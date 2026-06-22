@@ -103,6 +103,18 @@ app.get("/api/debug-users-columns", async (req, res) => {
   }
 });
 
+app.get("/api/debug-db", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT current_database(), current_schema()
+    `);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json(err.message);
+  }
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
