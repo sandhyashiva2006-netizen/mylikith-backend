@@ -9,11 +9,21 @@ const app = express();
 
 const authRoutes =
 require("./routes/auth");
+const writerRoutes =
+require("./routes/writers");
+
+
 
 app.use(cors());
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use(
+"/api/writers",
+writerRoutes
+);
+
+
 
 app.get("/", (req, res) => {
   res.json({
