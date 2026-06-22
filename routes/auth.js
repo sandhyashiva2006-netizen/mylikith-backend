@@ -19,7 +19,7 @@ const result = await db.query(
 
 `
 INSERT INTO users
-(name,email,password)
+(name,email,password_hash)
 
 VALUES($1,$2,$3)
 
@@ -78,7 +78,7 @@ message:"User not found"
 const valid =
 await bcrypt.compare(
 password,
-user.rows[0].password
+user.rows[0].password_hash
 );
 
 if(!valid){
