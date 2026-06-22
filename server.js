@@ -7,6 +7,9 @@ const pool = require("./db");
 
 const app = express();
 
+const authRoutes =
+require("./routes/auth");
+
 app.use(cors());
 app.use(express.json());
 
@@ -87,3 +90,5 @@ app.listen(PORT, () => {
     `Server running on port ${PORT}`
   );
 });
+
+app.use("/api/auth", authRoutes);
