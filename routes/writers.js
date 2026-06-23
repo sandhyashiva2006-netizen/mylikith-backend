@@ -334,5 +334,42 @@ success:false
 
 });
 
+async function deleteChapter(id){
+
+const confirmDelete =
+confirm(
+"Delete this chapter?"
+);
+
+if(!confirmDelete){
+return;
+}
+
+const response =
+await fetch(
+
+`${API}/api/writers/chapters/${id}`,
+
+{
+method:"DELETE"
+}
+
+);
+
+const data =
+await response.json();
+
+if(data.success){
+
+alert(
+"Chapter Deleted"
+);
+
+loadChapters();
+
+}
+
+}
+
 
 module.exports = router;
