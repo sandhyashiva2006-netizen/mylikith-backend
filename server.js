@@ -438,6 +438,58 @@ success:false
 
 });
 
+app.get(
+"/api/follow-count/:authorId",
+async (req,res)=>{
+
+const result =
+await pool.query(
+
+`
+SELECT COUNT(*)
+FROM follows
+WHERE author_id=$1
+`,
+
+[
+req.params.authorId
+]
+
+);
+
+res.json({
+count:
+result.rows[0].count
+});
+
+});
+
+app.post(
+"/api/novels/:id/view",
+async(req,res)=>{
+
+await pool.query(
+
+`
+UPDATE novels
+
+SET views = views + 1
+
+WHERE id = $1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+success:true
+});
+
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
