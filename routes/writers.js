@@ -148,7 +148,7 @@ try{
 
 const {
 novel_id,
-chapter_number,
+chapter_no,
 title,
 content
 } = req.body;
@@ -160,7 +160,7 @@ await db.query(
 INSERT INTO chapters
 (
 novel_id,
-chapter_number,
+chapter_no,
 title,
 content
 )
@@ -173,7 +173,7 @@ RETURNING *
 
 [
 novel_id,
-chapter_number,
+chapter_no,
 title,
 content
 ]
