@@ -135,6 +135,51 @@ success:false
 
 });
 
+app.get("/api/search", async (req,res)=>{
+
+try{
+
+const q =
+req.query.q;
+
+const result =
+await pool.query(
+
+`
+SELECT *
+FROM novels
+
+WHERE
+
+LOWER(title)
+LIKE LOWER($1)
+
+ORDER BY id DESC
+`,
+
+[
+`%${q}%`
+]
+
+);
+
+res.json(
+result.rows
+);
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
