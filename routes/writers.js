@@ -388,5 +388,105 @@ success:false
 });
 
 
+router.post(
+"/bookmark",
+async (req,res)=>{
+
+try{
+
+const {
+user_id,
+chapter_id
+} = req.body;
+
+const result =
+await db.query(
+
+`
+INSERT INTO bookmarks
+(
+user_id,
+chapter_id
+)
+
+VALUES
+($1,$2)
+
+RETURNING *
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
+router.get(
+"/bookmarks/:userId",
+async (req,res)=>{
+
+try{
+
+const result =
+await db.query(
+
+`
+SELECT
+b.id,
+c.title,
+c.chapter_no
+
+FROM bookmarks b
+
+JOIN chapters c
+
+ON b.chapter_id = c.id
+
+WHERE b.user_id=$1
+
+ORDER BY b.id DESC
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(
+result.rows
+);
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 
 module.exports = router;
