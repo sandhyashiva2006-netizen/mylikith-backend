@@ -180,6 +180,54 @@ success:false
 
 });
 
+app.post(
+"/api/follow",
+async (req,res)=>{
+
+try{
+
+const {
+user_id,
+author_id
+} = req.body;
+
+await pool.query(
+
+`
+INSERT INTO follows
+(
+user_id,
+author_id
+)
+
+VALUES
+($1,$2)
+`,
+
+[
+user_id,
+author_id
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
