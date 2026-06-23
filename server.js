@@ -281,6 +281,68 @@ success:false
 
 });
 
+app.post(
+"/api/reviews",
+async (req,res)=>{
+
+try{
+
+const {
+user_id,
+novel_id,
+rating,
+review
+} = req.body;
+
+await pool.query(
+
+`
+INSERT INTO reviews
+(
+user_id,
+novel_id,
+rating,
+review
+)
+
+VALUES
+($1,$2,$3,$4)
+
+ON CONFLICT
+(user_id,novel_id)
+
+DO UPDATE SET
+
+rating=$3,
+review=$4
+`,
+
+[
+user_id,
+novel_id,
+rating,
+review
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
