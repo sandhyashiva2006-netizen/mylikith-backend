@@ -95,6 +95,46 @@ app.get("/api/chapters/:id", async (req, res) => {
   }
 });
 
+app.get(
+"/api/novels/:id/chapters",
+async (req,res)=>{
+
+try{
+
+const result =
+await pool.query(
+
+`
+SELECT *
+FROM chapters
+WHERE novel_id=$1
+ORDER BY chapter_no ASC
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json(
+result.rows
+);
+
+}
+
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
