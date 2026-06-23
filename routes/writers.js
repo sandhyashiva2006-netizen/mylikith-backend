@@ -103,5 +103,42 @@ success:false
 
 });
 
+router.delete(
+"/novels/:id",
+async (req,res)=>{
+
+try{
+
+await db.query(
+
+`
+DELETE FROM novels
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 
 module.exports = router;
