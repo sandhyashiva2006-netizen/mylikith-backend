@@ -195,13 +195,14 @@ await pool.query(
 
 `
 INSERT INTO follows
-(
-user_id,
-author_id
-)
+(user_id, author_id)
 
-VALUES
-($1,$2)
+VALUES ($1,$2)
+
+ON CONFLICT
+(user_id, author_id)
+
+DO NOTHING
 `,
 
 [
@@ -213,6 +214,58 @@ author_id
 
 res.json({
 success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
+app.get(
+"/api/follow-status",
+async (req,res)=>{
+
+try{
+
+const {
+user_id,
+author_id
+} = req.query;
+
+const result =
+await pool.query(
+
+`
+SELECT *
+FROM follows
+
+WHERE
+
+user_id=$1
+AND
+author_id=$2
+`,
+
+[
+user_id,
+author_id
+]
+
+);
+
+res.json({
+
+following:
+result.rows.length > 0
+
 });
 
 }
