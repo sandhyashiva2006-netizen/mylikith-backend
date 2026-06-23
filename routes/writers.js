@@ -597,5 +597,105 @@ success:false
 
 });
 
+router.post(
+"/reading-history",
+async (req,res)=>{
+
+try{
+
+const {
+user_id,
+chapter_id
+} = req.body;
+
+await db.query(
+
+`
+INSERT INTO reading_history
+(
+user_id,
+chapter_id
+)
+
+VALUES
+($1,$2)
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
+router.get(
+"/reading-history/:userId",
+async (req,res)=>{
+
+try{
+
+const result =
+await db.query(
+
+`
+SELECT
+
+c.id,
+c.title,
+c.chapter_no
+
+FROM reading_history rh
+
+JOIN chapters c
+
+ON rh.chapter_id=c.id
+
+WHERE rh.user_id=$1
+
+ORDER BY rh.id DESC
+
+LIMIT 10
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(
+result.rows
+);
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 
 module.exports = router;
