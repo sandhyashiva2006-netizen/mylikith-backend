@@ -259,5 +259,44 @@ success:false
 
 });
 
+router.get(
+"/chapters/:novelId",
+async (req,res)=>{
+
+try{
+
+const result =
+await db.query(
+
+`
+SELECT *
+FROM chapters
+WHERE novel_id=$1
+ORDER BY chapter_no ASC
+`,
+
+[
+req.params.novelId
+]
+
+);
+
+res.json(
+result.rows
+);
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 
 module.exports = router;
