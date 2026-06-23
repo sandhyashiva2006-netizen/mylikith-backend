@@ -199,5 +199,65 @@ success:false
 
 });
 
+router.put(
+"/novels/:id",
+async (req,res)=>{
+
+try{
+
+const {
+title,
+description,
+language,
+category
+} = req.body;
+
+const result =
+await db.query(
+
+`
+UPDATE novels
+
+SET
+
+title=$1,
+description=$2,
+language=$3,
+category=$4
+
+WHERE id=$5
+
+RETURNING *
+`,
+
+[
+title,
+description,
+language,
+category,
+req.params.id
+]
+
+);
+
+res.json({
+success:true,
+novel:result.rows[0]
+});
+
+}
+
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 
 module.exports = router;
