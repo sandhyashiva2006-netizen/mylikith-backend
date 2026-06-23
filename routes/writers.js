@@ -334,42 +334,58 @@ success:false
 
 });
 
-async function deleteChapter(id){
+router.put(
+"/chapters/:id",
+async (req,res)=>{
 
-const confirmDelete =
-confirm(
-"Delete this chapter?"
+try{
+
+const {
+title,
+content
+} = req.body;
+
+const result =
+await db.query(
+
+`
+UPDATE chapters
+
+SET
+
+title=$1,
+content=$2
+
+WHERE id=$3
+
+RETURNING *
+`,
+
+[
+title,
+content,
+req.params.id
+]
+
 );
 
-if(!confirmDelete){
-return;
+res.json({
+success:true,
+chapter:result.rows[0]
+});
+
 }
+catch(err){
 
-const response =
-await fetch(
+console.log(err);
 
-`${API}/api/writers/chapters/${id}`,
-
-{
-method:"DELETE"
-}
-
-);
-
-const data =
-await response.json();
-
-if(data.success){
-
-alert(
-"Chapter Deleted"
-);
-
-loadChapters();
+res.status(500).json({
+success:false
+});
 
 }
 
-}
+});
 
 
 module.exports = router;
