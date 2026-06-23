@@ -140,5 +140,64 @@ success:false
 
 });
 
+router.post(
+"/chapters",
+async (req,res)=>{
+
+try{
+
+const {
+novel_id,
+chapter_number,
+title,
+content
+} = req.body;
+
+const result =
+await db.query(
+
+`
+INSERT INTO chapters
+(
+novel_id,
+chapter_number,
+title,
+content
+)
+
+VALUES
+($1,$2,$3,$4)
+
+RETURNING *
+`,
+
+[
+novel_id,
+chapter_number,
+title,
+content
+]
+
+);
+
+res.json({
+success:true,
+chapter:result.rows[0]
+});
+
+}
+
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 
 module.exports = router;
