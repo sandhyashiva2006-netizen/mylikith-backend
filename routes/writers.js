@@ -488,5 +488,114 @@ success:false
 
 });
 
+router.post(
+"/reading-progress",
+async (req,res)=>{
+
+try{
+
+const {
+user_id,
+chapter_id
+} = req.body;
+
+await db.query(
+
+`
+DELETE FROM reading_progress
+WHERE user_id=$1
+`,
+
+[user_id]
+
+);
+
+await db.query(
+
+`
+INSERT INTO reading_progress
+(
+user_id,
+chapter_id
+)
+
+VALUES
+($1,$2)
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
+router.get(
+"/reading-progress/:userId",
+async (req,res)=>{
+
+try{
+
+const result =
+await db.query(
+
+`
+SELECT
+
+c.id,
+c.title,
+c.chapter_no
+
+FROM reading_progress rp
+
+JOIN chapters c
+
+ON rp.chapter_id=c.id
+
+WHERE rp.user_id=$1
+
+LIMIT 1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(
+result.rows[0]
+);
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 
 module.exports = router;
