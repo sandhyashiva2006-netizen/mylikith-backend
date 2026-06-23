@@ -490,6 +490,45 @@ success:true
 
 });
 
+app.post(
+"/api/novels/:id/view",
+async (req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+UPDATE novels
+
+SET views = views + 1
+
+WHERE id = $1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
