@@ -298,5 +298,41 @@ success:false
 
 });
 
+router.delete(
+"/chapters/:id",
+async (req,res)=>{
+
+try{
+
+await db.query(
+
+`
+DELETE FROM chapters
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 
 module.exports = router;
