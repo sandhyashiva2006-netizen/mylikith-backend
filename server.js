@@ -529,6 +529,106 @@ success:false
 
 });
 
+app.post(
+"/api/comments",
+async(req,res)=>{
+
+try{
+
+const {
+user_id,
+chapter_id,
+comment
+} = req.body;
+
+await pool.query(
+
+`
+INSERT INTO comments
+(
+user_id,
+chapter_id,
+comment
+)
+
+VALUES
+($1,$2,$3)
+`,
+
+[
+user_id,
+chapter_id,
+comment
+]
+
+);
+
+res.json({
+success:true
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
+app.get(
+"/api/comments/:chapterId",
+async(req,res)=>{
+
+try{
+
+const result =
+await pool.query(
+
+`
+SELECT
+
+c.*,
+u.name
+
+FROM comments c
+
+JOIN users u
+
+ON c.user_id=u.id
+
+WHERE c.chapter_id=$1
+
+ORDER BY c.id DESC
+`,
+
+[
+req.params.chapterId
+]
+
+);
+
+res.json(
+result.rows
+);
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
