@@ -629,6 +629,96 @@ success:false
 
 });
 
+app.get(
+"/api/profile/stats/:userId",
+async(req,res)=>{
+
+try{
+
+const userId =
+req.params.userId;
+
+const bookmarks =
+await pool.query(
+
+`
+SELECT COUNT(*)
+FROM bookmarks
+
+WHERE user_id=$1
+`,
+
+[userId]
+);
+
+const follows =
+await pool.query(
+
+`
+SELECT COUNT(*)
+FROM follows
+
+WHERE user_id=$1
+`,
+
+[userId]
+);
+
+const reviews =
+await pool.query(
+
+`
+SELECT COUNT(*)
+FROM reviews
+
+WHERE user_id=$1
+`,
+
+[userId]
+);
+
+const comments =
+await pool.query(
+
+`
+SELECT COUNT(*)
+FROM comments
+
+WHERE user_id=$1
+`,
+
+[userId]
+);
+
+res.json({
+
+bookmarks:
+bookmarks.rows[0].count,
+
+follows:
+follows.rows[0].count,
+
+reviews:
+reviews.rows[0].count,
+
+comments:
+comments.rows[0].count
+
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
