@@ -747,6 +747,104 @@ app.get("/api/profile/continue/:userId", async (req, res) => {
 
 });
 
+app.get("/api/profile/history/:userId", async (req, res) => {
+
+    try {
+
+        const result = await pool.query(`
+            SELECT
+                rh.chapter_id,
+                c.title AS chapter_title,
+                n.title AS novel_title,
+                rh.read_at
+            FROM reading_history rh
+            JOIN chapters c ON rh.chapter_id = c.id
+            JOIN novels n ON c.novel_id = n.id
+            WHERE rh.user_id = $1
+            ORDER BY rh.read_at DESC
+            LIMIT 10
+        `,[req.params.userId]);
+
+        res.json(result.rows);
+
+    } catch(err){
+
+        console.log(err);
+
+        res.status(500).json({
+            success:false
+        });
+
+    }
+
+});
+
+app.get("/api/profile/reviews/:userId", async (req, res) => {
+
+    try {
+
+        const result = await pool.query(`
+            SELECT
+                r.id,
+                r.rating,
+                r.review,
+                n.id AS novel_id,
+                n.title AS novel_title
+            FROM reviews r
+            JOIN novels n
+            ON r.novel_id = n.id
+            WHERE r.user_id = $1
+            ORDER BY r.id DESC
+        `,[req.params.userId]);
+
+        res.json(result.rows);
+
+    } catch(err){
+
+        console.log(err);
+
+        res.status(500).json({
+            success:false
+        });
+
+    }
+
+});
+
+app.get("/api/profile/comments/:userId", async (req, res) => {
+
+    try {
+
+        const result = await pool.query(`
+            SELECT
+                c.id,
+                c.comment,
+                ch.id AS chapter_id,
+                ch.title AS chapter_title,
+                n.title AS novel_title
+            FROM comments c
+            JOIN chapters ch
+            ON c.chapter_id = ch.id
+            JOIN novels n
+            ON ch.novel_id = n.id
+            WHERE c.user_id = $1
+            ORDER BY c.id DESC
+        `,[req.params.userId]);
+
+        res.json(result.rows);
+
+    } catch(err){
+
+        console.log(err);
+
+        res.status(500).json({
+            success:false
+        });
+
+    }
+
+});
+
 
 const PORT = process.env.PORT || 5000;
 
