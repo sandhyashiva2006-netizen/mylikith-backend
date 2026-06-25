@@ -719,6 +719,35 @@ success:false
 
 });
 
+app.get("/api/profile/continue/:userId", async (req, res) => {
+
+    try {
+
+        const result = await pool.query(`
+            SELECT
+                rp.chapter_id,
+                c.title AS chapter_title,
+                n.title AS novel_title
+            FROM reading_progress rp
+            JOIN chapters c ON rp.chapter_id = c.id
+            JOIN novels n ON c.novel_id = n.id
+            WHERE rp.user_id = $1
+            ORDER BY rp.updated_at DESC
+            LIMIT 1
+        `, [req.params.userId]);
+
+        res.json(result.rows[0] || null);
+
+    } catch (err) {
+
+        console.log(err);
+        res.status(500).json({ success:false });
+
+    }
+
+});
+
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/api/debug-users-columns", async (req, res) => {
