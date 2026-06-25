@@ -834,6 +834,75 @@ app.get("/api/profile/comments/:userId", async (req, res) => {
 
 });
 
+app.get("/api/writer/analytics/:authorId", async (req, res) => {
+
+    try {
+
+        const authorId = req.params.authorId;
+
+        const novels = await pool.query(`
+            SELECT COUNT(*) AS total
+            FROM novels
+            WHERE author_id = $1
+        `,[authorId]);
+
+        const chapters = await pool.query(`
+            SELECT COUNT(*) AS total
+            FROM chapters c
+            JOIN novels n
+            ON c.novel_id = n.id
+            WHERE n.author_id = $1
+        `,[authorId]);
+
+        const reads = await pool.query(`
+            SELECT
+            COALESCE(SUM(views),0) AS total
+            FROM novels
+            WHERE author_id = $1
+        `,[authorId]);
+
+        const followers = await pool.query(`
+            SELECT
+            COUNT(*) AS total
+            FROM follows
+            WHERE author_id = $1
+        `,[authorId]);
+
+        const rating = await pool.query(`
+            SELECT
+            ROUND(AVG(r.rating),1) AS rating
+            FROM reviews r
+            JOIN novels n
+            ON r.novel_id = n.id
+            WHERE n.author_id = $1
+        `,[authorId]);
+
+        res.json({
+
+            novels: novels.rows[0].total,
+
+            chapters: chapters.rows[0].total,
+
+            reads: reads.rows[0].total,
+
+            followers: followers.rows[0].total,
+
+            rating: rating.rows[0].rating || 0
+
+        });
+
+    } catch(err){
+
+        console.log(err);
+
+        res.status(500).json({
+            success:false
+        });
+
+    }
+
+});
+
 
 const PORT = process.env.PORT || 5000;
 
