@@ -752,17 +752,31 @@ app.get("/api/profile/history/:userId", async (req, res) => {
     try {
 
         const result = await pool.query(`
+
             SELECT
+
                 rh.chapter_id,
+
                 c.title AS chapter_title,
+
                 n.title AS novel_title,
-                rh.read_at
+
+                rh.last_read_at
+
             FROM reading_history rh
-            JOIN chapters c ON rh.chapter_id = c.id
-            JOIN novels n ON c.novel_id = n.id
+
+            JOIN chapters c
+            ON rh.chapter_id = c.id
+
+            JOIN novels n
+            ON rh.novel_id = n.id
+
             WHERE rh.user_id = $1
-            ORDER BY rh.read_at DESC
+
+            ORDER BY rh.last_read_at DESC
+
             LIMIT 10
+
         `,[req.params.userId]);
 
         res.json(result.rows);
