@@ -605,6 +605,7 @@ try{
 
 const {
 user_id,
+novel_id,
 chapter_id
 } = req.body;
 
@@ -614,15 +615,17 @@ await db.query(
 INSERT INTO reading_history
 (
 user_id,
+novel_id,
 chapter_id
 )
 
 VALUES
-($1,$2)
+($1,$2,$3)
 `,
 
 [
 user_id,
+novel_id,
 chapter_id
 ]
 

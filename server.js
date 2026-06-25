@@ -464,31 +464,6 @@ result.rows[0].count
 
 });
 
-app.post(
-"/api/novels/:id/view",
-async(req,res)=>{
-
-await pool.query(
-
-`
-UPDATE novels
-
-SET views = views + 1
-
-WHERE id = $1
-`,
-
-[
-req.params.id
-]
-
-);
-
-res.json({
-success:true
-});
-
-});
 
 app.post(
 "/api/novels/:id/view",
@@ -753,31 +728,31 @@ app.get("/api/profile/history/:userId", async (req, res) => {
 
         const result = await pool.query(`
 
-            SELECT
+SELECT
 
-                rh.chapter_id,
+rh.chapter_id,
 
-                c.title AS chapter_title,
+c.title AS chapter_title,
 
-                n.title AS novel_title,
+n.title AS novel_title,
 
-                rh.last_read_at
+rh.last_read_at
 
-            FROM reading_history rh
+FROM reading_history rh
 
-            JOIN chapters c
-            ON rh.chapter_id = c.id
+JOIN chapters c
+ON rh.chapter_id = c.id
 
-            JOIN novels n
-            ON rh.novel_id = n.id
+JOIN novels n
+ON c.novel_id = n.id
 
-            WHERE rh.user_id = $1
+WHERE rh.user_id = $1
 
-            ORDER BY rh.last_read_at DESC
+ORDER BY rh.last_read_at DESC
 
-            LIMIT 10
+LIMIT 10
 
-        `,[req.params.userId]);
+`, [req.params.userId]);
 
         res.json(result.rows);
 
