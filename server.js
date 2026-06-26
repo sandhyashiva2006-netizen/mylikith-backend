@@ -7,6 +7,55 @@ const pool = require("./db");
 
 const app = express();
 
+const multer =
+require("multer");
+
+const path =
+require("path");
+
+const storage =
+multer.diskStorage({
+
+destination:
+
+(req,file,cb)=>{
+
+cb(
+null,
+"uploads/covers"
+);
+
+},
+
+filename:
+
+(req,file,cb)=>{
+
+cb(
+
+null,
+
+Date.now()
+
++
+
+path.extname(
+file.originalname
+)
+
+);
+
+}
+
+});
+
+const upload =
+multer({
+
+storage
+
+});
+
 const authRoutes =
 require("./routes/auth");
 const writerRoutes =
@@ -903,6 +952,39 @@ app.get("/api/writer/analytics/:authorId", async (req, res) => {
 
 });
 
+app.use(
+
+"/uploads",
+
+express.static(
+
+"uploads"
+
+)
+
+);
+
+app.post(
+
+"/api/upload-cover",
+
+upload.single(
+"cover"
+),
+
+(req,res)=>{
+
+res.json({
+
+success:true,
+
+url:
+
+`https://mylikith-backend.onrender.com/uploads/${req.file.filename}`
+
+});
+
+});
 
 const PORT = process.env.PORT || 5000;
 

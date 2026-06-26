@@ -23,7 +23,11 @@ INSERT INTO users
 
 VALUES($1,$2,$3)
 
-RETURNING id,name,email
+RETURNING
+id,
+name,
+email,
+role
 `,
 
 [name,email,hashedPassword]
@@ -111,9 +115,15 @@ success:true,
 token,
 
 user:{
+
 id:user.rows[0].id,
+
 name:user.rows[0].name,
-email:user.rows[0].email
+
+email:user.rows[0].email,
+
+role:user.rows[0].role
+
 }
 
 });
