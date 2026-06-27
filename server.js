@@ -1292,6 +1292,90 @@ success:false
 
 });
 
+app.get("/api/writer/notifications/:authorId", async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM writer_notifications
+
+WHERE author_id=$1
+
+ORDER BY id DESC
+
+LIMIT 20
+`,
+
+[req.params.authorId]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/writer/top-novel/:authorId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+title,
+
+views,
+
+rating
+
+FROM novels
+
+WHERE author_id=$1
+
+ORDER BY
+
+views DESC
+
+LIMIT 1
+`,
+
+[req.params.authorId]
+
+);
+
+res.json(result.rows[0]||null);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
