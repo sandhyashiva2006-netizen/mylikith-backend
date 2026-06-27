@@ -1536,6 +1536,123 @@ success:false
 
 });
 
+app.get("/api/admin/users",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+id,
+name,
+email,
+role
+
+FROM users
+
+ORDER BY id DESC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.put("/api/admin/users/:id/role",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+UPDATE users
+
+SET role=$1
+
+WHERE id=$2
+`,
+
+[
+req.body.role,
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.delete("/api/admin/users/:id",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+DELETE FROM users
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
