@@ -1226,6 +1226,72 @@ success:false
 
 });
 
+app.get("/api/writer/activity/:authorId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+'Novel Created' AS action,
+
+title,
+
+created_at
+
+FROM novels
+
+WHERE author_id=$1
+
+UNION ALL
+
+SELECT
+
+'Chapter Published',
+
+title,
+
+created_at
+
+FROM chapters
+
+WHERE novel_id IN(
+
+SELECT id
+
+FROM novels
+
+WHERE author_id=$1
+
+)
+
+ORDER BY created_at DESC
+
+LIMIT 10
+`,
+
+[req.params.authorId]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
