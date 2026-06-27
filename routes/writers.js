@@ -714,7 +714,88 @@ success:false
 
 });
 
+router.delete(
+"/bookmark/:id",
+async(req,res)=>{
 
+try{
 
+await db.query(
+
+`DELETE FROM bookmarks WHERE id=$1`,
+
+[req.params.id]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.get(
+"/notifications/:userId",
+async(req,res)=>{
+
+try{
+
+const result=
+
+await db.query(
+
+`
+SELECT
+title,
+created_at
+
+FROM notifications
+
+WHERE user_id=$1
+
+ORDER BY id DESC
+
+LIMIT 20
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(
+
+result.rows
+
+);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
 
 module.exports = router;
