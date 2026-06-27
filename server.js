@@ -1770,6 +1770,202 @@ success:false
 
 });
 
+app.get("/api/admin/chapters",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+c.id,
+
+c.chapter_no,
+
+c.title,
+
+n.title AS novel,
+
+u.name AS author
+
+FROM chapters c
+
+JOIN novels n
+ON c.novel_id=n.id
+
+LEFT JOIN users u
+ON n.author_id=u.id
+
+ORDER BY c.id DESC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.delete("/api/admin/chapters/:id",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+DELETE FROM chapters
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/admin/reports",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM reports
+
+ORDER BY id DESC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.put("/api/admin/reports/:id/resolve",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+UPDATE reports
+
+SET status='Resolved'
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.delete("/api/admin/reports/:id",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+DELETE FROM reports
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 
 app.listen(PORT, () => {
   console.log(
