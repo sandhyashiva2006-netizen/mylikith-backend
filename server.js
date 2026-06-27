@@ -1132,6 +1132,51 @@ success:false
 
 });
 
+app.post("/api/reader/reading-history", async (req,res)=>{
+
+try{
+
+const{
+user_id,
+novel_id,
+chapter_id
+}=req.body;
+
+await pool.query(
+
+`
+INSERT INTO reading_history
+(user_id,novel_id,chapter_id,last_read_at)
+
+VALUES($1,$2,$3,NOW())
+
+ON CONFLICT(user_id,chapter_id)
+
+DO UPDATE SET
+
+last_read_at=NOW()
+`,
+
+[user_id,novel_id,chapter_id]
+
+);
+
+res.json({
+success:true
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
