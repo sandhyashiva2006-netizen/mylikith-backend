@@ -1376,6 +1376,166 @@ success:false
 
 });
 
+/* ===========================
+   ADMIN DASHBOARD
+=========================== */
+
+app.get("/api/admin/dashboard", async(req,res)=>{
+
+try{
+
+const users=await pool.query(
+"SELECT COUNT(*) total FROM users"
+);
+
+const writers=await pool.query(
+"SELECT COUNT(*) total FROM users WHERE role='writer'"
+);
+
+const novels=await pool.query(
+"SELECT COUNT(*) total FROM novels"
+);
+
+const chapters=await pool.query(
+"SELECT COUNT(*) total FROM chapters"
+);
+
+const reviews=await pool.query(
+"SELECT COUNT(*) total FROM reviews"
+);
+
+const comments=await pool.query(
+"SELECT COUNT(*) total FROM comments"
+);
+
+const views=await pool.query(
+"SELECT COALESCE(SUM(views),0) total FROM novels"
+);
+
+res.json({
+
+users:Number(users.rows[0].total),
+
+writers:Number(writers.rows[0].total),
+
+novels:Number(novels.rows[0].total),
+
+chapters:Number(chapters.rows[0].total),
+
+reviews:Number(reviews.rows[0].total),
+
+comments:Number(comments.rows[0].total),
+
+views:Number(views.rows[0].total),
+
+reports:0
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+
+app.get("/api/admin/recent-users",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+id,
+
+name,
+
+email,
+
+role
+
+FROM users
+
+ORDER BY id DESC
+
+LIMIT 10
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+
+app.get("/api/admin/recent-novels",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+n.id,
+
+n.title,
+
+n.status,
+
+u.name AS author
+
+FROM novels n
+
+LEFT JOIN users u
+
+ON n.author_id=u.id
+
+ORDER BY n.id DESC
+
+LIMIT 10
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
