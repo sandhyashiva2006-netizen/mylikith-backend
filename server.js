@@ -396,6 +396,34 @@ review
 
 );
 
+await pool.query(
+
+`
+UPDATE novels
+
+SET rating=(
+
+SELECT
+COALESCE(
+ROUND(AVG(rating),1),
+0
+)
+
+FROM reviews
+
+WHERE novel_id=$1
+
+)
+
+WHERE id=$1
+`,
+
+[
+novel_id
+]
+
+);
+
 res.json({
 success:true
 });
