@@ -1376,6 +1376,80 @@ success:false
 
 });
 
+app.post("/api/report",async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+type,
+
+reported_item,
+
+reason
+
+}=req.body;
+
+await pool.query(
+
+`
+
+INSERT INTO reports
+
+(
+
+user_id,
+
+type,
+
+reported_item,
+
+reason
+
+)
+
+VALUES
+
+($1,$2,$3,$4)
+
+`,
+
+[
+
+user_id,
+
+type,
+
+reported_item,
+
+reason
+
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 /* ===========================
    ADMIN DASHBOARD
 =========================== */
@@ -1963,6 +2037,70 @@ success:false
 });
 
 }
+
+});
+
+app.get("/api/admin/settings",async(req,res)=>{
+
+const result=
+
+await pool.query(
+
+"SELECT * FROM site_settings LIMIT 1"
+
+);
+
+res.json(result.rows[0]);
+
+});
+
+app.put("/api/admin/settings",async(req,res)=>{
+
+const{
+
+site_name,
+
+announcement,
+
+maintenance
+
+}=req.body;
+
+await pool.query(
+
+`
+
+UPDATE site_settings
+
+SET
+
+site_name=$1,
+
+announcement=$2,
+
+maintenance=$3
+
+WHERE id=1
+
+`,
+
+[
+
+site_name,
+
+announcement,
+
+maintenance
+
+]
+
+);
+
+res.json({
+
+success:true
+
+});
 
 });
 
