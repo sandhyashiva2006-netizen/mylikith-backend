@@ -60,7 +60,7 @@ const authRoutes =
 require("./routes/auth");
 const writerRoutes =
 require("./routes/writers");
-
+const publishRoutes=require("./routes/publish.routes");
 
 
 app.use(cors());
@@ -71,7 +71,7 @@ app.use(
 "/api/writers",
 writerRoutes
 );
-
+app.use("/api/publish",publishRoutes);
 
 
 app.get("/", (req, res) => {
@@ -980,7 +980,7 @@ success:true,
 
 url:
 
-`https://mylikith-backend.onrender.com/uploads/${req.file.filename}`
+`https://mylikith-backend.onrender.com/uploads/covers/${req.file.filename}`
 
 });
 
