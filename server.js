@@ -1016,6 +1016,122 @@ app.get("/api/debug-db", async (req, res) => {
   }
 });
 
+app.get("/api/users/:id", async (req, res) => {
+
+try{
+
+const author=await pool.query(
+`
+SELECT
+id,
+name,
+bio,
+profile_image
+FROM users
+WHERE id=$1
+`,
+[req.params.id]
+);
+
+const followers=await pool.query(
+`
+SELECT COUNT(*) total
+FROM follows
+WHERE author_id=$1
+`,
+[req.params.id]
+);
+
+const novels=await pool.query(
+`
+SELECT COUNT(*) total
+FROM novels
+WHERE author_id=$1
+`,
+[req.params.id]
+);
+
+const rating=await pool.query(
+`
+SELECT ROUND(AVG(r.rating),1) rating
+FROM reviews r
+JOIN novels n
+ON r.novel_id=n.id
+WHERE n.author_id=$1
+`,
+[req.params.id]
+);
+
+res.json({
+
+...author.rows[0],
+
+followers:followers.rows[0].total,
+
+total_novels:novels.rows[0].total,
+
+rating:rating.rows[0].rating||0
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
+app.post("/api/library",async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+novel_id
+
+}=req.body;
+
+await pool.query(
+
+`INSERT INTO library(user_id,novel_id)
+
+VALUES($1,$2)
+
+ON CONFLICT(user_id,novel_id)
+
+DO NOTHING`,
+
+[user_id,novel_id]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
