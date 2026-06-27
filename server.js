@@ -1652,6 +1652,124 @@ success:false
 
 });
 
+app.get("/api/admin/novels",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+n.*,
+
+u.name AS author
+
+FROM novels n
+
+LEFT JOIN users u
+
+ON n.author_id=u.id
+
+ORDER BY n.id DESC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.delete("/api/admin/novels/:id",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+DELETE FROM novels
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.put("/api/admin/novels/:id/feature",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+UPDATE novels
+
+SET featured=TRUE
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 
 app.listen(PORT, () => {
   console.log(
