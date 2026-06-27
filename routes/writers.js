@@ -304,17 +304,31 @@ async (req,res)=>{
 
 try{
 
+const chapterId = req.params.id;
+
 await db.query(
+`DELETE FROM comments WHERE chapter_id=$1`,
+[chapterId]
+);
 
-`
-DELETE FROM chapters
-WHERE id=$1
-`,
+await db.query(
+`DELETE FROM bookmarks WHERE chapter_id=$1`,
+[chapterId]
+);
 
-[
-req.params.id
-]
+await db.query(
+`DELETE FROM reading_progress WHERE chapter_id=$1`,
+[chapterId]
+);
 
+await db.query(
+`DELETE FROM reading_history WHERE chapter_id=$1`,
+[chapterId]
+);
+
+await db.query(
+`DELETE FROM chapters WHERE id=$1`,
+[chapterId]
 );
 
 res.json({
