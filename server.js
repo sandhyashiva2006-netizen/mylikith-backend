@@ -124,24 +124,45 @@ app.get("/api/novels/:id", async (req, res) => {
 });
 
 app.get("/api/chapters/:id", async (req, res) => {
-  try {
 
-    const result = await pool.query(
-      "SELECT * FROM chapters WHERE id=$1",
-      [req.params.id]
-    );
+try{
 
-    res.json(result.rows[0]);
+const result = await pool.query(
 
-  } catch (err) {
+`SELECT * FROM chapters WHERE id=$1`,
 
-    console.error(err);
+[req.params.id]
 
-    res.status(500).json({
-      error: "Failed to load chapter"
-    });
+);
 
-  }
+if(result.rows.length===0){
+
+return res.status(404).json({
+
+success:false,
+
+message:"Chapter not found"
+
+});
+
+}
+
+res.json(result.rows[0]);
+
+}catch(err){
+
+console.error("Chapter API Error:",err);
+
+res.status(500).json({
+
+success:false,
+
+error:err.message
+
+});
+
+}
+
 });
 
 app.get(
