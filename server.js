@@ -61,6 +61,8 @@ require("./routes/auth");
 const writerRoutes =
 require("./routes/writers");
 const publishRoutes=require("./routes/publish.routes");
+const walletRoutes = require("./routes/wallet");
+
 
 
 app.use(cors());
@@ -72,6 +74,8 @@ app.use(
 writerRoutes
 );
 app.use("/api/publish",publishRoutes);
+app.use("/api/wallet", walletRoutes);
+
 
 
 app.get("/", (req, res) => {
