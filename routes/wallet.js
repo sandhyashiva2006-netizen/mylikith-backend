@@ -607,6 +607,8 @@ router.post("/verify-payment", async (req, res) => {
 
         const order = response.data;
 
+console.log(order);
+
         if (order.order_status !== "PAID") {
 
             return res.json({
@@ -801,23 +803,31 @@ router.post("/verify-payment", async (req, res) => {
 
     }
 
-    catch (err) {
+ catch (err) {
 
-        console.log("========== VERIFY PAYMENT ==========");
+    console.log("=========== VERIFY ERROR ===========");
 
-        console.log(err.response?.data || err.message);
+    console.log(err.response?.data);
 
-        console.log("====================================");
+    console.log(err.response?.status);
 
-        res.status(500).json({
+    console.log(err.response?.headers);
 
-            success: false,
+    console.log(err.message);
 
-            error: err.response?.data || err.message
+    console.log(err);
 
-        });
+    console.log("====================================");
 
-    }
+    res.status(500).json({
+
+        success:false,
+
+        message:err.response?.data || err.message
+
+    });
+
+}
 
 });
 
