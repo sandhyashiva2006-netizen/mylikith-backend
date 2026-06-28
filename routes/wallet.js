@@ -606,4 +606,207 @@ success:false
 
 });
 
+/* ===========================
+   VERIFY PAYMENT
+=========================== */
+
+router.post("/verify-payment", async (req, res) => {
+
+    try {
+
+        const { order_id } = req.body;
+
+        const response =
+        await Cashfree.PGFetchOrder(order_id);
+
+        const order = response.data;
+
+        if (order.order_status !== "PAID") {
+
+            return res.json({
+
+                success: false
+
+            });
+
+        }
+
+        const customerId =
+        Number(order.customer_details.customer_id);
+
+        const transactionExists =
+        await db.query(
+
+            `
+            SELECT id
+
+            FROM wallet_transactions
+
+            WHERE reference_id=$1
+            `,
+
+            [
+                order_id
+            ]
+
+        );
+
+        if(transactionExists.rows.length>0){
+
+            return res.json({
+
+                success:true,
+
+                message:"Already Credited"
+
+            });
+
+        }
+
+        const packageResult =
+        await db.query(
+
+            `
+            SELECT *
+
+            FROM coin_packages
+
+            WHERE price=$1
+
+            LIMIT 1
+            `,
+
+            [
+                order.order_amount
+            ]
+
+        );
+
+        if(packageResult.rows.length===0){
+
+            return res.status(404).json({
+
+                success:false
+
+            });
+
+        }
+
+        const pkg =
+        packageResult.rows[0];
+
+        const totalCoins =
+        Number(pkg.coins)+
+        Number(pkg.bonus_coins);
+
+        await db.query(
+
+            `
+            UPDATE wallets
+
+            SET
+
+            balance=balance+$1,
+
+            coins=coins+$2
+
+            WHERE user_id=$3
+            `,
+
+            [
+
+                order.order_amount,
+
+                totalCoins,
+
+                customerId
+
+            ]
+
+        );
+
+        const wallet =
+        await db.query(
+
+            `
+            SELECT id
+
+            FROM wallets
+
+            WHERE user_id=$1
+            `,
+
+            [
+                customerId
+            ]
+
+        );
+
+        await db.query(
+
+            `
+            INSERT INTO wallet_transactions
+            (
+
+            wallet_id,
+
+            user_id,
+
+            type,
+
+            coins,
+
+            amount,
+
+            description,
+
+            reference_id
+
+            )
+
+            VALUES
+
+            ($1,$2,'Credit',$3,$4,$5,$6)
+            `,
+
+            [
+
+                wallet.rows[0].id,
+
+                customerId,
+
+                totalCoins,
+
+                order.order_amount,
+
+                "Coin Purchase",
+
+                order_id
+
+            ]
+
+        );
+
+        res.json({
+
+            success:true
+
+        });
+
+    }
+
+    catch(err){
+
+        console.log(err.response?.data||err);
+
+        res.status(500).json({
+
+            success:false
+
+        });
+
+    }
+
+});
+
 module.exports = router;
