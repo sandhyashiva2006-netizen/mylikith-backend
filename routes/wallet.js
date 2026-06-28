@@ -404,4 +404,43 @@ router.get("/:userId/summary", async (req, res) => {
 
 });
 
+/* ===========================
+   COIN PACKAGES
+=========================== */
+
+router.get("/packages/list",async(req,res)=>{
+
+try{
+
+const result=await db.query(
+
+`
+SELECT *
+
+FROM coin_packages
+
+WHERE status=TRUE
+
+ORDER BY price
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+
 module.exports = router;
