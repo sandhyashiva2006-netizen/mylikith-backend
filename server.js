@@ -1688,6 +1688,162 @@ success:false
 
 });
 
+app.post("/api/chapters/:id/like",async(req,res)=>{
+
+try{
+
+const{user_id}=req.body;
+
+await pool.query(
+
+`
+INSERT INTO chapter_likes
+(user_id,chapter_id)
+
+VALUES($1,$2)
+
+ON CONFLICT(user_id,chapter_id)
+
+DO NOTHING
+`,
+
+[
+user_id,
+req.params.id
+]
+
+);
+
+res.json({success:true});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({success:false});
+
+}
+
+});
+
+app.delete("/api/chapters/:id/like",async(req,res)=>{
+
+try{
+
+const{user_id}=req.body;
+
+await pool.query(
+
+`
+DELETE FROM chapter_likes
+
+WHERE
+
+user_id=$1
+
+AND
+
+chapter_id=$2
+`,
+
+[
+user_id,
+req.params.id
+]
+
+);
+
+res.json({success:true});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({success:false});
+
+}
+
+});
+
+app.get("/api/chapters/:id/likes",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT COUNT(*) total
+
+FROM chapter_likes
+
+WHERE chapter_id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+likes:Number(result.rows[0].total)
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({success:false});
+
+}
+
+});
+
+app.get("/api/chapters/:id/liked/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT id
+
+FROM chapter_likes
+
+WHERE
+
+chapter_id=$1
+
+AND
+
+user_id=$2
+`,
+
+[
+req.params.id,
+req.params.userId
+]
+
+);
+
+res.json({
+
+liked:result.rows.length>0
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({success:false});
+
+}
+
+});
+
 /* ===========================
    ADMIN DASHBOARD
 =========================== */
