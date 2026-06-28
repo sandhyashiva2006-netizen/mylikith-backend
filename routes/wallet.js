@@ -580,11 +580,28 @@ router.post("/verify-payment", async (req, res) => {
 
         const { order_id } = req.body;
 
-        const response =
-        await cashfree.PGFetchOrder(
-    "2025-01-01",
-    order_id
-);
+        const response = await axios.get(
+
+            `https://sandbox.cashfree.com/pg/orders/${order_id}`,
+
+            {
+
+                headers: {
+
+                    "x-client-id":
+                        process.env.CASHFREE_APP_ID,
+
+                    "x-client-secret":
+                        process.env.CASHFREE_SECRET_KEY,
+
+                    "x-api-version":
+                        "2025-01-01"
+
+                }
+
+            }
+
+        );
 
         const order = response.data;
 
@@ -592,79 +609,82 @@ router.post("/verify-payment", async (req, res) => {
 
             return res.json({
 
-                success: false
+                success: false,
+
+                message: "Payment Pending"
 
             });
 
         }
 
         const customerId =
-        Number(order.customer_details.customer_id);
+            Number(order.customer_details.customer_id);
 
         const transactionExists =
-        await db.query(
+            await db.query(
 
-            `
-            SELECT id
+                `
+                SELECT id
 
-            FROM wallet_transactions
+                FROM wallet_transactions
 
-            WHERE reference_id=$1
-            `,
+                WHERE reference_id=$1
+                `,
 
-            [
-                order_id
-            ]
+                [
+                    order_id
+                ]
 
-        );
+            );
 
-        if(transactionExists.rows.length>0){
+        if (transactionExists.rows.length > 0) {
 
             return res.json({
 
-                success:true,
+                success: true,
 
-                message:"Already Credited"
+                message: "Already Credited"
 
             });
 
         }
 
         const packageResult =
-        await db.query(
+            await db.query(
 
-            `
-            SELECT *
+                `
+                SELECT *
 
-            FROM coin_packages
+                FROM coin_packages
 
-            WHERE price=$1
+                WHERE price=$1
 
-            LIMIT 1
-            `,
+                LIMIT 1
+                `,
 
-            [
-                order.order_amount
-            ]
+                [
+                    order.order_amount
+                ]
 
-        );
+            );
 
-        if(packageResult.rows.length===0){
+        if (packageResult.rows.length === 0) {
 
             return res.status(404).json({
 
-                success:false
+                success: false,
+
+                message: "Package not found"
 
             });
 
         }
 
-        const pkg =
-        packageResult.rows[0];
+        const pkg = packageResult.rows[0];
 
         const totalCoins =
-        Number(pkg.coins)+
-        Number(pkg.bonus_coins);
+            Number(pkg.coins) +
+            Number(pkg.bonus_coins);
 
         await db.query(
 
@@ -673,11 +693,11 @@ router.post("/verify-payment", async (req, res) => {
 
             SET
 
-            balance=balance+$1,
+            balance = balance + $1,
 
-            coins=coins+$2
+            coins = coins + $2
 
-            WHERE user_id=$3
+            WHERE user_id = $3
             `,
 
             [
@@ -693,21 +713,23 @@ router.post("/verify-payment", async (req, res) => {
         );
 
         const wallet =
-        await db.query(
+            await db.query(
 
-            `
-            SELECT id
+                `
+                SELECT id
 
-            FROM wallets
+                FROM wallets
 
-            WHERE user_id=$1
-            `,
+                WHERE user_id=$1
+                `,
 
-            [
-                customerId
-            ]
+                [
 
-        );
+                    customerId
+
+                ]
+
+            );
 
         await db.query(
 
@@ -715,25 +737,40 @@ router.post("/verify-payment", async (req, res) => {
             INSERT INTO wallet_transactions
             (
 
-            wallet_id,
+                wallet_id,
 
-            user_id,
+                user_id,
 
-            type,
+                type,
 
-            coins,
+                coins,
 
-            amount,
+                amount,
 
-            description,
+                description,
 
-            reference_id
+                reference_id
 
             )
 
             VALUES
+            (
 
-            ($1,$2,'Credit',$3,$4,$5,$6)
+                $1,
+
+                $2,
+
+                'Credit',
+
+                $3,
+
+                $4,
+
+                $5,
+
+                $6
+
+            )
             `,
 
             [
@@ -756,24 +793,25 @@ router.post("/verify-payment", async (req, res) => {
 
         res.json({
 
-            success:true
+            success: true
 
         });
 
     }
 
-    catch(err){
+    catch (err) {
 
-        console.log("========== CASHFREE ERROR ==========");
-console.log(err);
-console.log(err.response?.data);
-console.log(err.response?.status);
-console.log(err.response?.headers);
-console.log("====================================");
+        console.log("========== VERIFY PAYMENT ==========");
+
+        console.log(err.response?.data || err.message);
+
+        console.log("====================================");
 
         res.status(500).json({
 
-            success:false
+            success: false,
+
+            error: err.response?.data || err.message
 
         });
 
