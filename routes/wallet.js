@@ -1,7 +1,33 @@
-const express = require("express");
-const router = express.Router();
+const express=require("express");
 
-const db = require("../db");
+const router=express.Router();
+
+const db=require("../db");
+
+const crypto=require("crypto");
+
+const {
+Cashfree,
+CFEnvironment
+}=require("cashfree-pg");
+
+Cashfree.XClientId=
+process.env.CASHFREE_APP_ID;
+
+Cashfree.XClientSecret=
+process.env.CASHFREE_SECRET_KEY;
+
+Cashfree.XEnvironment=
+
+process.env.CASHFREE_ENV==="PRODUCTION"
+
+?
+
+CFEnvironment.PRODUCTION
+
+:
+
+CFEnvironment.SANDBOX;
 
 /* ===========================
    GET WALLET
@@ -442,5 +468,142 @@ success:false
 
 });
 
+/* ===========================
+   CREATE CASHFREE ORDER
+=========================== */
+
+router.post(
+"/create-order",
+async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+package_id
+
+}=req.body;
+
+const pkg=
+await db.query(
+
+`
+SELECT *
+
+FROM coin_packages
+
+WHERE id=$1
+`,
+
+[
+package_id
+]
+
+);
+
+if(pkg.rows.length===0){
+
+return res.status(404).json({
+
+success:false
+
+});
+
+}
+
+const orderId=
+
+"MLK_"
+
++
+
+Date.now()
+
++
+
+"_"
+
++
+
+crypto.randomBytes(4)
+
+.toString("hex");
+
+const packageData=
+pkg.rows[0];
+
+const request={
+
+order_amount:
+
+Number(packageData.price),
+
+order_currency:"INR",
+
+order_id:orderId,
+
+customer_details:{
+
+customer_id:
+
+String(user_id),
+
+customer_name:
+
+"Reader",
+
+customer_email:
+
+"reader@mylikith.com",
+
+customer_phone:
+
+"9999999999"
+
+},
+
+order_meta:{
+
+return_url:
+
+"https://mylikith-frontend.pages.dev/payment-success.html?order_id={order_id}"
+
+}
+
+};
+
+const response=
+
+await Cashfree.PGCreateOrder(
+request
+);
+
+res.json({
+
+success:true,
+
+paymentSessionId:
+
+response.data.payment_session_id,
+
+orderId
+
+});
+
+}catch(err){
+
+console.log(err.response?.data||err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
 
 module.exports = router;
