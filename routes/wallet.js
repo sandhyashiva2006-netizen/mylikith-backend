@@ -6,22 +6,8 @@ const db = require("../db");
 
 const crypto = require("crypto");
 
-const {
-    Cashfree,
-    CFEnvironment
-} = require("cashfree-pg");
+const axios = require("axios");
 
-const cashfree = new Cashfree(
-    process.env.CASHFREE_ENV === "PRODUCTION"
-        ? CFEnvironment.PRODUCTION
-        : CFEnvironment.SANDBOX,
-    process.env.CASHFREE_APP_ID,
-    process.env.CASHFREE_SECRET_KEY
-);
-
-console.log("APP ID:", process.env.CASHFREE_APP_ID);
-console.log("ENV:", process.env.CASHFREE_ENV);
-console.log("SECRET:", process.env.CASHFREE_SECRET_KEY ? "FOUND" : "MISSING");
 
 /* ===========================
    GET WALLET
