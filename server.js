@@ -1149,13 +1149,14 @@ novel_id
 
 await pool.query(
 
-`INSERT INTO library(user_id,novel_id)
+INSERT INTO library
+(user_id,novel_id)
 
 VALUES($1,$2)
 
 ON CONFLICT(user_id,novel_id)
 
-DO NOTHING`,
+DO NOTHING;
 
 [user_id,novel_id]
 
@@ -1449,6 +1450,177 @@ success:false
 }
 
 });
+
+app.get("/api/library/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+l.id,
+
+l.status,
+
+l.progress,
+
+l.last_chapter,
+
+n.id AS novel_id,
+
+n.title,
+
+n.cover_url,
+
+n.category,
+
+n.language,
+
+u.name AS author
+
+FROM library l
+
+JOIN novels n
+
+ON l.novel_id=n.id
+
+LEFT JOIN users u
+
+ON n.author_id=u.id
+
+WHERE l.user_id=$1
+
+ORDER BY l.created_at DESC
+`,
+
+[req.params.userId]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({success:false});
+
+}
+
+});
+
+app.delete("/api/library/:id",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+
+DELETE FROM library
+
+WHERE id=$1
+
+`,
+
+[req.params.id]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.put("/api/library/progress",async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+novel_id,
+
+progress,
+
+last_chapter
+
+}=req.body;
+
+await pool.query(
+
+`
+
+UPDATE library
+
+SET
+
+progress=$1,
+
+last_chapter=$2
+
+WHERE
+
+user_id=$3
+
+AND
+
+novel_id=$4
+
+`,
+
+[
+
+progress,
+
+last_chapter,
+
+user_id,
+
+novel_id
+
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 
 /* ===========================
    ADMIN DASHBOARD
