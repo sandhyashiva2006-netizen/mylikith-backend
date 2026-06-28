@@ -269,10 +269,20 @@ const result =
 await db.query(
 
 `
-SELECT *
-FROM chapters
-WHERE novel_id=$1
-ORDER BY chapter_no ASC
+SELECT
+    c.*,
+    COALESCE(l.likes,0) AS likes
+FROM chapters c
+LEFT JOIN (
+    SELECT
+        chapter_id,
+        COUNT(*) AS likes
+    FROM chapter_likes
+    GROUP BY chapter_id
+) l
+ON c.id=l.chapter_id
+WHERE c.novel_id=$1
+ORDER BY c.chapter_no;
 `,
 
 [
