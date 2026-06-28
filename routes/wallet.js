@@ -797,7 +797,12 @@ router.post("/verify-payment", async (req, res) => {
 
     catch(err){
 
-        console.log(err.response?.data||err);
+        console.log("========== CASHFREE ERROR ==========");
+console.log(err);
+console.log(err.response?.data);
+console.log(err.response?.status);
+console.log(err.response?.headers);
+console.log("====================================");
 
         res.status(500).json({
 
