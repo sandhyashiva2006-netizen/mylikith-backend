@@ -2104,6 +2104,390 @@ success:true
 
 });
 
+app.get("/api/admin/writers",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+u.id,
+
+u.name,
+
+u.email,
+
+COUNT(n.id) AS novels
+
+FROM users u
+
+LEFT JOIN novels n
+
+ON u.id=n.author_id
+
+WHERE u.role='writer'
+
+GROUP BY u.id
+
+ORDER BY u.id DESC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.delete("/api/admin/writers/:id",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+
+UPDATE users
+
+SET role='reader'
+
+WHERE id=$1
+
+`,
+
+[
+
+req.params.id
+
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/admin/reviews",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+r.id,
+
+r.rating,
+
+r.comment,
+
+u.name AS user,
+
+n.title AS novel
+
+FROM reviews r
+
+LEFT JOIN users u
+ON r.user_id=u.id
+
+LEFT JOIN novels n
+ON r.novel_id=n.id
+
+ORDER BY r.id DESC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.delete("/api/admin/reviews/:id",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+DELETE FROM reviews
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/admin/comments",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+c.id,
+
+c.comment,
+
+u.name AS user,
+
+ch.title AS chapter
+
+FROM comments c
+
+LEFT JOIN users u
+ON c.user_id=u.id
+
+LEFT JOIN chapters ch
+ON c.chapter_id=ch.id
+
+ORDER BY c.id DESC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.delete("/api/admin/comments/:id",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+DELETE FROM comments
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/admin/analytics",async(req,res)=>{
+
+try{
+
+const reads=await pool.query(
+
+"SELECT COALESCE(SUM(views),0) total FROM novels"
+
+);
+
+const rating=await pool.query(
+
+"SELECT ROUND(AVG(rating),1) rating FROM novels"
+
+);
+
+const topNovel=await pool.query(
+
+`
+SELECT title
+
+FROM novels
+
+ORDER BY views DESC
+
+LIMIT 1
+`
+
+);
+
+const topWriter=await pool.query(
+
+`
+SELECT
+
+u.name,
+
+SUM(n.views) views
+
+FROM users u
+
+JOIN novels n
+
+ON u.id=n.author_id
+
+GROUP BY u.id
+
+ORDER BY views DESC
+
+LIMIT 1
+`
+
+);
+
+const popular=await pool.query(
+
+`
+SELECT
+
+title,
+
+views,
+
+rating
+
+FROM novels
+
+ORDER BY views DESC
+
+LIMIT 10
+`
+
+);
+
+res.json({
+
+reads:reads.rows[0].total,
+
+rating:rating.rows[0].rating||0,
+
+topNovel:
+
+topNovel.rows[0]?.title||"-",
+
+topWriter:
+
+topWriter.rows[0]?.name||"-",
+
+popular:popular.rows
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/admin/revenue",async(req,res)=>{
+
+res.json({
+
+totalRevenue:0,
+
+writerPayouts:0,
+
+platformRevenue:0,
+
+pendingWithdrawals:0
+
+});
+
+});
+
 
 app.listen(PORT, () => {
   console.log(
