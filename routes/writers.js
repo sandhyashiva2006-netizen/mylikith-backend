@@ -65,18 +65,62 @@ success:false
 
 router.get(
 "/my-novels/:authorId",
-async (req,res)=>{
+async(req,res)=>{
 
 try{
 
-const result =
-await db.query(
+const result=await db.query(
 
 `
-SELECT *
-FROM novels
-WHERE author_id=$1
-ORDER BY id DESC
+SELECT
+
+n.*,
+
+COALESCE(ch.total_chapters,0) AS chapters,
+
+COALESCE(l.total_likes,0) AS likes
+
+FROM novels n
+
+LEFT JOIN(
+
+SELECT
+
+novel_id,
+
+COUNT(*) AS total_chapters
+
+FROM chapters
+
+GROUP BY novel_id
+
+) ch
+
+ON n.id=ch.novel_id
+
+LEFT JOIN(
+
+SELECT
+
+c.novel_id,
+
+COUNT(cl.id) AS total_likes
+
+FROM chapters c
+
+LEFT JOIN chapter_likes cl
+
+ON c.id=cl.chapter_id
+
+GROUP BY c.novel_id
+
+) l
+
+ON n.id=l.novel_id
+
+WHERE n.author_id=$1
+
+ORDER BY n.id DESC
 `,
 
 [
@@ -85,13 +129,9 @@ req.params.authorId
 
 );
 
-res.json(
-result.rows
-);
+res.json(result.rows);
 
-}
-
-catch(err){
+}catch(err){
 
 console.log(err);
 
