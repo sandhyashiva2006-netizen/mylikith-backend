@@ -452,137 +452,121 @@ success:false
    CREATE CASHFREE ORDER
 =========================== */
 
-router.post(
-"/create-order",
-async(req,res)=>{
+router.post("/create-order", async (req, res) => {
 
-try{
+    try {
 
-const{
+        const { user_id, package_id } = req.body;
 
-user_id,
+        const pkg = await db.query(
+            `
+            SELECT *
+            FROM coin_packages
+            WHERE id=$1
+            `,
+            [package_id]
+        );
 
-package_id
+        if (pkg.rows.length === 0) {
 
-}=req.body;
+            return res.status(404).json({
+                success: false,
+                message: "Package not found"
+            });
 
-const pkg=
-await db.query(
+        }
 
-`
-SELECT *
+        const packageData = pkg.rows[0];
 
-FROM coin_packages
+        const orderId =
+            "MLK_" +
+            Date.now() +
+            "_" +
+            crypto.randomBytes(4).toString("hex");
 
-WHERE id=$1
-`,
+        const response = await axios.post(
 
-[
-package_id
-]
+            "https://sandbox.cashfree.com/pg/orders",
 
-);
+            {
 
-if(pkg.rows.length===0){
+                order_id: orderId,
 
-return res.status(404).json({
+                order_amount: Number(packageData.price),
 
-success:false
+                order_currency: "INR",
 
-});
+                customer_details: {
 
-}
+                    customer_id: String(user_id),
 
-const orderId=
+                    customer_name: "MyLikith Reader",
 
-"MLK_"
+                    customer_email: "reader@mylikith.com",
 
-+
+                    customer_phone: "9999999999"
 
-Date.now()
+                },
 
-+
+                order_meta: {
 
-"_"
+                    return_url:
+                        "https://mylikith.pages.dev/payment-success.html?order_id={order_id}"
 
-+
+                }
 
-crypto.randomBytes(4)
+            },
 
-.toString("hex");
+            {
 
-const packageData=
-pkg.rows[0];
+                headers: {
 
-const request={
+                    "x-client-id":
+                        process.env.CASHFREE_APP_ID,
 
-order_amount:
+                    "x-client-secret":
+                        process.env.CASHFREE_SECRET_KEY,
 
-Number(packageData.price),
+                    "x-api-version":
+                        "2025-01-01",
 
-order_currency:"INR",
+                    "Content-Type":
+                        "application/json"
 
-order_id:orderId,
+                }
 
-customer_details:{
+            }
 
-customer_id:
+        );
 
-String(user_id),
+        res.json({
 
-customer_name:
+            success: true,
 
-"Reader",
+            paymentSessionId:
+                response.data.payment_session_id,
 
-customer_email:
+            orderId
 
-"reader@mylikith.com",
+        });
 
-customer_phone:
+    }
 
-"9999999999"
+    catch (err) {
 
-},
+        console.log("==============");
+        console.log(err.response?.data || err.message);
+        console.log("==============");
 
-order_meta:{
+        res.status(500).json({
 
-return_url:
+            success: false,
 
-"https://mylikith-frontend.pages.dev/payment-success.html?order_id={order_id}"
+            error: err.response?.data || err.message
 
-}
+        });
 
-};
-
-const response =
-await cashfree.PGCreateOrder(
-    "2025-01-01",
-    request
-);
-
-res.json({
-
-success:true,
-
-paymentSessionId:
-
-response.data.payment_session_id,
-
-orderId
-
-});
-
-}catch(err){
-
-console.log(err.response?.data||err);
-
-res.status(500).json({
-
-success:false
-
-});
-
-}
+    }
 
 });
 
