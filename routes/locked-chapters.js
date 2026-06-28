@@ -168,11 +168,368 @@ router.post("/lock", async (req, res) => {
 
 router.post("/unlock", async (req, res) => {
 
-    res.json({
+    const client = await db.connect();
 
-        success: true
+    try {
 
-    });
+        await client.query("BEGIN");
+
+        const {
+
+            user_id,
+
+            chapter_id
+
+        } = req.body;
+
+        const lockResult =
+            await client.query(
+
+                `
+                SELECT *
+
+                FROM locked_chapters
+
+                WHERE chapter_id=$1
+                `,
+
+                [
+
+                    chapter_id
+
+                ]
+
+            );
+
+        if (lockResult.rows.length === 0) {
+
+            await client.query("ROLLBACK");
+
+            return res.json({
+
+                success:false,
+
+                message:"Chapter is free."
+
+            });
+
+        }
+
+        const lock =
+            lockResult.rows[0];
+
+        const alreadyUnlocked =
+            await client.query(
+
+                `
+                SELECT id
+
+                FROM unlocked_chapters
+
+                WHERE user_id=$1
+
+                AND chapter_id=$2
+                `,
+
+                [
+
+                    user_id,
+
+                    chapter_id
+
+                ]
+
+            );
+
+        if(alreadyUnlocked.rows.length){
+
+            await client.query("ROLLBACK");
+
+            return res.json({
+
+                success:true,
+
+                message:"Already unlocked."
+
+            });
+
+        }
+
+        const wallet =
+            await client.query(
+
+                `
+                SELECT *
+
+                FROM wallets
+
+                WHERE user_id=$1
+                `,
+
+                [
+
+                    user_id
+
+                ]
+
+            );
+
+        if(wallet.rows.length===0){
+
+            await client.query("ROLLBACK");
+
+            return res.json({
+
+                success:false,
+
+                message:"Wallet not found."
+
+            });
+
+        }
+
+        if(wallet.rows[0].coins < lock.coins_required){
+
+            await client.query("ROLLBACK");
+
+            return res.json({
+
+                success:false,
+
+                message:"Not enough coins."
+
+            });
+
+        }
+
+        await client.query(
+
+            `
+            UPDATE wallets
+
+            SET
+
+            coins = coins - $1,
+
+            spent_coins = spent_coins + $1
+
+            WHERE user_id=$2
+            `,
+
+            [
+
+                lock.coins_required,
+
+                user_id
+
+            ]
+
+        );
+
+        await client.query(
+
+            `
+            INSERT INTO unlocked_chapters
+            (
+
+                user_id,
+
+                chapter_id,
+
+                novel_id,
+
+                coins_paid
+
+            )
+
+            VALUES
+
+            (
+
+                $1,
+
+                $2,
+
+                $3,
+
+                $4
+
+            )
+            `,
+
+            [
+
+                user_id,
+
+                chapter_id,
+
+                lock.novel_id,
+
+                lock.coins_required
+
+            ]
+
+        );
+
+        const novel =
+            await client.query(
+
+                `
+                SELECT author_id
+
+                FROM novels
+
+                WHERE id=$1
+                `,
+
+                [
+
+                    lock.novel_id
+
+                ]
+
+            );
+
+        const writerId =
+            novel.rows[0].author_id;
+
+        await client.query(
+
+            `
+            INSERT INTO writer_earnings
+            (
+
+                writer_id,
+
+                user_id,
+
+                novel_id,
+
+                chapter_id,
+
+                coins
+
+            )
+
+            VALUES
+
+            (
+
+                $1,
+
+                $2,
+
+                $3,
+
+                $4,
+
+                $5
+
+            )
+            `,
+
+            [
+
+                writerId,
+
+                user_id,
+
+                lock.novel_id,
+
+                chapter_id,
+
+                lock.coins_required
+
+            ]
+
+        );
+
+        await client.query(
+
+            `
+            INSERT INTO wallet_transactions
+            (
+
+                wallet_id,
+
+                user_id,
+
+                type,
+
+                coins,
+
+                amount,
+
+                description,
+
+                reference_id
+
+            )
+
+            SELECT
+
+                id,
+
+                user_id,
+
+                'Debit',
+
+                $1,
+
+                0,
+
+                'Premium Chapter Unlock',
+
+                NULL
+
+            FROM wallets
+
+            WHERE user_id=$2
+            `,
+
+            [
+
+                lock.coins_required,
+
+                user_id
+
+            ]
+
+        );
+
+        await client.query("COMMIT");
+
+        res.json({
+
+            success:true,
+
+            message:"Chapter unlocked."
+
+        });
+
+    }
+
+    catch(err){
+
+        await client.query("ROLLBACK");
+
+        console.log(err);
+
+        res.status(500).json({
+
+            success:false,
+
+            error:err.message
+
+        });
+
+    }
+
+    finally{
+
+        client.release();
+
+    }
 
 });
 
