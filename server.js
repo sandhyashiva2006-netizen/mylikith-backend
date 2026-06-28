@@ -62,6 +62,8 @@ const writerRoutes =
 require("./routes/writers");
 const publishRoutes=require("./routes/publish.routes");
 const walletRoutes = require("./routes/wallet");
+const lockedRoutes =
+require("./routes/locked-chapters");
 
 
 
@@ -75,6 +77,10 @@ writerRoutes
 );
 app.use("/api/publish",publishRoutes);
 app.use("/api/wallet", walletRoutes);
+app.use(
+"/api/locked",
+lockedRoutes
+);
 
 
 
