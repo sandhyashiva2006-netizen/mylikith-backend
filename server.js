@@ -1626,6 +1626,67 @@ success:false
 
 });
 
+app.put("/api/library/status",async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+novel_id,
+
+status
+
+}=req.body;
+
+await pool.query(
+
+`
+
+UPDATE library
+
+SET status=$1
+
+WHERE
+
+user_id=$2
+
+AND novel_id=$3
+
+`,
+
+[
+
+status,
+
+user_id,
+
+novel_id
+
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
 
 /* ===========================
    ADMIN DASHBOARD
