@@ -1,33 +1,23 @@
-const express=require("express");
+const express = require("express");
 
-const router=express.Router();
+const router = express.Router();
 
-const db=require("../db");
+const db = require("../db");
 
-const crypto=require("crypto");
+const crypto = require("crypto");
 
 const {
-Cashfree,
-CFEnvironment
-}=require("cashfree-pg");
+    Cashfree,
+    CFEnvironment
+} = require("cashfree-pg");
 
-Cashfree.XClientId=
-process.env.CASHFREE_APP_ID;
-
-Cashfree.XClientSecret=
-process.env.CASHFREE_SECRET_KEY;
-
-Cashfree.XEnvironment=
-
-process.env.CASHFREE_ENV==="PRODUCTION"
-
-?
-
-CFEnvironment.PRODUCTION
-
-:
-
-CFEnvironment.SANDBOX;
+const cashfree = new Cashfree(
+    process.env.CASHFREE_ENV === "PRODUCTION"
+        ? CFEnvironment.PRODUCTION
+        : CFEnvironment.SANDBOX,
+    process.env.CASHFREE_APP_ID,
+    process.env.CASHFREE_SECRET_KEY
+);
 
 /* ===========================
    GET WALLET
@@ -575,9 +565,9 @@ return_url:
 };
 
 const response =
-await Cashfree.PGCreateOrder(
-"2025-01-01",
-request
+await cashfree.PGCreateOrder(
+    "2025-01-01",
+    request
 );
 
 res.json({
