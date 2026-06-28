@@ -11,24 +11,31 @@ router.get("/:chapterId/:userId", async (req, res) => {
         const locked = await db.query(
 
             `
-            SELECT *
-            FROM locked_chapters
-            WHERE chapter_id=$1
+            SELECT
+id,
+is_premium,
+coins_required,
+novel_id
+FROM chapters
+WHERE id=$1
             `,
 
             [chapterId]
 
         );
 
-        if (locked.rows.length === 0) {
+        if (
+locked.rows.length === 0 ||
+!locked.rows[0].is_premium
+){
 
-            return res.json({
+    return res.json({
 
-                locked: false
+        locked:false
 
-            });
+    });
 
-        }
+}
 
         const unlocked = await db.query(
 
@@ -186,11 +193,13 @@ router.post("/unlock", async (req, res) => {
             await client.query(
 
                 `
-                SELECT *
-
-                FROM locked_chapters
-
-                WHERE chapter_id=$1
+                SELECT
+id,
+novel_id,
+coins_required,
+is_premium
+FROM chapters
+WHERE id=$1
                 `,
 
                 [
@@ -201,7 +210,10 @@ router.post("/unlock", async (req, res) => {
 
             );
 
-        if (lockResult.rows.length === 0) {
+        if(
+lockResult.rows.length===0 ||
+!lockResult.rows[0].is_premium
+){
 
             await client.query("ROLLBACK");
 
