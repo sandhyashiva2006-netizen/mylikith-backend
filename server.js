@@ -2209,7 +2209,7 @@ r.id,
 
 r.rating,
 
-r.comment,
+r.review,
 
 u.name AS user,
 
