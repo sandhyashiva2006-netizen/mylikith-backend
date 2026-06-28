@@ -19,6 +19,10 @@ const cashfree = new Cashfree(
     process.env.CASHFREE_SECRET_KEY
 );
 
+console.log("APP ID:", process.env.CASHFREE_APP_ID);
+console.log("ENV:", process.env.CASHFREE_ENV);
+console.log("SECRET:", process.env.CASHFREE_SECRET_KEY ? "FOUND" : "MISSING");
+
 /* ===========================
    GET WALLET
 =========================== */
@@ -607,7 +611,10 @@ router.post("/verify-payment", async (req, res) => {
         const { order_id } = req.body;
 
         const response =
-        await Cashfree.PGFetchOrder(order_id);
+        await cashfree.PGFetchOrder(
+    "2025-01-01",
+    order_id
+);
 
         const order = response.data;
 
