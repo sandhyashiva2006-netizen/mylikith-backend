@@ -405,8 +405,12 @@ async (req,res)=>{
 try{
 
 const {
+
 title,
-content
+content,
+is_premium,
+coins_required
+
 } = req.body;
 
 const result =
@@ -418,24 +422,32 @@ UPDATE chapters
 SET
 
 title=$1,
-content=$2
+content=$2,
+is_premium=$3,
+coins_required=$4
 
-WHERE id=$3
+WHERE id=$5
 
 RETURNING *
 `,
 
 [
+
 title,
 content,
+is_premium,
+coins_required,
 req.params.id
+
 ]
 
 );
 
 res.json({
+
 success:true,
 chapter:result.rows[0]
+
 });
 
 }
@@ -444,7 +456,9 @@ catch(err){
 console.log(err);
 
 res.status(500).json({
+
 success:false
+
 });
 
 }
