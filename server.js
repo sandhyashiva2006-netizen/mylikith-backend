@@ -1149,14 +1149,14 @@ novel_id
 
 await pool.query(
 
-INSERT INTO library
+`INSERT INTO library
 (user_id,novel_id)
 
 VALUES($1,$2)
 
 ON CONFLICT(user_id,novel_id)
 
-DO NOTHING;
+DO NOTHING`;
 
 [user_id,novel_id]
 
