@@ -31,8 +31,19 @@ router.get("/:userId", async (req, res) => {
             await db.query(
                 `
                 INSERT INTO wallets
-                (user_id,balance,coins)
-                VALUES($1,0,0)
+(
+user_id,
+coins,
+earned_coins,
+spent_coins
+)
+VALUES
+(
+$1,
+0,
+0,
+0
+)
                 `,
                 [req.params.userId]
             );
@@ -75,17 +86,19 @@ router.get("/:userId/history", async (req, res) => {
 
             `
             SELECT
-            id,
-            type,
-            amount,
-            description,
-            created_at
 
-            FROM wallet_transactions
+id,
+type,
+coins,
+amount,
+description,
+created_at
 
-            WHERE user_id=$1
+FROM wallet_transactions
 
-            ORDER BY id DESC
+WHERE user_id=$1
+
+ORDER BY id DESC
             `,
             [req.params.userId]
 
@@ -199,8 +212,7 @@ router.post("/debit", async (req, res) => {
 
             `
             SELECT balance
-
-            FROM wallets
+FROM wallets
 
             WHERE user_id=$1
             `,
@@ -308,10 +320,16 @@ router.get("/:userId/summary", async (req, res) => {
 
             `
             SELECT
-            balance,
-            coins
-            FROM wallets
-            WHERE user_id=$1
+
+coins,
+
+earned_coins,
+
+spent_coins
+
+FROM wallets
+
+WHERE user_id=$1
             `,
 
             [
@@ -384,17 +402,19 @@ router.get("/:userId/summary", async (req, res) => {
 
         res.json({
 
-            balance: wallet.rows[0]?.balance || 0,
+coins:
+wallet.rows[0]?.coins || 0,
 
-            coins: wallet.rows[0]?.coins || 0,
+earned_coins:
+wallet.rows[0]?.earned_coins || 0,
 
-            credits: credit.rows[0].total,
+spent_coins:
+wallet.rows[0]?.spent_coins || 0,
 
-            debits: debit.rows[0].total,
+transactions:
+Number(total.rows[0].total)
 
-            transactions: Number(total.rows[0].total)
-
-        });
+});
 
     } catch (err) {
 
@@ -706,9 +726,7 @@ WHERE user_id=$2
 
             [
 
-                order.order_amount,
-
-                totalCoins,
+               totalCoins,
 
                 customerId
 
