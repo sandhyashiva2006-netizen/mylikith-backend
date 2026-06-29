@@ -870,26 +870,96 @@ try{
 
 const writerId=req.params.writerId;
 
-const summary=
+/* ===========================
+   TOTAL EARNINGS
+=========================== */
+
+const earnings=
 await db.query(
 
 `
 SELECT
 
-COALESCE(SUM(coins),0) AS coins,
+COALESCE(SUM(amount),0) total_earnings,
 
-COALESCE(SUM(amount),0) AS amount,
-
-COUNT(*) AS sales
+COALESCE(SUM(coins),0) total_coins
 
 FROM writer_earnings
 
 WHERE writer_id=$1
 `,
 
-[writerId]
+[
+writerId
+]
 
 );
+
+/* ===========================
+   PENDING WITHDRAWALS
+=========================== */
+
+const pending=
+await db.query(
+
+`
+SELECT
+
+COALESCE(SUM(amount),0) pending
+
+FROM withdrawal_requests
+
+WHERE
+
+writer_id=$1
+
+AND
+
+status='Pending'
+`,
+
+[
+writerId
+]
+
+);
+
+/* ===========================
+   PAID WITHDRAWALS
+=========================== */
+
+const paid=
+await db.query(
+
+`
+SELECT
+
+COALESCE(SUM(amount),0) paid
+
+FROM withdrawal_requests
+
+WHERE
+
+writer_id=$1
+
+AND
+
+status IN
+(
+'Approved',
+'Completed'
+)
+`,
+
+[
+writerId
+]
+
+);
+
+/* ===========================
+   RECENT EARNINGS
+=========================== */
 
 const history=
 await db.query(
@@ -927,14 +997,56 @@ ORDER BY w.id DESC
 LIMIT 50
 `,
 
-[writerId]
+[
+writerId
+]
 
 );
 
+const total=
+Number(
+earnings.rows[0].total_earnings
+);
+
+const pendingAmount=
+Number(
+pending.rows[0].pending
+);
+
+const paidAmount=
+Number(
+paid.rows[0].paid
+);
+
+const withdrawable=
+
+total-
+
+pendingAmount-
+
+paidAmount;
+
 res.json({
 
-summary:
-summary.rows[0],
+summary:{
+
+coins:
+Number(
+earnings.rows[0].total_coins
+),
+
+amount:total,
+
+withdrawable:
+withdrawable,
+
+pending:
+pendingAmount,
+
+paid:
+paidAmount
+
+},
 
 history:
 history.rows
