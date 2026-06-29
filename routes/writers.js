@@ -862,4 +862,183 @@ success:false
 
 });
 
+router.get(
+"/earnings/:writerId",
+async(req,res)=>{
+
+try{
+
+const writerId=req.params.writerId;
+
+const summary=
+await db.query(
+
+`
+SELECT
+
+COALESCE(SUM(coins),0) AS coins,
+
+COALESCE(SUM(amount),0) AS amount,
+
+COUNT(*) AS sales
+
+FROM writer_earnings
+
+WHERE writer_id=$1
+`,
+
+[writerId]
+
+);
+
+const history=
+await db.query(
+
+`
+SELECT
+
+u.name,
+
+n.title AS novel,
+
+c.chapter_no,
+
+w.coins,
+
+w.amount,
+
+w.created_at
+
+FROM writer_earnings w
+
+JOIN users u
+ON w.user_id=u.id
+
+JOIN novels n
+ON w.novel_id=n.id
+
+JOIN chapters c
+ON w.chapter_id=c.id
+
+WHERE w.writer_id=$1
+
+ORDER BY w.id DESC
+
+LIMIT 50
+`,
+
+[writerId]
+
+);
+
+res.json({
+
+summary:
+summary.rows[0],
+
+history:
+history.rows
+
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.post(
+"/withdraw",
+async(req,res)=>{
+
+try{
+
+const{
+
+writer_id,
+amount,
+payment_method,
+account_name,
+account_number,
+ifsc_code,
+upi_id
+
+}=req.body;
+
+await db.query(
+
+`
+INSERT INTO withdrawal_requests
+(
+
+writer_id,
+amount,
+payment_method,
+account_name,
+account_number,
+ifsc_code,
+upi_id
+
+)
+
+VALUES
+(
+
+$1,$2,$3,$4,$5,$6,$7
+
+)
+`,
+
+[
+
+writer_id,
+amount,
+payment_method,
+account_name,
+account_number,
+ifsc_code,
+upi_id
+
+]
+
+);
+
+res.json({
+
+success:true,
+
+message:
+
+"Withdrawal request submitted successfully."
+
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false,
+
+message:
+
+"Unable to submit request."
+
+});
+
+}
+
+});
+
 module.exports = router;

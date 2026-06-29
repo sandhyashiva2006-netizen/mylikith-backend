@@ -405,56 +405,93 @@ lockResult.rows.length===0 ||
         const writerId =
             novel.rows[0].author_id;
 
-        await client.query(
+        const settings =
+await client.query(
 
-            `
-            INSERT INTO writer_earnings
-            (
+`
+SELECT *
 
-                writer_id,
+FROM platform_settings
 
-                user_id,
+LIMIT 1
+`
 
-                novel_id,
+);
 
-                chapter_id,
+const writerShare =
+Number(
+settings.rows[0].writer_share
+);
 
-                coins
+const writerAmount =
+Number(
 
-            )
+(
 
-            VALUES
+lock.coins_required *
 
-            (
+(writerShare / 100)
 
-                $1,
+).toFixed(2)
 
-                $2,
+);
 
-                $3,
+await client.query(
 
-                $4,
+`
+INSERT INTO writer_earnings
+(
 
-                $5
+    writer_id,
 
-            )
-            `,
+    user_id,
 
-            [
+    novel_id,
 
-                writerId,
+    chapter_id,
 
-                user_id,
+    coins,
 
-                lock.novel_id,
+    amount
 
-                chapter_id,
+)
 
-                lock.coins_required
+VALUES
 
-            ]
+(
 
-        );
+    $1,
+
+    $2,
+
+    $3,
+
+    $4,
+
+    $5,
+
+    $6
+
+)
+`,
+
+[
+
+    writerId,
+
+    user_id,
+
+    lock.novel_id,
+
+    chapter_id,
+
+    lock.coins_required,
+
+    writerAmount
+
+]
+
+);
 
         await client.query(
 
