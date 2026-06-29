@@ -1041,4 +1041,355 @@ message:
 
 });
 
+router.get(
+"/payment-details/:writerId",
+async(req,res)=>{
+
+try{
+
+const result=
+await db.query(
+
+`
+SELECT *
+
+FROM writer_payment_details
+
+WHERE writer_id=$1
+`,
+
+[
+req.params.writerId
+]
+
+);
+
+if(result.rows.length===0){
+
+return res.json({
+
+success:false
+
+});
+
+}
+
+res.json({
+
+success:true,
+
+details:result.rows[0]
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.post(
+"/payment-details",
+async(req,res)=>{
+
+try{
+
+const{
+
+writer_id,
+payment_method,
+upi_id,
+account_name,
+bank_name,
+account_number,
+ifsc_code
+
+}=req.body;
+
+await db.query(
+
+`
+INSERT INTO writer_payment_details
+(
+
+writer_id,
+
+payment_method,
+
+upi_id,
+
+account_name,
+
+bank_name,
+
+account_number,
+
+ifsc_code
+
+)
+
+VALUES
+(
+
+$1,$2,$3,$4,$5,$6,$7
+
+)
+
+ON CONFLICT(writer_id)
+
+DO UPDATE SET
+
+payment_method=EXCLUDED.payment_method,
+
+upi_id=EXCLUDED.upi_id,
+
+account_name=EXCLUDED.account_name,
+
+bank_name=EXCLUDED.bank_name,
+
+account_number=EXCLUDED.account_number,
+
+ifsc_code=EXCLUDED.ifsc_code
+`,
+
+[
+
+writer_id,
+payment_method,
+upi_id,
+account_name,
+bank_name,
+account_number,
+ifsc_code
+
+]
+
+);
+
+res.json({
+
+success:true,
+
+message:"Payment details saved."
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false,
+
+message:"Unable to save."
+
+});
+
+}
+
+});
+
+router.post(
+"/withdraw",
+async(req,res)=>{
+
+try{
+
+const{
+
+writer_id,
+amount
+
+}=req.body;
+
+const settings=
+await db.query(
+
+`
+SELECT *
+
+FROM platform_settings
+
+LIMIT 1
+`
+
+);
+
+const minimum=
+Number(
+settings.rows[0].minimum_withdrawal
+);
+
+if(amount<minimum){
+
+return res.json({
+
+success:false,
+
+message:
+`Minimum withdrawal is ₹${minimum}`
+
+});
+
+}
+
+const payment=
+await db.query(
+
+`
+SELECT *
+
+FROM writer_payment_details
+
+WHERE writer_id=$1
+`,
+
+[
+writer_id
+]
+
+);
+
+if(payment.rows.length===0){
+
+return res.json({
+
+success:false,
+
+message:
+"Please save payment details first."
+
+});
+
+}
+
+await db.query(
+
+`
+INSERT INTO withdrawal_requests
+(
+
+writer_id,
+
+amount,
+
+payment_method,
+
+account_name,
+
+account_number,
+
+ifsc_code,
+
+upi_id,
+
+status
+
+)
+
+VALUES
+(
+
+$1,$2,$3,$4,$5,$6,$7,'Pending'
+
+)
+`,
+
+[
+
+writer_id,
+
+amount,
+
+payment.rows[0].payment_method,
+
+payment.rows[0].account_name,
+
+payment.rows[0].account_number,
+
+payment.rows[0].ifsc_code,
+
+payment.rows[0].upi_id
+
+]
+
+);
+
+res.json({
+
+success:true,
+
+message:
+"Withdrawal request submitted."
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false,
+
+message:
+"Unable to submit request."
+
+});
+
+}
+
+});
+
+router.get(
+"/withdraw-history/:writerId",
+async(req,res)=>{
+
+try{
+
+const result=
+await db.query(
+
+`
+SELECT *
+
+FROM withdrawal_requests
+
+WHERE writer_id=$1
+
+ORDER BY id DESC
+`,
+
+[
+req.params.writerId
+]
+
+);
+
+res.json(
+
+result.rows
+
+);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+
 module.exports = router;
