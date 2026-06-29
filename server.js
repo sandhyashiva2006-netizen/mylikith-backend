@@ -64,6 +64,7 @@ const publishRoutes=require("./routes/publish.routes");
 const walletRoutes = require("./routes/wallet");
 const lockedRoutes =
 require("./routes/locked-chapters");
+const adminRoutes = require("./routes/admin");
 
 
 
@@ -81,6 +82,7 @@ app.use(
 "/api/locked",
 lockedRoutes
 );
+app.use("/api/admin", adminRoutes);
 
 
 
