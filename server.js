@@ -1888,9 +1888,44 @@ const comments=await pool.query(
 "SELECT COUNT(*) total FROM comments"
 );
 
-const views=await pool.query(
-"SELECT COALESCE(SUM(views),0) total FROM novels"
+const coinSales=await pool.query(
+`
+SELECT
+COALESCE(SUM(amount),0) total
+FROM wallet_transactions
+WHERE type='Credit'
+`
 );
+
+const writerEarnings=await pool.query(
+`
+SELECT
+COALESCE(SUM(amount),0) total
+FROM writer_earnings
+`
+);
+
+const platform=await pool.query(
+`
+SELECT platform_share
+FROM platform_settings
+LIMIT 1
+`
+);
+
+const withdrawals=await pool.query(
+`
+SELECT COUNT(*) total
+FROM withdrawal_requests
+WHERE status='Pending'
+`
+);
+
+const platformRevenue=
+
+Number(writerEarnings.rows[0].total) *
+
+Number(platform.rows[0].platform_share) / 100;
 
 res.json({
 
@@ -1906,13 +1941,22 @@ reviews:Number(reviews.rows[0].total),
 
 comments:Number(comments.rows[0].total),
 
-views:Number(views.rows[0].total),
+coin_sales:Number(
+coinSales.rows[0].total
+),
 
-reports:0
+platform_revenue:
+platformRevenue,
+
+pending_withdrawals:
+Number(
+withdrawals.rows[0].total
+)
 
 });
 
-}catch(err){
+}
+catch(err){
 
 console.log(err);
 
@@ -2878,19 +2922,117 @@ success:false
 
 });
 
-app.get("/api/admin/revenue",async(req,res)=>{
+app.get("/api/admin/revenue", async(req,res)=>{
+
+try{
+
+const revenue=
+await pool.query(
+
+`
+SELECT
+
+COALESCE(SUM(amount),0) total
+
+FROM writer_earnings
+`
+
+);
+
+const payouts=
+await pool.query(
+
+`
+SELECT
+
+COALESCE(SUM(amount),0) total
+
+FROM withdrawal_requests
+
+WHERE status IN
+(
+'Approved',
+'Completed'
+)
+`
+
+);
+
+const pending=
+await pool.query(
+
+`
+SELECT
+
+COALESCE(SUM(amount),0) total
+
+FROM withdrawal_requests
+
+WHERE status='Pending'
+`
+
+);
+
+const settings=
+await pool.query(
+
+`
+SELECT
+
+platform_share
+
+FROM platform_settings
+
+LIMIT 1
+`
+);
+
+const totalRevenue=
+Number(
+revenue.rows[0].total
+);
+
+const platformShare=
+Number(
+settings.rows[0].platform_share
+);
+
+const platformRevenue=
+
+(totalRevenue*platformShare)/100;
 
 res.json({
 
-totalRevenue:0,
+totalRevenue,
 
-writerPayouts:0,
+writerPayouts:
 
-platformRevenue:0,
+Number(
+payouts.rows[0].total
+),
 
-pendingWithdrawals:0
+platformRevenue,
+
+pendingWithdrawals:
+
+Number(
+pending.rows[0].total
+)
 
 });
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
 
 });
 
