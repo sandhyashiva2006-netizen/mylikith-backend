@@ -710,6 +710,9 @@ console.log(order);
             Number(pkg.coins) +
             Number(pkg.bonus_coins);
 
+console.log("TOTAL COINS:", totalCoins);
+console.log("CUSTOMER ID:", customerId);
+
         await db.query(
 
             `
@@ -733,6 +736,20 @@ WHERE user_id=$2
             ]
 
         );
+
+const checkWallet = await db.query(
+`
+SELECT
+coins,
+earned_coins,
+spent_coins
+FROM wallets
+WHERE user_id=$1
+`,
+[customerId]
+);
+
+console.log(checkWallet.rows[0]);
 
         const wallet =
             await db.query(
