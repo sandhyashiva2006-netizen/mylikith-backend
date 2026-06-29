@@ -695,13 +695,13 @@ console.log(order);
             `
             UPDATE wallets
 
-            SET
+SET
 
-            balance = balance + $1,
+coins = coins + $1,
 
-            coins = coins + $2
+earned_coins = earned_coins + $1
 
-            WHERE user_id = $3
+WHERE user_id=$2
             `,
 
             [
