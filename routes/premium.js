@@ -544,7 +544,8 @@ customer_phone:"9999999999"
 
 order_meta:{
 
-return_url:`https://mylikith-frontend.pages.dev/premium-success.html?order_id={order_id}&plan_id=${plan_id}`
+return_url:
+`https://mylikith-frontend.pages.dev/payment-success.html?type=premium&order_id={order_id}&plan_id=${plan_id}`
 
 }
 
