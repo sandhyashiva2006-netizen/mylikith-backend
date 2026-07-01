@@ -522,13 +522,7 @@ const orderId=
 
 `PRE_${Date.now()}`;
 
-const response=
-
-await axios.post(
-
-"https://sandbox.cashfree.com/pg/orders",
-
-{
+const orderPayload={
 
 order_id:orderId,
 
@@ -550,27 +544,31 @@ customer_phone:"9999999999"
 
 order_meta:{
 
-return_url:
-
-`https://mylikith-frontend.pages.dev/premium-success.html?order_id={order_id}&plan_id=${plan_id}`
+return_url:`https://mylikith-frontend.pages.dev/premium-success.html?order_id={order_id}&plan_id=${plan_id}`
 
 }
 
-},
+};
+
+console.log(orderPayload);
+
+const response=await axios.post(
+
+"https://sandbox.cashfree.com/pg/orders",
+
+orderPayload,
 
 {
 
 headers:{
 
-"x-client-id":
+"x-client-id":process.env.CASHFREE_APP_ID,
 
-process.env.CASHFREE_APP_ID,
+"x-client-secret":process.env.CASHFREE_SECRET_KEY,
 
-"x-client-secret":
+"x-api-version":"2025-01-01",
 
-process.env.CASHFREE_SECRET_KEY,
-
-"x-api-version":"2025-01-01"
+"Content-Type":"application/json"
 
 }
 
