@@ -20,17 +20,61 @@ await db.query(
 `
 SELECT
 
-wr.*,
+wr.id,
 
-u.name AS writer_name
+wr.writer_id,
+
+wr.amount,
+
+wr.status,
+
+wr.remarks,
+
+wr.requested_at,
+
+wr.processed_at,
+
+u.name AS writer_name,
+
+COALESCE(
+wp.payment_method,
+wr.payment_method
+) AS payment_method,
+
+COALESCE(
+wp.upi_id,
+wr.upi_id
+) AS upi_id,
+
+COALESCE(
+wp.account_name,
+wr.account_name
+) AS account_name,
+
+COALESCE(
+wp.bank_name,
+''
+) AS bank_name,
+
+COALESCE(
+wp.account_number,
+wr.account_number
+) AS account_number,
+
+COALESCE(
+wp.ifsc_code,
+wr.ifsc_code
+) AS ifsc_code
 
 FROM withdrawal_requests wr
 
 JOIN users u
+ON wr.writer_id = u.id
 
-ON wr.writer_id=u.id
+LEFT JOIN writer_payment_details wp
+ON wr.writer_id = wp.writer_id
 
-ORDER BY wr.requested_at DESC
+ORDER BY wr.requested_at DESC;
 `
 
 );
