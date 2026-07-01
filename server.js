@@ -2922,117 +2922,82 @@ success:false
 
 });
 
-app.get("/api/admin/revenue", async(req,res)=>{
+app.get("/api/admin/revenue", async (req, res) => {
 
-try{
+    try {
 
-const revenue=
-await pool.query(
+        const coinSales = await pool.query(`
+            SELECT COALESCE(SUM(amount),0) total
+            FROM wallet_transactions
+            WHERE type='Credit'
+        `);
 
-`
-SELECT
+        const writerRevenue = await pool.query(`
+            SELECT COALESCE(SUM(amount),0) total
+            FROM writer_earnings
+        `);
 
-COALESCE(SUM(amount),0) total
+        const paid = await pool.query(`
+            SELECT COALESCE(SUM(amount),0) total
+            FROM withdrawal_requests
+            WHERE status IN ('Approved','Completed')
+        `);
 
-FROM writer_earnings
-`
+        const pending = await pool.query(`
+            SELECT COALESCE(SUM(amount),0) total
+            FROM withdrawal_requests
+            WHERE status='Pending'
+        `);
 
-);
+        const settings = await pool.query(`
+            SELECT
+                writer_share,
+                platform_share
+            FROM platform_settings
+            LIMIT 1
+        `);
 
-const payouts=
-await pool.query(
+        const writerShare =
+            Number(settings.rows[0].writer_share);
 
-`
-SELECT
+        const platformShare =
+            Number(settings.rows[0].platform_share);
 
-COALESCE(SUM(amount),0) total
+        const totalRevenue =
+            Number(coinSales.rows[0].total);
 
-FROM withdrawal_requests
+        const platformRevenue =
+            totalRevenue * platformShare / 100;
 
-WHERE status IN
-(
-'Approved',
-'Completed'
-)
-`
+        res.json({
 
-);
+            totalRevenue,
 
-const pending=
-await pool.query(
+            writerPayouts:
+                Number(paid.rows[0].total),
 
-`
-SELECT
+            platformRevenue,
 
-COALESCE(SUM(amount),0) total
+            pendingWithdrawals:
+                Number(pending.rows[0].total),
 
-FROM withdrawal_requests
+            writerShare,
 
-WHERE status='Pending'
-`
+            platformShare
 
-);
+        });
 
-const settings=
-await pool.query(
+    } catch (err) {
 
-`
-SELECT
+        console.log(err);
 
-platform_share
+        res.status(500).json({
 
-FROM platform_settings
+            success: false
 
-LIMIT 1
-`
-);
+        });
 
-const totalRevenue=
-Number(
-revenue.rows[0].total
-);
-
-const platformShare=
-Number(
-settings.rows[0].platform_share
-);
-
-const platformRevenue=
-
-(totalRevenue*platformShare)/100;
-
-res.json({
-
-totalRevenue,
-
-writerPayouts:
-
-Number(
-payouts.rows[0].total
-),
-
-platformRevenue,
-
-pendingWithdrawals:
-
-Number(
-pending.rows[0].total
-)
-
-});
-
-}
-catch(err){
-
-console.log(err);
-
-res.status(500).json({
-
-success:false
-
-});
-
-}
+    }
 
 });
 
