@@ -65,6 +65,7 @@ const walletRoutes = require("./routes/wallet");
 const lockedRoutes =
 require("./routes/locked-chapters");
 const adminRoutes = require("./routes/admin");
+const premiumRoutes=require("./routes/premium");
 
 
 
@@ -83,6 +84,7 @@ app.use(
 lockedRoutes
 );
 app.use("/api/admin", adminRoutes);
+app.use("/api/premium",premiumRoutes);
 
 
 
@@ -1907,13 +1909,14 @@ FROM writer_earnings
 
 const platform=await pool.query(
 `
-SELECT platform_share
+SELECT
+platform_share
 FROM platform_settings
 LIMIT 1
 `
 );
 
-const withdrawals=await pool.query(
+const pending=await pool.query(
 `
 SELECT COUNT(*) total
 FROM withdrawal_requests
@@ -1921,11 +1924,23 @@ WHERE status='Pending'
 `
 );
 
+const completed=await pool.query(
+`
+SELECT COUNT(*) total
+FROM withdrawal_requests
+WHERE status IN('Approved','Completed')
+`
+);
+
 const platformRevenue=
 
-Number(writerEarnings.rows[0].total) *
+Number(writerEarnings.rows[0].total)
 
-Number(platform.rows[0].platform_share) / 100;
+*
+
+Number(platform.rows[0].platform_share)
+
+/100;
 
 res.json({
 
@@ -1945,18 +1960,19 @@ coin_sales:Number(
 coinSales.rows[0].total
 ),
 
-platform_revenue:
-platformRevenue,
+platform_revenue:platformRevenue,
 
-pending_withdrawals:
-Number(
-withdrawals.rows[0].total
+pending_withdrawals:Number(
+pending.rows[0].total
+),
+
+completed_withdrawals:Number(
+completed.rows[0].total
 )
 
 });
 
-}
-catch(err){
+}catch(err){
 
 console.log(err);
 
@@ -2816,62 +2832,112 @@ success:false
 
 });
 
-app.get("/api/admin/analytics",async(req,res)=>{
+app.get("/api/admin/analytics", async(req,res)=>{
 
 try{
 
+const users=await pool.query(
+`SELECT COUNT(*) total FROM users`
+);
+
+const writers=await pool.query(
+`SELECT COUNT(*) total FROM users WHERE role='writer'`
+);
+
+const novels=await pool.query(
+`SELECT COUNT(*) total FROM novels`
+);
+
+const chapters=await pool.query(
+`SELECT COUNT(*) total FROM chapters`
+);
+
 const reads=await pool.query(
-
-"SELECT COALESCE(SUM(views),0) total FROM novels"
-
+`
+SELECT COALESCE(SUM(views),0) total
+FROM novels
+`
 );
 
 const rating=await pool.query(
+`
+SELECT
+COALESCE(ROUND(AVG(rating),1),0) rating
+FROM novels
+`
+);
 
-"SELECT ROUND(AVG(rating),1) rating FROM novels"
+const coinSales=await pool.query(
+`
+SELECT
+COALESCE(SUM(amount),0) total
+FROM wallet_transactions
+WHERE type='Credit'
+`
+);
 
+const coinsSpent=await pool.query(
+`
+SELECT
+COALESCE(SUM(coins),0) total
+FROM wallet_transactions
+WHERE type='Debit'
+`
+);
+
+const pending=await pool.query(
+`
+SELECT COUNT(*) total
+FROM withdrawal_requests
+WHERE status='Pending'
+`
+);
+
+const completed=await pool.query(
+`
+SELECT COUNT(*) total
+FROM withdrawal_requests
+WHERE status IN('Approved','Completed')
+`
 );
 
 const topNovel=await pool.query(
-
 `
-SELECT title
-
+SELECT
+title,
+views,
+rating
 FROM novels
-
 ORDER BY views DESC
-
 LIMIT 1
 `
-
 );
 
 const topWriter=await pool.query(
-
 `
 SELECT
 
 u.name,
 
-SUM(n.views) views
+COALESCE(SUM(we.amount),0) earnings
 
 FROM users u
 
-JOIN novels n
+LEFT JOIN writer_earnings we
 
-ON u.id=n.author_id
+ON u.id=we.writer_id
+
+WHERE u.role='writer'
 
 GROUP BY u.id
 
-ORDER BY views DESC
+ORDER BY earnings DESC
 
 LIMIT 1
 `
-
 );
 
 const popular=await pool.query(
-
 `
 SELECT
 
@@ -2887,24 +2953,38 @@ ORDER BY views DESC
 
 LIMIT 10
 `
-
 );
 
 res.json({
 
-reads:reads.rows[0].total,
+users:Number(users.rows[0].total),
 
-rating:rating.rows[0].rating||0,
+writers:Number(writers.rows[0].total),
+
+novels:Number(novels.rows[0].total),
+
+chapters:Number(chapters.rows[0].total),
+
+reads:Number(reads.rows[0].total),
+
+rating:Number(rating.rows[0].rating),
+
+coinSales:Number(coinSales.rows[0].total),
+
+coinsSpent:Number(coinsSpent.rows[0].total),
+
+pendingWithdrawals:Number(pending.rows[0].total),
+
+completedWithdrawals:Number(completed.rows[0].total),
 
 topNovel:
-
 topNovel.rows[0]?.title||"-",
 
 topWriter:
-
 topWriter.rows[0]?.name||"-",
 
-popular:popular.rows
+popular:
+popular.rows
 
 });
 
