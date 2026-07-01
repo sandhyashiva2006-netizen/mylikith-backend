@@ -1324,6 +1324,8 @@ router.post(
 "/withdraw",
 async(req,res)=>{
 
+console.log(req.body);
+
 try{
 
 const{
