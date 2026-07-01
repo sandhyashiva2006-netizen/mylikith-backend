@@ -1154,15 +1154,23 @@ message:
 }
 catch(err){
 
+console.log("========== WITHDRAW ERROR ==========");
+
 console.log(err);
+
+console.log(err.message);
+
+console.log(err.detail);
+
+console.log(err.code);
+
+console.log("===================================");
 
 res.status(500).json({
 
 success:false,
 
-message:
-
-"Unable to submit request."
+message:err.message
 
 });
 
