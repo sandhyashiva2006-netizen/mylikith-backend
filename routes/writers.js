@@ -1068,100 +1068,6 @@ success:false
 
 });
 
-router.post(
-"/withdraw",
-async(req,res)=>{
-
-try{
-
-const{
-
-writer_id,
-amount,
-payment_method,
-account_name,
-account_number,
-ifsc_code,
-upi_id
-
-}=req.body;
-
-await db.query(
-
-`
-INSERT INTO withdrawal_requests
-(
-
-writer_id,
-amount,
-payment_method,
-account_name,
-account_number,
-ifsc_code,
-upi_id
-
-)
-
-VALUES
-(
-
-$1,$2,$3,$4,$5,$6,$7
-
-)
-`,
-
-[
-
-writer_id,
-amount,
-payment_method,
-account_name,
-account_number,
-ifsc_code,
-upi_id
-
-]
-
-);
-
-
-
-res.json({
-
-success:true,
-
-message:
-
-"Withdrawal request submitted successfully."
-
-});
-
-}
-catch(err){
-
-console.log("========== WITHDRAW ERROR ==========");
-
-console.log(err);
-
-console.log(err.message);
-
-console.log(err.detail);
-
-console.log(err.code);
-
-console.log("===================================");
-
-res.status(500).json({
-
-success:false,
-
-message:err.message
-
-});
-
-}
-
-});
 
 router.get(
 "/payment-details/:writerId",
@@ -1353,7 +1259,7 @@ Number(
 settings.rows[0].minimum_withdrawal
 );
 
-if(amount<minimum){
+if(Number(amount) < minimum){
 
 return res.json({
 
@@ -1391,6 +1297,109 @@ success:false,
 
 message:
 "Please save payment details first."
+
+});
+
+}
+
+const existing =
+await db.query(
+`
+SELECT id
+FROM withdrawal_requests
+WHERE writer_id=$1
+AND status='Pending'
+LIMIT 1
+`,
+[
+writer_id
+]
+);
+
+if(existing.rows.length){
+
+return res.json({
+
+success:false,
+
+message:"You already have a pending withdrawal request."
+
+});
+
+}
+
+const earnings =
+await db.query(
+`
+SELECT
+COALESCE(SUM(amount),0) total
+FROM writer_earnings
+WHERE writer_id=$1
+`,
+[
+writer_id
+]
+);
+
+const pending =
+await db.query(
+`
+SELECT
+COALESCE(SUM(amount),0) total
+FROM withdrawal_requests
+WHERE writer_id=$1
+AND status='Pending'
+`,
+[
+writer_id
+]
+);
+
+const approved =
+await db.query(
+`
+SELECT
+COALESCE(SUM(amount),0) total
+FROM withdrawal_requests
+WHERE writer_id=$1
+AND status IN('Approved','Completed')
+`,
+[
+writer_id
+]
+);
+
+const withdrawable =
+
+Number(earnings.rows[0].total)
+
+-
+
+Number(pending.rows[0].total)
+
+-
+
+Number(approved.rows[0].total);
+
+if(withdrawable <= 0){
+
+return res.json({
+
+success:false,
+
+message:"No withdrawable balance available."
+
+});
+
+}
+
+if(amount > withdrawable){
+
+return res.json({
+
+success:false,
+
+message:`Only ₹${withdrawable.toFixed(2)} is available to withdraw.`
 
 });
 
@@ -1452,8 +1461,7 @@ res.json({
 
 success:true,
 
-message:
-"Withdrawal request submitted."
+message:"Withdrawal request submitted successfully."
 
 });
 
