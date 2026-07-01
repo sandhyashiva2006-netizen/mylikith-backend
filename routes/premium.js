@@ -540,11 +540,19 @@ customer_details:{
 
 customer_id:String(user_id),
 
-customer_name:user_id.toString(),
+customer_name:"MyLikith Reader",
 
 customer_email:"premium@mylikith.com",
 
 customer_phone:"9999999999"
+
+},
+
+order_meta:{
+
+return_url:
+
+`https://mylikith-frontend.pages.dev/premium-success.html?order_id={order_id}&plan_id=${plan_id}`
 
 }
 
@@ -562,7 +570,7 @@ process.env.CASHFREE_APP_ID,
 
 process.env.CASHFREE_SECRET_KEY,
 
-"x-api-version":"2023-08-01"
+"x-api-version":"2025-01-01"
 
 }
 
@@ -591,6 +599,189 @@ res.status(500).json({
 success:false,
 
 message:"Unable to create premium order."
+
+});
+
+}
+
+});
+
+router.post(
+"/verify-payment",
+async(req,res)=>{
+
+try{
+
+const{
+
+order_id,
+plan_id,
+user_id
+
+}=req.body;
+
+const response=
+await axios.get(
+
+`https://sandbox.cashfree.com/pg/orders/${order_id}`,
+
+{
+
+headers:{
+
+"x-client-id":
+process.env.CASHFREE_APP_ID,
+
+"x-client-secret":
+process.env.CASHFREE_SECRET_KEY,
+
+"x-api-version":
+"2025-01-01"
+
+}
+
+}
+
+);
+
+if(response.data.order_status!=="PAID"){
+
+return res.json({
+
+success:false,
+
+message:"Payment Pending"
+
+});
+
+}
+
+const exists=
+await db.query(
+
+`
+SELECT id
+
+FROM user_premium
+
+WHERE payment_order_id=$1
+`,
+
+[
+order_id
+]
+
+);
+
+if(exists.rows.length){
+
+return res.json({
+
+success:true
+
+});
+
+}
+
+const plan=
+await db.query(
+
+`
+SELECT *
+
+FROM premium_plans
+
+WHERE id=$1
+`,
+
+[
+plan_id
+]
+
+);
+
+const days=
+plan.rows[0].duration_days;
+
+await db.query(
+
+`
+INSERT INTO user_premium
+(
+
+user_id,
+
+plan_id,
+
+payment_order_id,
+
+expiry_date
+
+)
+
+VALUES
+(
+
+$1,
+
+$2,
+
+$3,
+
+NOW()+($4||' days')::interval
+
+)
+`,
+
+[
+
+user_id,
+
+plan_id,
+
+order_id,
+
+days
+
+]
+
+);
+
+await db.query(
+
+`
+UPDATE wallets
+
+SET
+
+coins=coins+$1
+
+WHERE user_id=$2
+`,
+
+[
+
+plan.rows[0].coins,
+
+user_id
+
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
 
 });
 
