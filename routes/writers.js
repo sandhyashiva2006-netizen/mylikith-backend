@@ -1124,6 +1124,23 @@ upi_id
 
 );
 
+await db.query(
+`
+UPDATE writer_earnings
+
+SET withdrawn = TRUE
+
+WHERE writer_id = $1
+
+AND withdrawn = FALSE
+
+LIMIT 1
+`,
+[
+writer_id
+]
+);
+
 res.json({
 
 success:true,
