@@ -102,6 +102,32 @@ premium:false
 
 }
 
+if(new Date(result.rows[0].expiry_date)<new Date()){
+
+await db.query(
+
+`
+UPDATE user_premium
+
+SET status='Expired'
+
+WHERE id=$1
+`,
+
+[
+result.rows[0].id
+]
+
+);
+
+return res.json({
+
+premium:false
+
+});
+
+}
+
 res.json({
 
 premium:true,
