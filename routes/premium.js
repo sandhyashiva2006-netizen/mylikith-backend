@@ -482,45 +482,29 @@ async(req,res)=>{
 try{
 
 const{
-
 user_id,
 plan_id
-
 }=req.body;
 
-const plan=
-
-await db.query(
-
+const plan=await db.query(
 `
 SELECT *
-
 FROM premium_plans
-
 WHERE id=$1
 `,
-
-[
-plan_id
-]
-
+[plan_id]
 );
 
 if(plan.rows.length===0){
 
 return res.json({
-
 success:false,
-
 message:"Plan not found."
-
 });
 
 }
 
-const orderId=
-
-`PRE_${Date.now()}`;
+const orderId=`PRE_${Date.now()}`;
 
 const orderPayload={
 
@@ -551,6 +535,7 @@ return_url:
 
 };
 
+console.log("========== PREMIUM ORDER ==========");
 console.log(orderPayload);
 
 const response=await axios.post(
@@ -563,13 +548,17 @@ orderPayload,
 
 headers:{
 
-"x-client-id":process.env.CASHFREE_APP_ID,
+"x-client-id":
+process.env.CASHFREE_APP_ID,
 
-"x-client-secret":process.env.CASHFREE_SECRET_KEY,
+"x-client-secret":
+process.env.CASHFREE_SECRET_KEY,
 
-"x-api-version":"2025-01-01",
+"x-api-version":
+"2025-01-01",
 
-"Content-Type":"application/json"
+"Content-Type":
+"application/json"
 
 }
 
@@ -577,12 +566,14 @@ headers:{
 
 );
 
+console.log("========== CASHFREE RESPONSE ==========");
+console.log(response.data);
+
 res.json({
 
 success:true,
 
 paymentSessionId:
-
 response.data.payment_session_id,
 
 orderId
@@ -590,6 +581,8 @@ orderId
 });
 
 }catch(err){
+
+console.log("========== PREMIUM ORDER ERROR ==========");
 
 console.log(err.response?.data||err);
 
