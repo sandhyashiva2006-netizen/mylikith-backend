@@ -30,7 +30,6 @@ ORDER BY price
 
 );
 
-await checkPremiumAchievements(user_id);
 
 res.json(result.rows);
 

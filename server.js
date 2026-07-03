@@ -3081,6 +3081,41 @@ app.get("/api/admin/revenue", async (req, res) => {
 
 });
 
+app.get("/api/feed/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM reader_feed
+
+WHERE user_id=$1
+
+ORDER BY id DESC
+
+LIMIT 50
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
 
 app.listen(PORT, () => {
   console.log(

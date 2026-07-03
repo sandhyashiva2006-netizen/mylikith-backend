@@ -220,6 +220,81 @@ content
 
 );
 
+const novel=await db.query(
+
+`
+SELECT
+
+title,
+author_id
+
+FROM novels
+
+WHERE id=$1
+`,
+
+[
+novel_id
+]
+
+);
+
+const followers=await db.query(
+
+`
+SELECT user_id
+
+FROM follows
+
+WHERE author_id=$1
+`,
+
+[
+novel.rows[0].author_id
+]
+
+);
+
+for(const follower of followers.rows){
+
+await db.query(
+
+`
+INSERT INTO reader_feed(
+
+user_id,
+
+novel_id,
+
+chapter_id,
+
+title,
+
+message
+
+)
+
+VALUES($1,$2,$3,$4,$5)
+`,
+
+[
+
+follower.user_id,
+
+novel_id,
+
+result.rows[0].id,
+
+title,
+
+`${novel.rows[0].title} has a new chapter.`
+
+]
+
+);
+
+}
+
 res.json({
 success:true,
 chapter:result.rows[0]
