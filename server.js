@@ -3969,6 +3969,198 @@ claim_streak:0
 
 });
 
+app.post("/api/goals/update",async(req,res)=>{
+
+try{
+
+const{user_id}=req.body;
+
+const goal=await pool.query(
+
+`
+SELECT *
+
+FROM reader_goals
+
+WHERE user_id=$1
+`,
+
+[user_id]
+
+);
+
+if(goal.rows.length===0){
+
+return res.json({
+
+success:true
+
+});
+
+}
+
+await pool.query(
+
+`
+UPDATE reader_goals
+
+SET
+
+progress=progress+1,
+
+updated_at=NOW()
+
+WHERE user_id=$1
+`,
+
+[user_id]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.post("/api/goals",async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+goal_type,
+
+target
+
+}=req.body;
+
+await pool.query(
+
+`
+INSERT INTO reader_goals(
+
+user_id,
+
+goal_type,
+
+target
+
+)
+
+VALUES($1,$2,$3)
+
+ON CONFLICT(user_id)
+
+DO UPDATE SET
+
+goal_type=$2,
+
+target=$3,
+
+progress=0,
+
+updated_at=NOW()
+`,
+
+[
+user_id,
+goal_type,
+target
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/goals/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM reader_goals
+
+WHERE user_id=$1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(
+
+result.rows[0]||
+
+{
+
+goal_type:"Chapters",
+
+target:0,
+
+progress:0
+
+}
+
+);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+goal_type:"Chapters",
+
+target:0,
+
+progress:0
+
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
