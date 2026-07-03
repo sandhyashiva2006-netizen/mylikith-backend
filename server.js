@@ -3477,6 +3477,498 @@ best_streak:0
 
 });
 
+app.post("/api/challenges/update",async(req,res)=>{
+
+try{
+
+const{user_id}=req.body;
+
+const challenges=await pool.query(
+
+`
+SELECT *
+
+FROM reading_challenges
+
+WHERE active=true
+`
+
+);
+
+for(const challenge of challenges.rows){
+
+const existing=await pool.query(
+
+`
+SELECT *
+
+FROM user_challenges
+
+WHERE
+
+user_id=$1
+
+AND
+
+challenge_id=$2
+`,
+
+[
+user_id,
+challenge.id
+]
+
+);
+
+if(existing.rows.length===0){
+
+await pool.query(
+
+`
+INSERT INTO user_challenges(
+
+user_id,
+
+challenge_id,
+
+progress
+
+)
+
+VALUES($1,$2,1)
+`,
+
+[
+user_id,
+challenge.id
+]
+
+);
+
+continue;
+
+}
+
+if(existing.rows[0].completed){
+
+continue;
+
+}
+
+const progress=
+
+existing.rows[0].progress+1;
+
+if(progress>=challenge.target){
+
+await pool.query(
+
+`
+UPDATE user_challenges
+
+SET
+
+progress=$1,
+
+completed=true,
+
+completed_at=NOW()
+
+WHERE id=$2
+`,
+
+[
+progress,
+existing.rows[0].id
+]
+
+);
+
+await pool.query(
+
+`
+UPDATE wallets
+
+SET
+
+coins=coins+$1,
+
+earned_coins=earned_coins+$1
+
+WHERE user_id=$2
+`,
+
+[
+challenge.reward_coins,
+user_id
+]
+
+);
+
+}else{
+
+await pool.query(
+
+`
+UPDATE user_challenges
+
+SET progress=$1
+
+WHERE id=$2
+`,
+
+[
+progress,
+existing.rows[0].id
+]
+
+);
+
+}
+
+}
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/challenges/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+c.*,
+
+u.progress,
+
+u.completed
+
+FROM reading_challenges c
+
+LEFT JOIN user_challenges u
+
+ON
+
+c.id=u.challenge_id
+
+AND
+
+u.user_id=$1
+
+WHERE c.active=true
+
+ORDER BY c.target
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+app.post("/api/daily-reward",async(req,res)=>{
+
+try{
+
+const{user_id}=req.body;
+
+const today=new Date().toISOString().split("T")[0];
+
+const existing=await pool.query(
+
+`
+SELECT *
+
+FROM daily_rewards
+
+WHERE user_id=$1
+`,
+
+[user_id]
+
+);
+
+if(existing.rows.length===0){
+
+await pool.query(
+
+`
+INSERT INTO daily_rewards
+
+(user_id,last_claim,claim_streak)
+
+VALUES($1,$2,1)
+`,
+
+[
+user_id,
+today
+]
+
+);
+
+await pool.query(
+
+`
+UPDATE wallets
+
+SET
+
+coins=coins+10,
+
+earned_coins=earned_coins+10
+
+WHERE user_id=$1
+`,
+
+[user_id]
+
+);
+
+return res.json({
+
+success:true,
+
+coins:10,
+
+streak:1
+
+});
+
+}
+
+const reward=existing.rows[0];
+
+const last=new Date(reward.last_claim);
+
+const now=new Date(today);
+
+const diff=Math.floor(
+
+(now-last)/(1000*60*60*24)
+
+);
+
+if(diff===0){
+
+return res.json({
+
+success:false,
+
+message:"Already claimed today."
+
+});
+
+}
+
+let streak=reward.claim_streak;
+
+if(diff===1){
+
+streak++;
+
+}else{
+
+streak=1;
+
+}
+
+let coins=10;
+
+if(streak===7) coins=50;
+
+if(streak===30) coins=250;
+
+await pool.query(
+
+`
+UPDATE daily_rewards
+
+SET
+
+last_claim=$1,
+
+claim_streak=$2
+
+WHERE user_id=$3
+`,
+
+[
+today,
+streak,
+user_id
+]
+
+);
+
+await pool.query(
+
+`
+UPDATE wallets
+
+SET
+
+coins=coins+$1,
+
+earned_coins=earned_coins+$1
+
+WHERE user_id=$2
+`,
+
+[
+coins,
+user_id
+]
+
+);
+
+await pool.query(
+
+`
+INSERT INTO wallet_transactions(
+
+wallet_id,
+
+user_id,
+
+type,
+
+coins,
+
+amount,
+
+description
+
+)
+
+SELECT
+
+id,
+
+user_id,
+
+'Credit',
+
+$1,
+
+0,
+
+'Daily Reward'
+
+FROM wallets
+
+WHERE user_id=$2
+`,
+
+[
+coins,
+user_id
+]
+
+);
+
+res.json({
+
+success:true,
+
+coins,
+
+streak
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/daily-reward/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM daily_rewards
+
+WHERE user_id=$1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(
+
+result.rows[0]||
+
+{
+
+claim_streak:0
+
+}
+
+);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+claim_streak:0
+
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
