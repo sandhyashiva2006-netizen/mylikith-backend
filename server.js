@@ -839,15 +839,34 @@ app.get("/api/profile/continue/:userId", async (req, res) => {
 
         const result = await pool.query(`
             SELECT
-                rp.chapter_id,
-                c.title AS chapter_title,
-                n.title AS novel_title
-            FROM reading_progress rp
-            JOIN chapters c ON rp.chapter_id = c.id
-            JOIN novels n ON c.novel_id = n.id
-            WHERE rp.user_id = $1
-            ORDER BY rp.updated_at DESC
-            LIMIT 1
+
+rp.chapter_id,
+
+rp.progress_percent,
+
+rp.updated_at,
+
+c.chapter_no,
+
+c.title AS chapter_title,
+
+n.id AS novel_id,
+
+n.title AS novel_title,
+
+n.cover_url
+
+FROM reading_progress rp
+
+JOIN chapters c
+ON rp.chapter_id=c.id
+
+JOIN novels n
+ON c.novel_id=n.id
+
+WHERE rp.user_id=$1
+
+LIMIT 1
         `, [req.params.userId]);
 
         res.json(result.rows[0] || null);
@@ -4054,6 +4073,238 @@ method:"POST"
 }catch(e){}
 
 },3600000);
+
+app.get("/api/recommendations/:userId",async(req,res)=>{
+
+try{
+
+const userId=req.params.userId;
+
+const result=await pool.query(
+
+`
+SELECT
+
+n.*,
+
+COUNT(l.id) AS score
+
+FROM novels n
+
+LEFT JOIN library l
+ON n.category IN(
+
+SELECT DISTINCT n2.category
+
+FROM library lb
+
+JOIN novels n2
+ON lb.novel_id=n2.id
+
+WHERE lb.user_id=$1
+
+)
+
+WHERE n.id NOT IN(
+
+SELECT novel_id
+
+FROM library
+
+WHERE user_id=$1
+
+)
+
+GROUP BY n.id
+
+ORDER BY score DESC,n.views DESC,n.rating DESC
+
+LIMIT 12
+`,
+
+[userId]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+app.post("/api/search/history",async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+keyword
+
+}=req.body;
+
+await pool.query(
+
+`
+DELETE FROM recent_searches
+
+WHERE
+
+user_id=$1
+
+AND keyword=$2
+`,
+
+[
+user_id,
+keyword
+]
+
+);
+
+await pool.query(
+
+`
+INSERT INTO recent_searches(
+
+user_id,
+
+keyword
+
+)
+
+VALUES($1,$2)
+`,
+
+[
+user_id,
+keyword
+]
+
+);
+
+await pool.query(
+
+`
+DELETE FROM recent_searches
+
+WHERE id IN(
+
+SELECT id
+
+FROM recent_searches
+
+WHERE user_id=$1
+
+ORDER BY searched_at DESC
+
+OFFSET 10
+
+)
+`,
+
+[user_id]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/search/history/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM recent_searches
+
+WHERE user_id=$1
+
+ORDER BY searched_at DESC
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+app.delete("/api/search/history/:userId",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+DELETE FROM recent_searches
+
+WHERE user_id=$1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
 
 app.listen(PORT, () => {
   console.log(

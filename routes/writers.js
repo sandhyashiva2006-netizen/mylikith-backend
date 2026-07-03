@@ -711,10 +711,15 @@ async (req,res)=>{
 
 try{
 
-const {
+const{
+
 user_id,
-chapter_id
-} = req.body;
+
+chapter_id,
+
+progress
+
+}=req.body;
 
 await db.query(
 
@@ -733,16 +738,24 @@ await db.query(
 INSERT INTO reading_progress
 (
 user_id,
-chapter_id
+
+chapter_id,
+
+progress_percent,
+
+updated_at
+
 )
 
 VALUES
-($1,$2)
+
+($1,$2,$3,NOW())
 `,
 
 [
 user_id,
-chapter_id
+chapter_id,
+progress
 ]
 
 );
