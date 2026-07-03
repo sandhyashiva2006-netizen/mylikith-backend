@@ -230,6 +230,33 @@ lockResult.rows.length===0 ||
         const lock =
             lockResult.rows[0];
 
+const premium=await client.query(
+
+`
+SELECT id
+
+FROM user_premium
+
+WHERE
+
+user_id=$1
+
+AND status='Active'
+
+AND expiry_date>NOW()
+
+LIMIT 1
+`,
+
+[
+user_id
+]
+
+);
+
+const isPremium=
+premium.rows.length>0;
+
         const alreadyUnlocked =
             await client.query(
 
@@ -300,19 +327,27 @@ lockResult.rows.length===0 ||
 
         }
 
-        if(wallet.rows[0].coins < lock.coins_required){
+ if(
 
-            await client.query("ROLLBACK");
+!isPremium &&
 
-            return res.json({
+wallet.rows[0].coins < lock.coins_required
 
-                success:false,
+){
 
-                message:"Not enough coins."
+    await client.query("ROLLBACK");
 
-            });
+    return res.json({
 
-        }
+        success:false,
+
+        message:"Not enough coins."
+
+    });
+
+}
+
+if(!isPremium){
 
         await client.query(
 
@@ -337,6 +372,7 @@ lockResult.rows.length===0 ||
             ]
 
         );
+}
 
         await client.query(
 
@@ -382,6 +418,16 @@ lockResult.rows.length===0 ||
             ]
 
         );
+
+if(isPremium){
+
+console.log(
+
+`Premium access granted for User ${user_id} -> Chapter ${chapter_id}`
+
+);
+
+}
 
         const novel =
             await client.query(
@@ -493,6 +539,8 @@ VALUES
 
 );
 
+if(!isPremium){
+
         await client.query(
 
             `
@@ -545,6 +593,8 @@ VALUES
             ]
 
         );
+
+}
 
         await client.query("COMMIT");
 

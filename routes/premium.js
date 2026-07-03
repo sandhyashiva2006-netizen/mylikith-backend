@@ -43,6 +43,81 @@ res.status(500).json([]);
 });
 
 /* ===========================
+PREMIUM ACCESS CHECK
+=========================== */
+
+router.get(
+"/access/:userId",
+async(req,res)=>{
+
+try{
+
+const result=await db.query(
+
+`
+SELECT
+
+up.id,
+up.expiry_date,
+pp.name
+
+FROM user_premium up
+
+JOIN premium_plans pp
+ON up.plan_id=pp.id
+
+WHERE
+
+up.user_id=$1
+
+AND up.status='Active'
+
+AND up.expiry_date>NOW()
+
+LIMIT 1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+if(result.rows.length===0){
+
+return res.json({
+
+premium:false
+
+});
+
+}
+
+res.json({
+
+premium:true,
+
+plan:result.rows[0].name,
+
+expiry:result.rows[0].expiry_date
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+premium:false
+
+});
+
+}
+
+});
+
+/* ===========================
 PREMIUM STATUS
 =========================== */
 
@@ -169,6 +244,36 @@ plan_id,
 payment_order_id
 
 }=req.body;
+
+const activePremium=await db.query(
+
+`
+SELECT id
+FROM user_premium
+WHERE
+user_id=$1
+AND status='Active'
+AND expiry_date>NOW()
+LIMIT 1
+`,
+
+[
+user_id
+]
+
+);
+
+if(activePremium.rows.length){
+
+return res.json({
+
+success:false,
+
+message:"Premium membership already active."
+
+});
+
+}
 
 const plan=
 
@@ -304,6 +409,34 @@ plan_id,
 order_id
 
 }=req.body;
+
+const activePremium=await db.query(
+
+`
+SELECT id
+FROM user_premium
+WHERE
+user_id=$1
+AND status='Active'
+AND expiry_date>NOW()
+LIMIT 1
+`,
+
+[
+user_id
+]
+
+);
+
+if(activePremium.rows.length){
+
+return res.json({
+
+success:true
+
+});
+
+}
 
 const plan=await db.query(
 `
@@ -512,6 +645,34 @@ user_id
 
 }=req.body;
 
+const activePremium=await db.query(
+
+`
+SELECT id
+FROM user_premium
+WHERE
+user_id=$1
+AND status='Active'
+AND expiry_date>NOW()
+LIMIT 1
+`,
+
+[
+user_id
+]
+
+);
+
+if(activePremium.rows.length){
+
+return res.json({
+
+success:true
+
+});
+
+}
+
 const response=
 await axios.get(
 
@@ -658,6 +819,52 @@ plan.rows[0].coins,
 user_id
 
 ]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+/* ===========================
+AUTO EXPIRE
+=========================== */
+
+router.post(
+"/expire",
+async(req,res)=>{
+
+try{
+
+await db.query(
+
+`
+UPDATE user_premium
+
+SET status='Expired'
+
+WHERE
+
+status='Active'
+
+AND expiry_date<NOW()
+`
 
 );
 
