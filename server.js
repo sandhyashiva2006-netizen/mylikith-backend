@@ -3477,226 +3477,6 @@ best_streak:0
 
 });
 
-app.post("/api/challenges/update",async(req,res)=>{
-
-try{
-
-const{user_id}=req.body;
-
-const challenges=await pool.query(
-
-`
-SELECT *
-
-FROM reading_challenges
-
-WHERE active=true
-`
-
-);
-
-for(const challenge of challenges.rows){
-
-const existing=await pool.query(
-
-`
-SELECT *
-
-FROM user_challenges
-
-WHERE
-
-user_id=$1
-
-AND
-
-challenge_id=$2
-`,
-
-[
-user_id,
-challenge.id
-]
-
-);
-
-if(existing.rows.length===0){
-
-await pool.query(
-
-`
-INSERT INTO user_challenges(
-
-user_id,
-
-challenge_id,
-
-progress
-
-)
-
-VALUES($1,$2,1)
-`,
-
-[
-user_id,
-challenge.id
-]
-
-);
-
-continue;
-
-}
-
-if(existing.rows[0].completed){
-
-continue;
-
-}
-
-const progress=
-
-existing.rows[0].progress+1;
-
-if(progress>=challenge.target){
-
-await pool.query(
-
-`
-UPDATE user_challenges
-
-SET
-
-progress=$1,
-
-completed=true,
-
-completed_at=NOW()
-
-WHERE id=$2
-`,
-
-[
-progress,
-existing.rows[0].id
-]
-
-);
-
-await pool.query(
-
-`
-UPDATE wallets
-
-SET
-
-coins=coins+$1,
-
-earned_coins=earned_coins+$1
-
-WHERE user_id=$2
-`,
-
-[
-challenge.reward_coins,
-user_id
-]
-
-);
-
-}else{
-
-await pool.query(
-
-`
-UPDATE user_challenges
-
-SET progress=$1
-
-WHERE id=$2
-`,
-
-[
-progress,
-existing.rows[0].id
-]
-
-);
-
-}
-
-}
-
-res.json({
-
-success:true
-
-});
-
-}catch(err){
-
-console.log(err);
-
-res.status(500).json({
-
-success:false
-
-});
-
-}
-
-});
-
-app.get("/api/challenges/:userId",async(req,res)=>{
-
-try{
-
-const result=await pool.query(
-
-`
-SELECT
-
-c.*,
-
-u.progress,
-
-u.completed
-
-FROM reading_challenges c
-
-LEFT JOIN user_challenges u
-
-ON
-
-c.id=u.challenge_id
-
-AND
-
-u.user_id=$1
-
-WHERE c.active=true
-
-ORDER BY c.target
-`,
-
-[
-req.params.userId
-]
-
-);
-
-res.json(result.rows);
-
-}catch(err){
-
-console.log(err);
-
-res.status(500).json([]);
-
-}
-
-});
 
 app.post("/api/daily-reward",async(req,res)=>{
 
@@ -3746,9 +3526,9 @@ UPDATE wallets
 
 SET
 
-coins=coins+10,
+coins=coins+2,
 
-earned_coins=earned_coins+10
+earned_coins=earned_coins+2
 
 WHERE user_id=$1
 `,
@@ -3761,7 +3541,7 @@ return res.json({
 
 success:true,
 
-coins:10,
+coins:2,
 
 streak:1
 
@@ -3805,11 +3585,11 @@ streak=1;
 
 }
 
-let coins=10;
+let coins=2;
 
-if(streak===7) coins=50;
+if(streak===7) coins=10;
 
-if(streak===30) coins=250;
+if(streak===30) coins=50;
 
 await pool.query(
 
@@ -3857,20 +3637,15 @@ user_id
 await pool.query(
 
 `
-INSERT INTO wallet_transactions(
-
+INSERT INTO wallet_transactions
+(
 wallet_id,
-
 user_id,
-
 type,
-
 coins,
-
 amount,
-
-description
-
+description,
+expiry_date
 )
 
 SELECT
@@ -3885,7 +3660,9 @@ $1,
 
 0,
 
-'Daily Reward'
+'Daily Reward',
+
+NOW()+INTERVAL '30 days'
 
 FROM wallets
 
@@ -4160,6 +3937,123 @@ progress:0
 }
 
 });
+
+app.post("/api/rewards/expire",async(req,res)=>{
+
+try{
+
+const expired=await pool.query(
+
+`
+SELECT
+
+wallet_id,
+
+user_id,
+
+SUM(coins) coins
+
+FROM wallet_transactions
+
+WHERE
+
+description='Daily Reward'
+
+AND expired=false
+
+AND expiry_date<=NOW()
+
+GROUP BY wallet_id,user_id
+`
+
+);
+
+for(const row of expired.rows){
+
+await pool.query(
+
+`
+UPDATE wallets
+
+SET
+
+coins=GREATEST(coins-$1,0)
+
+WHERE user_id=$2
+`,
+
+[
+row.coins,
+row.user_id
+]
+
+);
+
+await pool.query(
+
+`
+UPDATE wallet_transactions
+
+SET expired=true
+
+WHERE
+
+user_id=$1
+
+AND description='Daily Reward'
+
+AND expired=false
+
+AND expiry_date<=NOW()
+`,
+
+[
+row.user_id
+]
+
+);
+
+}
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+setInterval(async()=>{
+
+try{
+
+await fetch(
+
+"http://localhost:5000/api/rewards/expire",
+
+{
+
+method:"POST"
+
+}
+
+);
+
+}catch(e){}
+
+},3600000);
 
 app.listen(PORT, () => {
   console.log(
