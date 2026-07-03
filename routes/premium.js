@@ -30,6 +30,8 @@ ORDER BY price
 
 );
 
+await checkPremiumAchievements(user_id);
+
 res.json(result.rows);
 
 }catch(err){
@@ -1061,6 +1063,175 @@ res.status(500).json({
 premium:false
 
 });
+
+}
+
+});
+
+async function checkPremiumAchievements(user_id){
+
+const stats=await db.query(
+
+`
+SELECT
+
+COUNT(DISTINCT chapter_id) chapters,
+
+COALESCE(SUM(words_read),0) words,
+
+COALESCE(SUM(reading_seconds),0) seconds
+
+FROM premium_reading_stats
+
+WHERE user_id=$1
+`,
+
+[user_id]
+
+);
+
+const s=stats.rows[0];
+
+if(Number(s.chapters)>=10){
+
+await db.query(
+
+`
+INSERT INTO premium_achievements
+(user_id,title,description,icon)
+
+SELECT
+$1,
+'Book Explorer',
+'Completed 10 chapters.',
+'📚'
+
+WHERE NOT EXISTS(
+
+SELECT 1
+
+FROM premium_achievements
+
+WHERE
+
+user_id=$1
+
+AND title='Book Explorer'
+
+)
+`,
+
+[user_id]
+
+);
+
+}
+
+if(Number(s.words)>=50000){
+
+await db.query(
+
+`
+INSERT INTO premium_achievements
+(user_id,title,description,icon)
+
+SELECT
+$1,
+'Word Master',
+'Read 50,000 words.',
+'📝'
+
+WHERE NOT EXISTS(
+
+SELECT 1
+
+FROM premium_achievements
+
+WHERE
+
+user_id=$1
+
+AND title='Word Master'
+
+)
+`,
+
+[user_id]
+
+);
+
+}
+
+if(Number(s.seconds)>=36000){
+
+await db.query(
+
+`
+INSERT INTO premium_achievements
+(user_id,title,description,icon)
+
+SELECT
+$1,
+'Reading Legend',
+'Read for 10 hours.',
+'🏆'
+
+WHERE NOT EXISTS(
+
+SELECT 1
+
+FROM premium_achievements
+
+WHERE
+
+user_id=$1
+
+AND title='Reading Legend'
+
+)
+`,
+
+[user_id]
+
+);
+
+}
+
+}
+
+router.get(
+
+"/achievements/:userId",
+
+async(req,res)=>{
+
+try{
+
+const result=await db.query(
+
+`
+SELECT *
+
+FROM premium_achievements
+
+WHERE user_id=$1
+
+ORDER BY created_at DESC
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
 
 }
 
