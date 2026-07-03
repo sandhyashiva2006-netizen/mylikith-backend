@@ -3283,6 +3283,200 @@ res.status(500).json([]);
 
 });
 
+app.post("/api/streak/update",async(req,res)=>{
+
+try{
+
+const{user_id}=req.body;
+
+const existing=await pool.query(
+
+`
+SELECT *
+
+FROM reader_streaks
+
+WHERE user_id=$1
+`,
+
+[user_id]
+
+);
+
+const today=new Date();
+
+const todayString=today.toISOString().split("T")[0];
+
+if(existing.rows.length===0){
+
+await pool.query(
+
+`
+INSERT INTO reader_streaks(
+
+user_id,
+
+current_streak,
+
+best_streak,
+
+last_read_date
+
+)
+
+VALUES($1,1,1,$2)
+`,
+
+[
+user_id,
+todayString
+]
+
+);
+
+return res.json({
+
+success:true
+
+});
+
+}
+
+const streak=existing.rows[0];
+
+const last=new Date(streak.last_read_date);
+
+const diff=Math.floor(
+
+(today-last)/(1000*60*60*24)
+
+);
+
+let current=streak.current_streak;
+
+if(diff===1){
+
+current++;
+
+}else if(diff>1){
+
+current=1;
+
+}else{
+
+return res.json({
+
+success:true
+
+});
+
+}
+
+const best=Math.max(
+
+current,
+
+streak.best_streak
+
+);
+
+await pool.query(
+
+`
+UPDATE reader_streaks
+
+SET
+
+current_streak=$1,
+
+best_streak=$2,
+
+last_read_date=$3,
+
+updated_at=NOW()
+
+WHERE user_id=$4
+`,
+
+[
+current,
+best,
+todayString,
+user_id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/streak/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM reader_streaks
+
+WHERE user_id=$1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(
+
+result.rows[0]||
+
+{
+
+current_streak:0,
+
+best_streak:0
+
+}
+
+);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+current_streak:0,
+
+best_streak:0
+
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
