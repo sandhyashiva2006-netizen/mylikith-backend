@@ -295,6 +295,42 @@ title,
 
 }
 
+await db.query(
+
+`
+INSERT INTO reader_notifications(
+
+user_id,
+
+title,
+
+message,
+
+type,
+
+reference_id
+
+)
+
+VALUES($1,$2,$3,$4,$5)
+`,
+
+[
+
+follower.user_id,
+
+"New Chapter",
+
+`${novel.rows[0].title} has published a new chapter.`,
+
+"chapter",
+
+result.rows[0].id
+
+]
+
+);
+
 res.json({
 success:true,
 chapter:result.rows[0]
@@ -571,6 +607,33 @@ RETURNING *
 
 [
 user_id,
+chapter_id
+]
+
+);
+
+await db.query(
+
+`
+INSERT INTO reader_activity(
+
+user_id,
+
+activity_type,
+
+title,
+
+reference_id
+
+)
+
+VALUES($1,$2,$3,$4)
+`,
+
+[
+user_id,
+"bookmark",
+"Bookmarked a chapter",
 chapter_id
 ]
 

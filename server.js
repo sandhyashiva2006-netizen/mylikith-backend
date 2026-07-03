@@ -438,6 +438,33 @@ novel_id
 
 );
 
+await pool.query(
+
+`
+INSERT INTO reader_activity(
+
+user_id,
+
+activity_type,
+
+title,
+
+reference_id
+
+)
+
+VALUES($1,$2,$3,$4)
+`,
+
+[
+user_id,
+"review",
+"Reviewed a novel",
+novel_id
+]
+
+);
+
 res.json({
 success:true
 });
@@ -1176,6 +1203,33 @@ DO NOTHING
 
 [
 user_id,
+novel_id
+]
+
+);
+
+await pool.query(
+
+`
+INSERT INTO reader_activity(
+
+user_id,
+
+activity_type,
+
+title,
+
+reference_id
+
+)
+
+VALUES($1,$2,$3,$4)
+`,
+
+[
+user_id,
+"library",
+"Added a novel to Library",
 novel_id
 ]
 
@@ -3091,6 +3145,118 @@ const result=await pool.query(
 SELECT *
 
 FROM reader_feed
+
+WHERE user_id=$1
+
+ORDER BY id DESC
+
+LIMIT 50
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+app.get("/api/notifications/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM reader_notifications
+
+WHERE user_id=$1
+
+ORDER BY id DESC
+
+LIMIT 50
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+app.put("/api/notifications/:id/read",async(req,res)=>{
+
+try{
+
+await pool.query(
+
+`
+UPDATE reader_notifications
+
+SET is_read=TRUE
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.get("/api/activity/:userId",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM reader_activity
 
 WHERE user_id=$1
 
