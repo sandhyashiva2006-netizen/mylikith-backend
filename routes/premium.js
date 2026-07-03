@@ -902,7 +902,11 @@ user_id,
 
 chapter_id,
 
-reading_seconds
+reading_seconds,
+
+words_read,
+
+completed
 
 }=req.body;
 
@@ -913,17 +917,20 @@ INSERT INTO premium_reading_stats
 (
 user_id,
 chapter_id,
-reading_seconds
+reading_seconds,
+words_read,
+completed
 )
-
 VALUES
-($1,$2,$3)
+($1,$2,$3,$4,$5)
 `,
 
 [
 user_id,
 chapter_id,
-reading_seconds
+reading_seconds,
+words_read,
+completed
 ]
 
 );
@@ -995,11 +1002,25 @@ const stats=await db.query(
 `
 SELECT
 
-COALESCE(SUM(reading_seconds),0) total_seconds,
+COALESCE(
+SUM(reading_seconds),0
+) total_seconds,
 
-COUNT(DISTINCT chapter_id) total_chapters,
+COALESCE(
+SUM(words_read),0
+) total_words,
 
-COUNT(DISTINCT DATE(created_at)) total_days
+COUNT(
+DISTINCT chapter_id
+) total_chapters,
+
+COUNT(
+DISTINCT DATE(created_at)
+) total_days,
+
+COUNT(*) FILTER(
+WHERE completed=true
+) completed_chapters
 
 FROM premium_reading_stats
 
@@ -1015,15 +1036,18 @@ res.json({
 premium:true,
 
 totalHours:
-
 (stats.rows[0].total_seconds/3600).toFixed(1),
 
-totalChapters:
+totalWords:
+stats.rows[0].total_words,
 
+totalChapters:
 stats.rows[0].total_chapters,
 
-totalDays:
+completed:
+stats.rows[0].completed_chapters,
 
+totalDays:
 stats.rows[0].total_days
 
 });
