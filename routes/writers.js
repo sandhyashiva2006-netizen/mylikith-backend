@@ -409,9 +409,10 @@ const {
 title,
 content,
 is_premium,
-coins_required
+coins_required,
+early_access
 
-} = req.body;
+}=req.body;
 
 const result =
 await db.query(
@@ -424,21 +425,21 @@ SET
 title=$1,
 content=$2,
 is_premium=$3,
-coins_required=$4
+coins_required=$4,
+early_access=$5
 
-WHERE id=$5
+WHERE id=$6
 
 RETURNING *
 `,
 
 [
-
 title,
 content,
 is_premium,
 coins_required,
+early_access,
 req.params.id
-
 ]
 
 );
