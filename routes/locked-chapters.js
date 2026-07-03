@@ -8,6 +8,33 @@ router.get("/:chapterId/:userId", async (req, res) => {
 
         const { chapterId, userId } = req.params;
 
+const premium = await db.query(
+
+`
+SELECT id
+
+FROM user_premium
+
+WHERE
+
+user_id=$1
+
+AND status='Active'
+
+AND expiry_date>NOW()
+
+LIMIT 1
+`,
+
+[
+userId
+]
+
+);
+
+const isPremium =
+premium.rows.length > 0;
+
         const locked = await db.query(
 
             `
@@ -67,6 +94,18 @@ locked.rows.length === 0 ||
             });
 
         }
+
+if(isPremium){
+
+return res.json({
+
+locked:false,
+
+premium:true
+
+});
+
+}
 
         res.json({
 
