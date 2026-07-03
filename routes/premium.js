@@ -948,4 +948,98 @@ success:false
 
 });
 
+router.get(
+
+"/reading-stats/:userId",
+
+async(req,res)=>{
+
+try{
+
+const userId=req.params.userId;
+
+const premium=await db.query(
+
+`
+SELECT id
+
+FROM user_premium
+
+WHERE
+
+user_id=$1
+
+AND status='Active'
+
+AND expiry_date>NOW()
+
+LIMIT 1
+`,
+
+[userId]
+
+);
+
+if(!premium.rows.length){
+
+return res.json({
+
+premium:false
+
+});
+
+}
+
+const stats=await db.query(
+
+`
+SELECT
+
+COALESCE(SUM(reading_seconds),0) total_seconds,
+
+COUNT(DISTINCT chapter_id) total_chapters,
+
+COUNT(DISTINCT DATE(created_at)) total_days
+
+FROM premium_reading_stats
+
+WHERE user_id=$1
+`,
+
+[userId]
+
+);
+
+res.json({
+
+premium:true,
+
+totalHours:
+
+(stats.rows[0].total_seconds/3600).toFixed(1),
+
+totalChapters:
+
+stats.rows[0].total_chapters,
+
+totalDays:
+
+stats.rows[0].total_days
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+premium:false
+
+});
+
+}
+
+});
+
 module.exports=router;
