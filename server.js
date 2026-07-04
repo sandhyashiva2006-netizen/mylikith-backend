@@ -4511,6 +4511,124 @@ res.status(500).json([]);
 
 });
 
+app.get("/api/authors/:id",async(req,res)=>{
+
+try{
+
+const author=await pool.query(
+
+`
+SELECT
+
+id,
+
+name,
+
+bio,
+
+profile_image
+
+FROM users
+
+WHERE
+
+id=$1
+
+AND role='writer'
+`,
+
+[
+req.params.id
+]
+
+);
+
+if(!author.rows.length){
+
+return res.status(404).json({
+
+success:false
+
+});
+
+}
+
+const stats=await pool.query(
+
+`
+SELECT
+
+COUNT(*) novels,
+
+COALESCE(SUM(views),0) views,
+
+ROUND(AVG(rating),1) rating
+
+FROM novels
+
+WHERE author_id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+const novels=await pool.query(
+
+`
+SELECT
+
+id,
+
+title,
+
+cover_url,
+
+category,
+
+language,
+
+views
+
+FROM novels
+
+WHERE author_id=$1
+
+ORDER BY views DESC
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+author:author.rows[0],
+
+stats:stats.rows[0],
+
+novels:novels.rows
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
