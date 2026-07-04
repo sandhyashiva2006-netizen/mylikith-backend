@@ -497,6 +497,47 @@ await db.query(
 );
 
 await db.query(
+`
+DELETE FROM chapter_likes
+WHERE chapter_id=$1
+`,
+[
+chapterId
+]
+);
+
+await db.query(
+`
+DELETE FROM reader_feed
+WHERE chapter_id=$1
+`,
+[
+chapterId
+]
+);
+
+await db.query(
+`
+DELETE FROM reader_notifications
+WHERE reference_id=$1
+AND type='chapter'
+`,
+[
+chapterId
+]
+);
+
+await db.query(
+`
+DELETE FROM writer_earnings
+WHERE chapter_id=$1
+`,
+[
+chapterId
+]
+);
+
+await db.query(
 `DELETE FROM chapters WHERE id=$1`,
 [chapterId]
 );
