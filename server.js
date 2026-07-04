@@ -3,9 +3,23 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 
+const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
+
 const pool = require("./db");
 
 const app = express();
+
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: "Too many requests. Please try again later."
+    }
+});
 
 const multer =
 require("multer");
@@ -69,7 +83,15 @@ const premiumRoutes=require("./routes/premium");
 
 
 
+app.use(helmet({
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: false
+}));
+
 app.use(cors());
+
+app.use("/api", apiLimiter);
+
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
