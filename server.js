@@ -4251,7 +4251,7 @@ method:"POST"
 
 },3600000);
 
-app.get("/api/recommendations/:userId",async(req,res)=>{
+app.get("/api/recommendations/:userId", async (req, res) => {
 
 try{
 
@@ -4282,7 +4282,17 @@ WHERE lb.user_id=$1
 
 )
 
-WHERE n.id NOT IN(
+WHERE
+
+LOWER(n.publish_status)='published'
+
+AND
+
+LOWER(n.approval_status)='approved'
+
+AND
+
+n.id NOT IN(
 
 SELECT novel_id
 
@@ -4294,12 +4304,22 @@ WHERE user_id=$1
 
 GROUP BY n.id
 
-ORDER BY score DESC,n.views DESC,n.rating DESC
+ORDER BY
+
+score DESC,
+
+n.views DESC,
+
+n.rating DESC,
+
+n.created_at DESC
 
 LIMIT 12
 `,
 
-[userId]
+[
+userId
+]
 
 );
 
