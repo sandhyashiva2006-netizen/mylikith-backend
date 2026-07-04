@@ -4,6 +4,27 @@ const router = express.Router();
 
 const db = require("../db");
 
+const auth = require("../middleware/auth");
+
+router.use(auth);
+
+router.use((req,res,next)=>{
+
+    if(req.user.role!=="admin"){
+
+        return res.status(403).json({
+
+            success:false,
+            message:"Admin access required."
+
+        });
+
+    }
+
+    next();
+
+});
+
 /* ==========================================
    GET ALL WITHDRAWALS
 ========================================== */
@@ -209,5 +230,125 @@ message:"Unable to reject."
 }
 
 });
+
+/* ==========================================
+   GET ALL SITE PAGES
+========================================== */
+
+router.get("/pages", async (req, res) => {
+
+    try {
+
+        const result = await db.query(`
+            SELECT *
+            FROM site_pages
+            ORDER BY title
+        `);
+
+        res.json(result.rows);
+
+    } catch (err) {
+
+        console.log(err);
+
+        res.status(500).json([]);
+
+    }
+
+});
+
+/* ==========================================
+   GET SITE PAGE
+========================================== */
+
+router.get("/pages/:slug", async (req, res) => {
+
+    try {
+
+        const result = await db.query(
+
+            `
+            SELECT *
+            FROM site_pages
+            WHERE slug=$1
+            `,
+
+            [req.params.slug]
+
+        );
+
+        if (!result.rows.length) {
+
+            return res.status(404).json({
+                success: false
+            });
+
+        }
+
+        res.json(result.rows[0]);
+
+    } catch (err) {
+
+        console.log(err);
+
+        res.status(500).json({
+            success: false
+        });
+
+    }
+
+});
+
+/* ==========================================
+   UPDATE SITE PAGE
+========================================== */
+
+router.put("/pages/:slug", async (req, res) => {
+
+    try {
+
+        const {
+            title,
+            content
+        } = req.body;
+
+        await db.query(
+
+            `
+            UPDATE site_pages
+
+            SET
+
+            title=$1,
+            content=$2,
+            updated_at=NOW()
+
+            WHERE slug=$3
+            `,
+
+            [
+                title,
+                content,
+                req.params.slug
+            ]
+
+        );
+
+        res.json({
+            success: true
+        });
+
+    } catch (err) {
+
+        console.log(err);
+
+        res.status(500).json({
+            success: false
+        });
+
+    }
+
+});
+
 
 module.exports = router;

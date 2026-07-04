@@ -128,7 +128,8 @@ const token =
 jwt.sign(
 
 {
-id:user.rows[0].id
+id:user.rows[0].id,
+role:user.rows[0].role
 },
 
 process.env.JWT_SECRET,
