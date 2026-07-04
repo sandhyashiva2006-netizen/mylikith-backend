@@ -439,9 +439,6 @@ WHERE
 
 c.novel_id=$1
 
-AND
-
-c.is_draft=false
 ORDER BY c.chapter_no;
 `,
 
