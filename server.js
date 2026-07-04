@@ -148,8 +148,24 @@ app.get("/api/novels", async (req, res) => {
   try {
 
     const result = await pool.query(
-      "SELECT * FROM novels ORDER BY id DESC"
-    );
+
+`
+SELECT *
+
+FROM novels
+
+WHERE
+
+LOWER(status)='published'
+
+AND
+
+LOWER(approval_status)='approved'
+
+ORDER BY id DESC
+`
+
+);
 
     res.json(result.rows);
 
@@ -165,24 +181,63 @@ app.get("/api/novels", async (req, res) => {
 });
 
 app.get("/api/novels/:id", async (req, res) => {
-  try {
 
-    const result = await pool.query(
-      "SELECT * FROM novels WHERE id=$1",
-      [req.params.id]
-    );
+try{
 
-    res.json(result.rows[0]);
+const result=await pool.query(
 
-  } catch (err) {
+`
+SELECT *
 
-    console.error(err);
+FROM novels
 
-    res.status(500).json({
-      error: "Failed to load novel"
-    });
+WHERE
 
-  }
+id=$1
+
+AND
+
+LOWER(status)='published'
+
+AND
+
+LOWER(approval_status)='approved'
+`,
+
+[
+req.params.id
+]
+
+);
+
+if(result.rows.length===0){
+
+return res.status(404).json({
+
+success:false,
+
+message:"Novel not found."
+
+});
+
+}
+
+res.json(result.rows[0]);
+
+}catch(err){
+
+console.error(err);
+
+res.status(500).json({
+
+success:false,
+
+message:"Failed to load novel"
+
+});
+
+}
+
 });
 
 app.get("/api/chapters/:id", async (req, res) => {
@@ -340,9 +395,18 @@ await pool.query(
 
 `
 SELECT *
+
 FROM novels
 
 WHERE
+
+LOWER(status)='published'
+
+AND
+
+LOWER(approval_status)='approved'
+
+AND
 
 LOWER(title)
 LIKE LOWER($1)
@@ -4525,6 +4589,14 @@ FROM novels
 WHERE
 
 id<>$1
+
+AND
+
+LOWER(status)='published'
+
+AND
+
+LOWER(approval_status)='approved'
 
 AND
 
