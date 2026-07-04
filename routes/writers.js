@@ -785,6 +785,8 @@ success:false
 
 }
 
+});
+
 router.post(
 "/bookmark",
 async (req,res)=>{
