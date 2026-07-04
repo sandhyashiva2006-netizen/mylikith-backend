@@ -204,43 +204,17 @@ await db.query(
 
 `
 INSERT INTO chapters(
-
 novel_id,
-
 chapter_no,
-
 title,
-
 content,
-
 is_premium,
-
 coins_required,
-
 early_access,
-
 is_draft
-
 )
-
 VALUES(
-
-$1,
-
-$2,
-
-$3,
-
-$4,
-
-$5,
-
-$6,
-
-$7,
-
-$8
-
+$1,$2,$3,$4,$5,$6,$7,$8
 )
 
 RETURNING *
@@ -254,7 +228,7 @@ content,
 is_premium,
 coins_required,
 early_access,
-is_draft
+true
 ]
 
 );
@@ -612,6 +586,165 @@ success:false
 
 });
 
+router.put(
+"/chapters/:id/publish",
+async(req,res)=>{
+
+try{
+
+const chapterId=req.params.id;
+
+const chapter=await db.query(
+
+`
+SELECT
+
+c.*,
+
+n.title AS novel_title,
+
+n.author_id
+
+FROM chapters c
+
+JOIN novels n
+ON c.novel_id=n.id
+
+WHERE c.id=$1
+`,
+
+[
+chapterId
+]
+
+);
+
+if(!chapter.rows.length){
+
+return res.status(404).json({
+
+success:false
+
+});
+
+}
+
+await db.query(
+
+`
+UPDATE chapters
+
+SET is_draft=false
+
+WHERE id=$1
+`,
+
+[
+chapterId
+]
+
+);
+
+const followers=await db.query(
+
+`
+SELECT user_id
+
+FROM follows
+
+WHERE author_id=$1
+`,
+
+[
+chapter.rows[0].author_id
+]
+
+);
+
+for(const follower of followers.rows){
+
+await db.query(
+
+`
+INSERT INTO reader_feed(
+
+user_id,
+
+novel_id,
+
+chapter_id,
+
+title,
+
+message
+
+)
+
+VALUES($1,$2,$3,$4,$5)
+`,
+
+[
+follower.user_id,
+chapter.rows[0].novel_id,
+chapterId,
+chapter.rows[0].title,
+`${chapter.rows[0].novel_title} has a new chapter.`
+]
+
+);
+
+await db.query(
+
+`
+INSERT INTO reader_notifications(
+
+user_id,
+
+title,
+
+message,
+
+type,
+
+reference_id
+
+)
+
+VALUES($1,$2,$3,$4,$5)
+`,
+
+[
+follower.user_id,
+"New Chapter",
+`${chapter.rows[0].novel_title} has published a new chapter.`,
+"chapter",
+chapterId
+]
+
+);
+
+}
+
+res.json({
+
+success:true
+
+});
+
+}
+catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
 
 router.post(
 "/bookmark",
