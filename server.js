@@ -4605,7 +4605,7 @@ id<>$1
 
 AND
 
-LOWER(status)='published'
+LOWER(publish_status)='published'
 
 AND
 
@@ -4684,6 +4684,14 @@ WHERE
 l1.novel_id=$1
 
 AND l2.novel_id<>$1
+
+AND
+
+LOWER(n.publish_status)='published'
+
+AND
+
+LOWER(n.approval_status)='approved'
 
 GROUP BY
 
@@ -4771,7 +4779,17 @@ ROUND(AVG(rating),1) rating
 
 FROM novels
 
-WHERE author_id=$1
+WHERE
+
+author_id=$1
+
+AND
+
+LOWER(publish_status)='published'
+
+AND
+
+LOWER(approval_status)='approved'
 `,
 
 [
@@ -4786,20 +4804,25 @@ const novels=await pool.query(
 SELECT
 
 id,
-
 title,
-
 cover_url,
-
 category,
-
 language,
-
 views
 
 FROM novels
 
-WHERE author_id=$1
+WHERE
+
+author_id=$1
+
+AND
+
+LOWER(publish_status)='published'
+
+AND
+
+LOWER(approval_status)='approved'
 
 ORDER BY views DESC
 `,
