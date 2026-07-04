@@ -186,27 +186,62 @@ async (req,res)=>{
 
 try{
 
-const {
+const{
+
 novel_id,
 chapter_no,
 title,
-content
-} = req.body;
+content,
+is_premium=false,
+coins_required=0,
+early_access=false,
+is_draft=false
+
+}=req.body;
 
 const result =
 await db.query(
 
 `
-INSERT INTO chapters
-(
+INSERT INTO chapters(
+
 novel_id,
+
 chapter_no,
+
 title,
-content
+
+content,
+
+is_premium,
+
+coins_required,
+
+early_access,
+
+is_draft
+
 )
 
-VALUES
-($1,$2,$3,$4)
+VALUES(
+
+$1,
+
+$2,
+
+$3,
+
+$4,
+
+$5,
+
+$6,
+
+$7,
+
+$8
+
+)
 
 RETURNING *
 `,
@@ -215,7 +250,11 @@ RETURNING *
 novel_id,
 chapter_no,
 title,
-content
+content,
+is_premium,
+coins_required,
+early_access,
+is_draft
 ]
 
 );
@@ -239,13 +278,13 @@ novel_id
 
 );
 
+if(!is_draft){
+
 const followers=await db.query(
 
 `
 SELECT user_id
-
 FROM follows
-
 WHERE author_id=$1
 `,
 
@@ -278,22 +317,14 @@ VALUES($1,$2,$3,$4,$5)
 `,
 
 [
-
 follower.user_id,
-
 novel_id,
-
 result.rows[0].id,
-
 title,
-
 `${novel.rows[0].title} has a new chapter.`
-
 ]
 
 );
-
-}
 
 await db.query(
 
@@ -316,20 +347,18 @@ VALUES($1,$2,$3,$4,$5)
 `,
 
 [
-
 follower.user_id,
-
 "New Chapter",
-
 `${novel.rows[0].title} has published a new chapter.`,
-
 "chapter",
-
 result.rows[0].id
-
 ]
 
 );
+
+}
+
+}
 
 res.json({
 success:true,
@@ -432,7 +461,13 @@ LEFT JOIN (
     GROUP BY chapter_id
 ) l
 ON c.id=l.chapter_id
-WHERE c.novel_id=$1
+WHERE
+
+c.novel_id=$1
+
+AND
+
+c.is_draft=false
 ORDER BY c.chapter_no;
 `,
 
