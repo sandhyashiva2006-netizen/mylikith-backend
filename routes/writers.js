@@ -565,6 +565,81 @@ success:false
 
 });
 
+router.put("/chapters/:id/move", async (req, res) => {
+
+    try {
+
+        const { direction } = req.body;
+
+        const current = await db.query(
+            "SELECT id, novel_id, chapter_no FROM chapters WHERE id=$1",
+            [req.params.id]
+        );
+
+        if (!current.rows.length) {
+
+            return res.status(404).json({
+                success: false
+            });
+
+        }
+
+        const chapter = current.rows[0];
+
+        const swap = await db.query(
+
+            `
+            SELECT id, chapter_no
+            FROM chapters
+
+            WHERE novel_id=$1
+
+            AND chapter_no=$2
+            `,
+
+            [
+                chapter.novel_id,
+                direction === "up"
+                    ? chapter.chapter_no - 1
+                    : chapter.chapter_no + 1
+            ]
+
+        );
+
+        if (!swap.rows.length) {
+
+            return res.json({
+                success: true
+            });
+
+        }
+
+        await db.query(
+            "UPDATE chapters SET chapter_no=$1 WHERE id=$2",
+            [swap.rows[0].chapter_no, chapter.id]
+        );
+
+        await db.query(
+            "UPDATE chapters SET chapter_no=$1 WHERE id=$2",
+            [chapter.chapter_no, swap.rows[0].id]
+        );
+
+        res.json({
+            success: true
+        });
+
+    } catch (err) {
+
+        console.log(err);
+
+        res.status(500).json({
+            success: false
+        });
+
+    }
+
+});
+
 router.put(
 "/chapters/:id",
 async (req,res)=>{
