@@ -4193,6 +4193,35 @@ keyword
 await pool.query(
 
 `
+INSERT INTO search_trends(
+
+keyword,
+
+search_count
+
+)
+
+VALUES($1,1)
+
+ON CONFLICT(keyword)
+
+DO UPDATE SET
+
+search_count=
+search_trends.search_count+1,
+
+updated_at=NOW()
+`,
+
+[
+keyword
+]
+
+);
+
+await pool.query(
+
+`
 DELETE FROM recent_searches
 
 WHERE id IN(
@@ -4301,6 +4330,182 @@ res.status(500).json({
 success:false
 
 });
+
+}
+
+});
+
+app.get("/api/search/trending",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM search_trends
+
+ORDER BY
+
+search_count DESC,
+
+updated_at DESC
+
+LIMIT 10
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+app.get("/api/novels/:id/similar",async(req,res)=>{
+
+try{
+
+const novel=await pool.query(
+
+`
+SELECT category,language
+
+FROM novels
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+if(!novel.rows.length){
+
+return res.json([]);
+
+}
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM novels
+
+WHERE
+
+id<>$1
+
+AND
+
+(
+
+category=$2
+
+OR
+
+language=$3
+
+)
+
+ORDER BY
+
+views DESC,
+
+rating DESC
+
+LIMIT 6
+`,
+
+[
+req.params.id,
+novel.rows[0].category,
+novel.rows[0].language
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+app.get("/api/novels/:id/also-read",async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+n.id,
+
+n.title,
+
+n.cover_url,
+
+n.category,
+
+COUNT(*) score
+
+FROM library l1
+
+JOIN library l2
+ON l1.user_id=l2.user_id
+
+JOIN novels n
+ON n.id=l2.novel_id
+
+WHERE
+
+l1.novel_id=$1
+
+AND l2.novel_id<>$1
+
+GROUP BY
+
+n.id
+
+ORDER BY
+
+score DESC,
+
+n.views DESC
+
+LIMIT 6
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
 
 }
 
