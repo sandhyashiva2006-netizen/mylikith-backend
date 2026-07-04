@@ -4690,6 +4690,48 @@ success:false
 
 });
 
+const cron=require("node-cron");
+
+cron.schedule("* * * * *",async()=>{
+
+try{
+
+const chapters=await pool.query(
+
+`
+SELECT id
+
+FROM chapters
+
+WHERE
+
+is_draft=true
+
+AND
+
+is_scheduled=true
+
+AND
+
+publish_at<=NOW()
+`
+
+);
+
+for(const chapter of chapters.rows){
+
+await writerRoutes.publishChapter(chapter.id);
+
+}
+
+}catch(err){
+
+console.log(err);
+
+}
+
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`

@@ -630,13 +630,7 @@ success:false
 
 });
 
-router.put(
-"/chapters/:id/publish",
-async(req,res)=>{
-
-try{
-
-const chapterId=req.params.id;
+async function publishChapter(chapterId){
 
 const chapter=await db.query(
 
@@ -665,11 +659,7 @@ chapterId
 
 if(!chapter.rows.length){
 
-return res.status(404).json({
-
-success:false
-
-});
+return false;
 
 }
 
@@ -678,7 +668,11 @@ await db.query(
 `
 UPDATE chapters
 
-SET is_draft=false
+SET
+
+is_draft=false,
+is_scheduled=false,
+publish_at=NULL
 
 WHERE id=$1
 `,
@@ -713,13 +707,9 @@ await db.query(
 INSERT INTO reader_feed(
 
 user_id,
-
 novel_id,
-
 chapter_id,
-
 title,
-
 message
 
 )
@@ -743,13 +733,9 @@ await db.query(
 INSERT INTO reader_notifications(
 
 user_id,
-
 title,
-
 message,
-
 type,
-
 reference_id
 
 )
@@ -769,14 +755,25 @@ chapterId
 
 }
 
+return true;
+
+}
+
+router.put(
+"/chapters/:id/publish",
+async(req,res)=>{
+
+try{
+
+const ok=await publishChapter(req.params.id);
+
 res.json({
 
-success:true
+success:ok
 
 });
 
-}
-catch(err){
+}catch(err){
 
 console.log(err);
 
@@ -787,8 +784,6 @@ success:false
 });
 
 }
-
-});
 
 router.post(
 "/bookmark",
@@ -1889,3 +1884,4 @@ res.status(500).json([]);
 
 
 module.exports = router;
+module.exports.publishChapter = publishChapter;
