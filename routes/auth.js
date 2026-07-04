@@ -6,7 +6,24 @@ const db = require("../db");
 
 const router = express.Router();
 
+const { requireFields } = require("../utils/validate");
+
 router.post("/register", async (req, res) => {
+
+const validation = requireFields(req.body, [
+    "name",
+    "email",
+    "password"
+]);
+
+if (!validation.success) {
+
+    return res.status(400).json({
+        success: false,
+        message: `${validation.field} is required.`
+    });
+
+}
 
 try {
 
@@ -54,6 +71,20 @@ success:false
 });
 
 router.post("/login", async (req,res)=>{
+
+const validation = requireFields(req.body, [
+    "email",
+    "password"
+]);
+
+if (!validation.success) {
+
+    return res.status(400).json({
+        success: false,
+        message: `${validation.field} is required.`
+    });
+
+}
 
 try{
 

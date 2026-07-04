@@ -75,10 +75,33 @@ file.originalname
 
 });
 
-const upload =
-multer({
+const upload = multer({
 
-storage
+    storage,
+
+    limits:{
+        fileSize:5*1024*1024
+    },
+
+    fileFilter:(req,file,cb)=>{
+
+        const allowed=[
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+        ];
+
+        if(!allowed.includes(file.mimetype)){
+
+            return cb(
+                new Error("Invalid file type.")
+            );
+
+        }
+
+        cb(null,true);
+
+    }
 
 });
 
@@ -1178,22 +1201,43 @@ express.static(
 );
 
 app.post(
-
 "/api/upload-cover",
 
-upload.single(
-"cover"
-),
-
 (req,res)=>{
+
+upload.single("cover")(req,res,function(err){
+
+if(err){
+
+return res.status(400).json({
+
+success:false,
+
+message:err.message
+
+});
+
+}
+
+if(!req.file){
+
+return res.status(400).json({
+
+success:false,
+
+message:"No image selected."
+
+});
+
+}
 
 res.json({
 
 success:true,
 
-url:
+url:`https://mylikith-backend.onrender.com/uploads/covers/${req.file.filename}`
 
-`https://mylikith-backend.onrender.com/uploads/covers/${req.file.filename}`
+});
 
 });
 
