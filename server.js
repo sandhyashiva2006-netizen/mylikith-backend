@@ -191,17 +191,7 @@ SELECT *
 
 FROM novels
 
-WHERE
-
-id=$1
-
-AND
-
-LOWER(status)='published'
-
-AND
-
-LOWER(approval_status)='approved'
+WHERE id=$1
 `,
 
 [
@@ -210,13 +200,11 @@ req.params.id
 
 );
 
-if(result.rows.length===0){
+if(!result.rows.length){
 
 return res.status(404).json({
 
-success:false,
-
-message:"Novel not found."
+success:false
 
 });
 
@@ -226,13 +214,11 @@ res.json(result.rows[0]);
 
 }catch(err){
 
-console.error(err);
+console.log(err);
 
 res.status(500).json({
 
-success:false,
-
-message:"Failed to load novel"
+success:false
 
 });
 
