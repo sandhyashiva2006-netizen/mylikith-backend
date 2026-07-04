@@ -12,7 +12,8 @@ author_id,
 title,
 description,
 language,
-category
+category,
+cover_url
 } = req.body;
 
 const result =
@@ -25,11 +26,12 @@ author_id,
 title,
 description,
 language,
-category
+category,
+cover_url
 )
 
 VALUES
-($1,$2,$3,$4,$5)
+($1,$2,$3,$4,$5,$6)
 
 RETURNING *
 `,
@@ -39,7 +41,8 @@ author_id,
 title,
 description,
 language,
-category
+category,
+cover_url
 ]
 
 );
