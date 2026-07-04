@@ -363,7 +363,9 @@ const {
 title,
 description,
 language,
-category
+category,
+status,
+cover_url
 } = req.body;
 
 const result =
@@ -374,12 +376,14 @@ UPDATE novels
 
 SET
 
-title=$1,
-description=$2,
-language=$3,
-category=$4
+title=COALESCE($1,title),
+description=COALESCE($2,description),
+language=COALESCE($3,language),
+category=COALESCE($4,category),
+status=COALESCE($5,status),
+cover_url=COALESCE($6,cover_url)
 
-WHERE id=$5
+WHERE id=$7
 
 RETURNING *
 `,
@@ -389,6 +393,8 @@ title,
 description,
 language,
 category,
+status,
+cover_url,
 req.params.id
 ]
 
