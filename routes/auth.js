@@ -29,6 +29,30 @@ try {
 
 const { name, email, password } = req.body;
 
+const existing = await db.query(
+
+`
+SELECT id
+FROM users
+WHERE email=$1
+`,
+
+[email]
+
+);
+
+if(existing.rows.length){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Email already registered."
+
+});
+
+}
+
 const hashedPassword =
 await bcrypt.hash(password, 10);
 
