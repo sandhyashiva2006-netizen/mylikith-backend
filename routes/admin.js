@@ -430,6 +430,198 @@ message:"Unable to reject."
 });
 
 /* ==========================================
+   GET NOVELS PENDING APPROVAL
+========================================== */
+
+router.get(
+"/novel-approvals",
+async(req,res)=>{
+
+try{
+
+const result=await db.query(
+
+`
+SELECT
+
+n.*,
+
+u.name
+
+FROM novels n
+
+JOIN users u
+
+ON n.author_id=u.id
+
+WHERE
+
+LOWER(n.approval_status)='pending'
+
+ORDER BY n.created_at ASC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+/* ==========================================
+   APPROVE NOVEL
+========================================== */
+
+router.put(
+"/novel-approvals/:id/approve",
+async(req,res)=>{
+
+try{
+
+const novel=await db.query(
+
+`
+SELECT *
+
+FROM novels
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+if(!novel.rows.length){
+
+return res.status(404).json({
+
+success:false
+
+});
+
+}
+
+await db.query(
+
+`
+UPDATE novels
+
+SET
+
+approval_status='Approved',
+
+status='published',
+
+published_at=NOW()
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+await db.query(
+
+`
+UPDATE writer_profiles
+
+SET
+
+first_novel_approved=true
+
+WHERE user_id=$1
+`,
+
+[
+novel.rows[0].author_id
+]
+
+);
+
+res.json({
+
+success:true,
+
+message:"Novel approved."
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+/* ==========================================
+   REJECT NOVEL
+========================================== */
+
+router.put(
+"/novel-approvals/:id/reject",
+async(req,res)=>{
+
+try{
+
+await db.query(
+
+`
+UPDATE novels
+
+SET
+
+approval_status='Rejected'
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+/* ==========================================
    GET ALL SITE PAGES
 ========================================== */
 
