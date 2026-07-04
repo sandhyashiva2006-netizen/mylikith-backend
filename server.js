@@ -1,5 +1,15 @@
 require("dotenv").config();
 
+cloudinary.config({
+
+    cloud_name:process.env.CLOUDINARY_CLOUD_NAME,
+
+    api_key:process.env.CLOUDINARY_API_KEY,
+
+    api_secret:process.env.CLOUDINARY_API_SECRET
+
+});
+
 const express = require("express");
 const cors = require("cors");
 
@@ -36,22 +46,56 @@ const authLimiter = rateLimit({
 const multer =
 require("multer");
 
+const { v2: cloudinary } = require("cloudinary");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+
 const path =
 require("path");
 
-const storage =
-multer.diskStorage({
+const storage = new CloudinaryStorage({
 
-destination:
+    cloudinary,
 
-(req,file,cb)=>{
+    params:{
 
-cb(
-null,
-"uploads/covers"
-);
+        folder:"mylikith/covers",
 
-},
+        allowed_formats:[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp"
+        ],
+
+        public_id:()=>Date.now().toString()
+
+    }
+
+});
+
+const fs=require("fs");
+const path=require("path");
+
+const uploadDir=path.join(__dirname,"uploads","covers");
+
+if(!fs.existsSync(uploadDir)){
+    fs.mkdirSync(uploadDir,{recursive:true});
+}
+
+const storage=multer.diskStorage({
+
+    destination:(req,file,cb)=>{
+        cb(null,uploadDir);
+    },
+
+    filename:(req,file,cb)=>{
+        cb(
+            null,
+            Date.now()+path.extname(file.originalname)
+        );
+    }
+
+});
 
 filename:
 
@@ -81,26 +125,6 @@ const upload = multer({
 
     limits:{
         fileSize:5*1024*1024
-    },
-
-    fileFilter:(req,file,cb)=>{
-
-        const allowed=[
-            "image/jpeg",
-            "image/png",
-            "image/webp"
-        ];
-
-        if(!allowed.includes(file.mimetype)){
-
-            return cb(
-                new Error("Invalid file type.")
-            );
-
-        }
-
-        cb(null,true);
-
     }
 
 });
@@ -1235,7 +1259,7 @@ res.json({
 
 success:true,
 
-url:`https://mylikith-backend.onrender.com/uploads/covers/${req.file.filename}`
+url:req.file.path
 
 });
 
