@@ -640,6 +640,126 @@ router.put("/chapters/:id/move", async (req, res) => {
 
 });
 
+router.post("/chapters/:id/duplicate", async (req,res)=>{
+
+try{
+
+const chapter=await db.query(
+
+`
+SELECT *
+FROM chapters
+WHERE id=$1
+`,
+
+[req.params.id]
+
+);
+
+if(!chapter.rows.length){
+
+return res.json({
+success:false
+});
+
+}
+
+const ch=chapter.rows[0];
+
+const next=await db.query(
+
+`
+SELECT
+COALESCE(MAX(chapter_no),0)+1 next
+FROM chapters
+WHERE novel_id=$1
+`,
+
+[ch.novel_id]
+
+);
+
+const chapterNo=next.rows[0].next;
+
+await db.query(
+
+`
+INSERT INTO chapters
+(
+
+novel_id,
+chapter_no,
+title,
+content,
+is_draft,
+is_premium,
+coins_required,
+early_access
+
+)
+
+VALUES
+
+($1,$2,$3,$4,$5,$6,$7,$8)
+`,
+
+[
+ch.novel_id,
+chapterNo,
+ch.title+" (Copy)",
+ch.content,
+true,
+ch.is_premium,
+ch.coins_required,
+ch.early_access
+]
+
+);
+
+res.json({
+success:true
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
+
+async function duplicateChapter(id){
+
+const response=await fetch(
+
+`${API}/api/writers/chapters/${id}/duplicate`,
+
+{
+
+method:"POST"
+
+}
+
+);
+
+const data=await response.json();
+
+if(data.success){
+
+loadChapters();
+
+}else{
+
+alert("Unable to duplicate chapter.");
+
+}
+
+}
+
 router.put(
 "/chapters/:id",
 async (req,res)=>{
