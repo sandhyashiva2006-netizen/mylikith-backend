@@ -143,7 +143,15 @@ try{
 
 const result = await pool.query(
 
-`SELECT * FROM chapters WHERE id=$1`,
+`SELECT *
+FROM chapters
+WHERE
+
+id=$1
+
+AND
+
+is_draft=false`,
 
 [req.params.id]
 
@@ -191,7 +199,14 @@ await pool.query(
 `
 SELECT *
 FROM chapters
-WHERE novel_id=$1
+WHERE
+
+novel_id=$1
+
+AND
+
+is_draft=false
+
 ORDER BY chapter_no ASC
 `,
 
