@@ -520,7 +520,7 @@ SET
 
 approval_status='Approved',
 
-status='published',
+publish_status='Published',
 
 published_at=NOW()
 
@@ -590,7 +590,9 @@ UPDATE novels
 
 SET
 
-approval_status='Rejected'
+approval_status='Rejected',
+
+publish_status='Draft'
 
 WHERE id=$1
 `,

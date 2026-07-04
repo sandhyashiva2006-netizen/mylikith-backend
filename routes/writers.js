@@ -244,39 +244,40 @@ const result=await db.query(
 `
 INSERT INTO novels
 (
-
 author_id,
-
 title,
-
 description,
-
-language,
-
-category,
-
 cover_url,
-
-status,
-
+language,
+category,
+story_status,
+publish_status,
 approval_status
-
 )
 
 VALUES
+(
+$1,
+$2,
+$3,
+$4,
+$5,
+$6,
+'Ongoing',
+$7,
+$8
+)
 
-($1,$2,$3,$4,$5,$6,$7,$8)
-
-RETURNING *
+RETURNING *;
 `,
 
 [
 author_id,
 title,
 description,
+cover_url,
 language,
 category,
-cover_url,
 publishStatus,
 approvalStatus
 ]

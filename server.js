@@ -162,6 +162,10 @@ AND
 
 LOWER(approval_status)='approved'
 
+AND
+
+LOWER(publish_status)='published'
+
 ORDER BY id DESC
 `
 
@@ -394,8 +398,11 @@ LOWER(approval_status)='approved'
 
 AND
 
-LOWER(title)
-LIKE LOWER($1)
+LOWER(publish_status)='published'
+
+AND
+
+LOWER(title) LIKE LOWER($1)
 
 ORDER BY id DESC
 `,
