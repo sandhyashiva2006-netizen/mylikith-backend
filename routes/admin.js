@@ -26,6 +26,190 @@ router.use((req,res,next)=>{
 });
 
 /* ==========================================
+   GET WRITER APPLICATIONS
+========================================== */
+
+router.get(
+"/writer-applications",
+async(req,res)=>{
+
+try{
+
+const result=await db.query(
+
+`
+SELECT
+
+wp.*,
+
+u.name,
+
+u.email
+
+FROM writer_profiles wp
+
+JOIN users u
+
+ON wp.user_id=u.id
+
+ORDER BY wp.created_at DESC
+`
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json([]);
+
+}
+
+});
+
+/* ==========================================
+   APPROVE WRITER
+========================================== */
+
+router.put(
+"/writer-applications/:id/approve",
+async(req,res)=>{
+
+try{
+
+const application=await db.query(
+
+`
+SELECT *
+
+FROM writer_profiles
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+if(!application.rows.length){
+
+return res.json({
+
+success:false
+
+});
+
+}
+
+await db.query(
+
+`
+UPDATE writer_profiles
+
+SET
+
+status='Approved',
+
+approved_at=NOW()
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+await db.query(
+
+`
+UPDATE users
+
+SET role='writer'
+
+WHERE id=$1
+`,
+
+[
+application.rows[0].user_id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+/* ==========================================
+   REJECT WRITER
+========================================== */
+
+router.put(
+"/writer-applications/:id/reject",
+async(req,res)=>{
+
+try{
+
+await db.query(
+
+`
+UPDATE writer_profiles
+
+SET
+
+status='Rejected'
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+/* ==========================================
    GET ALL WITHDRAWALS
 ========================================== */
 

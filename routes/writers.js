@@ -3,6 +3,163 @@ const db = require("../db");
 
 const router = express.Router();
 
+/* ==========================================
+   APPLY FOR WRITER
+========================================== */
+
+router.post("/apply", async (req,res)=>{
+
+try{
+
+const{
+
+user_id,
+pen_name,
+bio,
+experience
+
+}=req.body;
+
+const existing=await db.query(
+
+`
+SELECT id
+FROM writer_profiles
+WHERE user_id=$1
+`,
+
+[user_id]
+
+);
+
+if(existing.rows.length){
+
+return res.json({
+
+success:false,
+
+message:"Application already submitted."
+
+});
+
+}
+
+await db.query(
+
+`
+INSERT INTO writer_profiles
+(
+
+user_id,
+
+pen_name,
+
+bio,
+
+experience,
+
+agreement,
+
+agreement_accepted_at
+
+)
+
+VALUES
+
+($1,$2,$3,$4,true,NOW())
+`,
+
+[
+user_id,
+pen_name,
+bio,
+experience
+]
+
+);
+
+res.json({
+
+success:true,
+
+message:"Application submitted successfully."
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+/* ==========================================
+   WRITER APPLICATION STATUS
+========================================== */
+
+router.get(
+"/application/:userId",
+async(req,res)=>{
+
+try{
+
+const result=
+
+await db.query(
+
+`
+SELECT *
+
+FROM writer_profiles
+
+WHERE user_id=$1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+if(result.rows.length===0){
+
+return res.json({
+
+exists:false
+
+});
+
+}
+
+res.json({
+
+exists:true,
+
+application:result.rows[0]
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 router.post("/novels", async (req, res) => {
 
 try {
