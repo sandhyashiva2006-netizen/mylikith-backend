@@ -70,7 +70,7 @@ res.status(500).json([]);
 });
 
 /* ==========================================
-   APPROVE WRITER
+   APPROVE WRITER APPLICATION
 ========================================== */
 
 router.put(
@@ -97,13 +97,17 @@ req.params.id
 
 if(!application.rows.length){
 
-return res.json({
+return res.status(404).json({
 
-success:false
+success:false,
+
+message:"Application not found."
 
 });
 
 }
+
+const writer=application.rows[0];
 
 await db.query(
 
@@ -114,7 +118,11 @@ SET
 
 status='Approved',
 
-approved_at=NOW()
+approved_at=NOW(),
+
+approved_by=1,
+
+first_novel_approved=false
 
 WHERE id=$1
 `,
@@ -130,20 +138,24 @@ await db.query(
 `
 UPDATE users
 
-SET role='writer'
+SET
+
+role='writer'
 
 WHERE id=$1
 `,
 
 [
-application.rows[0].user_id
+writer.user_id
 ]
 
 );
 
 res.json({
 
-success:true
+success:true,
+
+message:"Writer approved successfully."
 
 });
 
@@ -153,7 +165,9 @@ console.log(err);
 
 res.status(500).json({
 
-success:false
+success:false,
+
+message:"Unable to approve writer."
 
 });
 

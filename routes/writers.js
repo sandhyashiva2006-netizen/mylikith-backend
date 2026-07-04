@@ -165,30 +165,107 @@ router.post("/novels", async (req, res) => {
 try {
 
 const {
+
 author_id,
 title,
 description,
 language,
 category,
 cover_url
+
 } = req.body;
 
-const result =
-await db.query(
+/* ==========================================
+   CHECK WRITER STATUS
+========================================== */
+
+const writer = await db.query(
+
+`
+SELECT *
+
+FROM writer_profiles
+
+WHERE user_id=$1
+`,
+
+[
+author_id
+]
+
+);
+
+if(!writer.rows.length){
+
+return res.status(403).json({
+
+success:false,
+
+message:"You are not an approved writer."
+
+});
+
+}
+
+if(writer.rows[0].status.toLowerCase()!=="approved"){
+
+return res.status(403).json({
+
+success:false,
+
+message:"Your writer application is still under review."
+
+});
+
+}
+
+/* ==========================================
+   FIRST NOVEL APPROVAL
+========================================== */
+
+let publishStatus="draft";
+
+let approvalStatus="Pending";
+
+if(writer.rows[0].first_novel_approved){
+
+publishStatus="published";
+
+approvalStatus="Approved";
+
+}
+
+/* ==========================================
+   CREATE NOVEL
+========================================== */
+
+const result=await db.query(
 
 `
 INSERT INTO novels
 (
+
 author_id,
+
 title,
+
 description,
+
 language,
+
 category,
-cover_url
+
+cover_url,
+
+status,
+
+approval_status
+
 )
 
 VALUES
-($1,$2,$3,$4,$5,$6)
+
+($1,$2,$3,$4,$5,$6,$7,$8)
 
 RETURNING *
 `,
@@ -199,24 +276,29 @@ title,
 description,
 language,
 category,
-cover_url
+cover_url,
+publishStatus,
+approvalStatus
 ]
 
 );
 
 res.json({
+
 success:true,
+
 novel:result.rows[0]
+
 });
 
-}
-
-catch(err){
+}catch(err){
 
 console.log(err);
 
 res.status(500).json({
+
 success:false
+
 });
 
 }
