@@ -93,7 +93,7 @@ const lockedRoutes =
 require("./routes/locked-chapters");
 const adminRoutes = require("./routes/admin");
 const premiumRoutes=require("./routes/premium");
-
+const pageRoutes = require("./routes/pages");
 
 
 app.use(helmet({
@@ -127,44 +127,9 @@ app.use(
 "/api/locked",
 lockedRoutes
 );
+app.use("/api/pages", pageRoutes);
 
-app.get("/api/pages/:slug", async (req, res) => {
 
-    try{
-
-        const result = await db.query(
-
-            `
-            SELECT title,content
-            FROM site_pages
-            WHERE slug=$1
-            `,
-
-            [req.params.slug]
-
-        );
-
-        if(!result.rows.length){
-
-            return res.status(404).json({
-                success:false
-            });
-
-        }
-
-        res.json(result.rows[0]);
-
-    }catch(err){
-
-        console.log(err);
-
-        res.status(500).json({
-            success:false
-        });
-
-    }
-
-});
 
 app.use("/api/admin", adminRoutes);
 app.use("/api/premium",premiumRoutes);
