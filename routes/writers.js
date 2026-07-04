@@ -562,13 +562,15 @@ async (req,res)=>{
 
 try{
 
-const {
+const{
 
 title,
 content,
 is_premium,
 coins_required,
-early_access
+early_access,
+is_scheduled=false,
+publish_at=null
 
 }=req.body;
 
@@ -584,9 +586,11 @@ title=$1,
 content=$2,
 is_premium=$3,
 coins_required=$4,
-early_access=$5
+early_access=$5,
+is_scheduled=$6,
+publish_at=$7
 
-WHERE id=$6
+WHERE id=$8
 
 RETURNING *
 `,
@@ -597,6 +601,8 @@ content,
 is_premium,
 coins_required,
 early_access,
+is_scheduled,
+publish_at,
 req.params.id
 ]
 
