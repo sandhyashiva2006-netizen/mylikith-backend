@@ -143,15 +143,7 @@ try{
 
 const result = await pool.query(
 
-`SELECT *
-FROM chapters
-WHERE
-
-id=$1
-
-AND
-
-is_draft=false`,
+`SELECT * FROM chapters WHERE id=$1`,
 
 [req.params.id]
 
@@ -180,6 +172,60 @@ res.status(500).json({
 success:false,
 
 error:err.message
+
+});
+
+}
+
+});
+
+app.get(
+"/api/public/chapters/:id",
+async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT *
+
+FROM chapters
+
+WHERE
+
+id=$1
+
+AND
+
+is_draft=false
+`,
+
+[
+req.params.id
+]
+
+);
+
+if(result.rows.length===0){
+
+return res.status(404).json({
+
+success:false
+
+});
+
+}
+
+res.json(result.rows[0]);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
 
 });
 
