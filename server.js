@@ -74,7 +74,6 @@ const storage = new CloudinaryStorage({
 });
 
 const fs=require("fs");
-const path=require("path");
 
 const uploadDir=path.join(__dirname,"uploads","covers");
 
