@@ -73,50 +73,6 @@ const storage = new CloudinaryStorage({
 
 });
 
-const fs=require("fs");
-
-const uploadDir=path.join(__dirname,"uploads","covers");
-
-if(!fs.existsSync(uploadDir)){
-    fs.mkdirSync(uploadDir,{recursive:true});
-}
-
-const storage=multer.diskStorage({
-
-    destination:(req,file,cb)=>{
-        cb(null,uploadDir);
-    },
-
-    filename:(req,file,cb)=>{
-        cb(
-            null,
-            Date.now()+path.extname(file.originalname)
-        );
-    }
-
-});
-
-filename:
-
-(req,file,cb)=>{
-
-cb(
-
-null,
-
-Date.now()
-
-+
-
-path.extname(
-file.originalname
-)
-
-);
-
-}
-
-});
 
 const upload = multer({
 
@@ -1211,17 +1167,7 @@ app.get("/api/writer/analytics/:authorId", async (req, res) => {
 
 });
 
-app.use(
 
-"/uploads",
-
-express.static(
-
-"uploads"
-
-)
-
-);
 
 app.post(
 "/api/upload-cover",
