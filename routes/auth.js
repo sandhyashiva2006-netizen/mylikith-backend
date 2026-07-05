@@ -313,7 +313,9 @@ name:user.rows[0].name,
 
 email:user.rows[0].email,
 
-role:user.rows[0].role
+role:user.rows[0].role,
+
+referral_code:user.rows[0].referral_code
 
 }
 
