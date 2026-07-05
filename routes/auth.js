@@ -4,6 +4,8 @@ const jwt = require("jsonwebtoken");
 
 const db = require("../db");
 
+const { rewardCoins } = require("./wallet");
+
 const router = express.Router();
 
 const { requireFields } = require("../utils/validate");
@@ -164,6 +166,10 @@ referral_code
 
 if(referrer.rows.length){
 
+const referrerId=referrer.rows[0].id;
+
+const newUserId=result.rows[0].id;
+
 await db.query(
 
 `
@@ -200,9 +206,29 @@ NOW()
 `,
 
 [
-referrer.rows[0].id,
-result.rows[0].id
+referrerId,
+newUserId
 ]
+
+);
+
+await rewardCoins(
+
+referrerId,
+
+20,
+
+"Referral Reward"
+
+);
+
+await rewardCoins(
+
+newUserId,
+
+20,
+
+"Welcome Referral Bonus"
 
 );
 

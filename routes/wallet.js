@@ -866,4 +866,149 @@ console.log(checkWallet.rows[0]);
 
 });
 
-module.exports = router;
+async function rewardCoins(userId,coins,description){
+
+let wallet=await db.query(
+
+`
+SELECT *
+
+FROM wallets
+
+WHERE user_id=$1
+`,
+
+[
+userId
+]
+
+);
+
+if(wallet.rows.length===0){
+
+await db.query(
+
+`
+INSERT INTO wallets
+(
+user_id,
+coins,
+earned_coins,
+spent_coins,
+balance
+)
+
+VALUES
+(
+$1,
+0,
+0,
+0,
+0
+)
+`,
+
+[
+userId
+]
+
+);
+
+wallet=await db.query(
+
+`
+SELECT *
+
+FROM wallets
+
+WHERE user_id=$1
+`,
+
+[
+userId
+]
+
+);
+
+}
+
+await db.query(
+
+`
+UPDATE wallets
+
+SET
+
+coins=coins+$1,
+
+earned_coins=earned_coins+$1
+
+WHERE user_id=$2
+`,
+
+[
+coins,
+userId
+]
+
+);
+
+await db.query(
+
+`
+INSERT INTO wallet_transactions
+(
+
+wallet_id,
+
+user_id,
+
+type,
+
+coins,
+
+amount,
+
+description
+
+)
+
+VALUES
+(
+
+$1,
+
+$2,
+
+'Credit',
+
+$3,
+
+0,
+
+$4
+
+)
+`,
+
+[
+wallet.rows[0].id,
+
+userId,
+
+coins,
+
+description
+]
+
+);
+
+}
+
+module.exports={
+
+router,
+
+rewardCoins
+
+};

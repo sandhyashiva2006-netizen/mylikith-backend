@@ -88,7 +88,13 @@ require("./routes/auth");
 const writerRoutes =
 require("./routes/writers");
 const publishRoutes=require("./routes/publish.routes");
-const walletRoutes = require("./routes/wallet");
+const{
+
+router:walletRoutes,
+
+rewardCoins
+
+}=require("./routes/wallet");
 const lockedRoutes =
 require("./routes/locked-chapters");
 const adminRoutes = require("./routes/admin");
