@@ -809,9 +809,34 @@ chapter_id
 
 }=req.body;
 
+const existingSession=await db.query(
 
+`
+SELECT *
 
-if(session.rows.length===0){
+FROM rewarded_ad_sessions
+
+WHERE
+
+user_id=$1
+
+AND
+
+chapter_id=$2
+
+AND
+
+completed=false
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+if(existingSession.rows.length===0){
 
 return res.status(400).json({
 
@@ -840,7 +865,7 @@ views_completed+1,
 
 required_views
 
-)
+),
 
 updated_at=NOW()
 
@@ -928,7 +953,9 @@ chapter_id
 await db.query(
 
 `
-DELETE FROM rewarded_ad_sessions
+UPDATE rewarded_ad_sessions
+
+SET completed=true
 
 WHERE id=$1
 `,
@@ -968,12 +995,12 @@ chapter_id
 
 );
 
+
+
 await db.query(
 
 `
-UPDATE rewarded_ad_sessions
-
-SET completed=true
+DELETE FROM rewarded_ad_sessions
 
 WHERE id=$1
 `,
