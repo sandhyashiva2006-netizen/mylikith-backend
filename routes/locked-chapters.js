@@ -809,6 +809,45 @@ chapter_id
 
 }=req.body;
 
+const session=await db.query(
+
+`
+SELECT *
+
+FROM rewarded_ad_sessions
+
+WHERE
+
+user_id=$1
+
+AND
+
+chapter_id=$2
+
+AND
+
+completed=false
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+if(session.rows.length===0){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Invalid ad session."
+
+});
+
+}
+
 const session=
 
 await db.query(
@@ -820,7 +859,13 @@ SET
 
 views_completed=
 
+LEAST(
+
 views_completed+1,
+
+required_views
+
+)
 
 updated_at=NOW()
 
@@ -901,6 +946,20 @@ ON CONFLICT DO NOTHING
 [
 user_id,
 chapter_id
+]
+
+);
+
+await db.query(
+
+`
+DELETE FROM rewarded_ad_sessions
+
+WHERE id=$1
+`,
+
+[
+ad.id
 ]
 
 );
