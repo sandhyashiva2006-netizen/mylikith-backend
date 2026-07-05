@@ -751,7 +751,13 @@ INSERT INTO rewarded_ad_sessions(
 
 user_id,
 
-chapter_id
+chapter_id,
+
+views_completed,
+
+required_views,
+
+completed
 
 )
 
@@ -759,13 +765,29 @@ VALUES(
 
 $1,
 
-$2
+$2,
+
+0,
+
+2,
+
+false
 
 )
 
 ON CONFLICT(user_id,chapter_id)
 
-DO NOTHING
+DO UPDATE
+
+SET
+
+views_completed=0,
+
+required_views=2,
+
+completed=false,
+
+updated_at=NOW();
 `,
 
 [
