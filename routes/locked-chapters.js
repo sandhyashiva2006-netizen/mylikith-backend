@@ -915,6 +915,8 @@ remaining:
 
 }
 
+console.log("Reached unlock logic");
+
 /* ---------- Unlock Chapter ---------- */
 
 await db.query(
