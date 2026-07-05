@@ -671,4 +671,305 @@ if(!isPremium){
 
 });
 
+router.get(
+"/ad/status/:userId",
+async(req,res)=>{
+
+try{
+
+const result=await db.query(
+
+`
+SELECT COUNT(*) total
+
+FROM rewarded_ad_unlocks
+
+WHERE
+
+user_id=$1
+
+AND
+
+created_at>=NOW()-INTERVAL '24 HOURS'
+`,
+
+[
+req.params.userId
+]
+
+);
+
+const used=
+Number(result.rows[0].total);
+
+res.json({
+
+used,
+
+remaining:
+
+Math.max(0,2-used),
+
+eligible:
+
+used<2
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.post(
+"/ad/start",
+async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+chapter_id
+
+}=req.body;
+
+await db.query(
+
+`
+INSERT INTO rewarded_ad_sessions(
+
+user_id,
+
+chapter_id
+
+)
+
+VALUES(
+
+$1,
+
+$2
+
+)
+
+ON CONFLICT(user_id,chapter_id)
+
+DO NOTHING
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.post(
+"/ad/viewed",
+async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+chapter_id
+
+}=req.body;
+
+const session=
+
+await db.query(
+
+`
+UPDATE rewarded_ad_sessions
+
+SET
+
+views_completed=
+
+views_completed+1,
+
+updated_at=NOW()
+
+WHERE
+
+user_id=$1
+
+AND
+
+chapter_id=$2
+
+RETURNING *
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+if(!session.rows.length){
+
+return res.json({
+
+success:false
+
+});
+
+}
+
+const ad=session.rows[0];
+
+if(ad.views_completed<2){
+
+return res.json({
+
+success:true,
+
+completed:false,
+
+remaining:
+
+2-ad.views_completed
+
+});
+
+}
+
+/* ---------- Unlock Chapter ---------- */
+
+await db.query(
+
+`
+INSERT INTO unlocked_chapters(
+
+user_id,
+
+chapter_id,
+
+coins_paid
+
+)
+
+VALUES(
+
+$1,
+
+$2,
+
+0
+
+)
+
+ON CONFLICT DO NOTHING
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+await db.query(
+
+`
+INSERT INTO rewarded_ad_unlocks(
+
+user_id,
+
+chapter_id
+
+)
+
+VALUES(
+
+$1,
+
+$2
+
+)
+
+ON CONFLICT DO NOTHING
+`,
+
+[
+user_id,
+chapter_id
+]
+
+);
+
+await db.query(
+
+`
+UPDATE rewarded_ad_sessions
+
+SET completed=true
+
+WHERE id=$1
+`,
+
+[
+ad.id
+]
+
+);
+
+res.json({
+
+success:true,
+
+completed:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
 module.exports = router;
