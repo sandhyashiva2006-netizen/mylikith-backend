@@ -119,15 +119,40 @@ WHERE referral_code=$5
 
 )
 
+RETURNING
+
+id,
+
+name,
+
+email,
+
+role,
+
+referral_code
+`,
+
+[
+name,
+
+email,
+
+hashedPassword,
+
+myReferralCode,
+
+referral_code||null
+]
+
+);
+
 if(referral_code){
 
 const referrer=await db.query(
 
 `
 SELECT id
-
 FROM users
-
 WHERE referral_code=$1
 `,
 
@@ -143,7 +168,6 @@ await db.query(
 
 `
 INSERT INTO referrals
-
 (
 
 referrer_id,
@@ -183,34 +207,8 @@ result.rows[0].id
 );
 
 }
+
 }
-
-RETURNING
-
-id,
-
-name,
-
-email,
-
-role,
-
-referral_code
-`,
-
-[
-name,
-
-email,
-
-hashedPassword,
-
-myReferralCode,
-
-referral_code||null
-]
-
-);
 
 res.json({
 success:true,
