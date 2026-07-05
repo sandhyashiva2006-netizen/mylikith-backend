@@ -809,32 +809,7 @@ chapter_id
 
 }=req.body;
 
-const session=await db.query(
 
-`
-SELECT *
-
-FROM rewarded_ad_sessions
-
-WHERE
-
-user_id=$1
-
-AND
-
-chapter_id=$2
-
-AND
-
-completed=false
-`,
-
-[
-user_id,
-chapter_id
-]
-
-);
 
 if(session.rows.length===0){
 
