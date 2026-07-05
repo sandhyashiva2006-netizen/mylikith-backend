@@ -134,6 +134,13 @@ app.use(
 lockedRoutes
 );
 app.use("/api/pages", pageRoutes);
+app.use(
+
+"/api/referrals",
+
+require("./routes/referrals")
+
+);
 
 
 
