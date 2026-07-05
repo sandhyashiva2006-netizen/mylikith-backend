@@ -27,7 +27,17 @@ if (!validation.success) {
 
 try {
 
-const { name, email, password } = req.body;
+const {
+
+name,
+
+email,
+
+password,
+
+referral_code
+
+}=req.body;
 
 const existing = await db.query(
 
@@ -56,22 +66,149 @@ message:"Email already registered."
 const hashedPassword =
 await bcrypt.hash(password, 10);
 
+const myReferralCode=
+
+"MLK"+
+
+Math.random()
+
+.toString(36)
+
+.substring(2,8)
+
+.toUpperCase();
+
 const result = await db.query(
 
 `
 INSERT INTO users
-(name,email,password_hash)
+(
 
-VALUES($1,$2,$3)
-
-RETURNING
-id,
 name,
+
 email,
-role
+
+password_hash,
+
+referral_code,
+
+referred_by
+
+)
+
+VALUES
+(
+
+$1,
+
+$2,
+
+$3,
+
+$4,
+
+(
+
+SELECT id
+
+FROM users
+
+WHERE referral_code=$5
+
+)
+
+)
+
+if(referral_code){
+
+const referrer=await db.query(
+
+`
+SELECT id
+
+FROM users
+
+WHERE referral_code=$1
 `,
 
-[name,email,hashedPassword]
+[
+referral_code
+]
+
+);
+
+if(referrer.rows.length){
+
+await db.query(
+
+`
+INSERT INTO referrals
+
+(
+
+referrer_id,
+
+referred_user_id,
+
+reward_coins,
+
+status,
+
+rewarded_at
+
+)
+
+VALUES
+
+(
+
+$1,
+
+$2,
+
+20,
+
+'Completed',
+
+NOW()
+
+)
+`,
+
+[
+referrer.rows[0].id,
+result.rows[0].id
+]
+
+);
+
+}
+}
+
+RETURNING
+
+id,
+
+name,
+
+email,
+
+role,
+
+referral_code
+`,
+
+[
+name,
+
+email,
+
+hashedPassword,
+
+myReferralCode,
+
+referral_code||null
+]
 
 );
 
