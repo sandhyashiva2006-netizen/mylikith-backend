@@ -919,6 +919,22 @@ console.log("Reached unlock logic");
 
 /* ---------- Unlock Chapter ---------- */
 
+const chapter = await db.query(
+
+`
+SELECT novel_id
+
+FROM chapters
+
+WHERE id=$1
+`,
+
+[
+chapter_id
+]
+
+);
+
 await db.query(
 
 `
@@ -927,6 +943,8 @@ INSERT INTO unlocked_chapters(
 user_id,
 
 chapter_id,
+
+novel_id,
 
 coins_paid
 
@@ -938,6 +956,8 @@ $1,
 
 $2,
 
+$3,
+
 0
 
 )
@@ -947,7 +967,8 @@ ON CONFLICT DO NOTHING
 
 [
 user_id,
-chapter_id
+chapter_id,
+chapter.rows[0].novel_id
 ]
 
 );
