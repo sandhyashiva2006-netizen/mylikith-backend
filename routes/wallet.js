@@ -4,6 +4,12 @@ const router = express.Router();
 
 const db = require("../db");
 
+const{
+
+createNotification
+
+}=require("./writers");
+
 const crypto = require("crypto");
 
 const axios = require("axios");
@@ -1000,6 +1006,18 @@ coins,
 
 description
 ]
+
+);
+
+await createNotification(
+
+userId,
+
+"🪙 Coins Credited",
+
+`${coins} coins have been added to your wallet.\n\nReason: ${description}`,
+
+"wallet"
 
 );
 

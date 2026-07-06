@@ -4,6 +4,12 @@ const router = express.Router();
 
 const db = require("../db");
 
+const{
+
+createNotification
+
+}=require("./writers");
+
 const auth = require("../middleware/auth");
 
 router.use(auth);
@@ -130,6 +136,36 @@ WHERE id=$1
 [
 req.params.id
 ]
+
+);
+
+const writer=await db.query(
+
+`
+SELECT user_id
+
+FROM writer_profiles
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+await createNotification(
+
+writer.rows[0].user_id,
+
+"✅ Writer Application Approved",
+
+"Congratulations! Your writer application has been approved. You can now publish novels.",
+
+"writer",
+
+req.params.id
 
 );
 
@@ -530,6 +566,39 @@ WHERE id=$1
 [
 req.params.id
 ]
+
+);
+
+const novel=await db.query(
+
+`
+SELECT
+
+author_id,
+title
+
+FROM novels
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+await createNotification(
+
+novel.rows[0].author_id,
+
+"📚 Novel Approved",
+
+`Congratulations! Your novel "${novel.rows[0].title}" has been approved and is now available to readers.`,
+
+"novel",
+
+req.params.id
 
 );
 

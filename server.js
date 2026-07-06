@@ -123,9 +123,18 @@ app.use(express.urlencoded({
 }));
 
 app.use("/api/auth", authLimiter, authRoutes);
+const{
+
+router:writerRoutes
+
+}=require("./routes/writers");
+
 app.use(
+
 "/api/writers",
+
 writerRoutes
+
 );
 app.use("/api/publish",publishRoutes);
 app.use("/api/wallet", walletRoutes);

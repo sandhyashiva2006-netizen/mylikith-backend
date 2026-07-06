@@ -6,6 +6,12 @@ const db = require("../db");
 
 const { rewardCoins } = require("./wallet");
 
+const{
+
+createNotification
+
+}=require("./writers");
+
 const router = express.Router();
 
 const { requireFields } = require("../utils/validate");
@@ -222,6 +228,20 @@ referrerId,
 
 );
 
+await createNotification(
+
+referrerId,
+
+"🎁 Referral Reward",
+
+"Congratulations! You earned 20 coins because a new user joined using your referral link.",
+
+"referral",
+
+newUserId
+
+);
+
 await rewardCoins(
 
 newUserId,
@@ -229,6 +249,20 @@ newUserId,
 20,
 
 "Welcome Referral Bonus"
+
+);
+
+await createNotification(
+
+newUserId,
+
+"🎉 Welcome Bonus",
+
+"Welcome to MyLikith! You received 20 bonus coins for joining with a referral link.",
+
+"referral",
+
+referrerId
 
 );
 

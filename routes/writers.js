@@ -86,6 +86,18 @@ message:"Application submitted successfully."
 
 });
 
+await createNotification(
+
+user_id,
+
+"✍️ Writer Application Submitted",
+
+"Your application has been submitted successfully and is awaiting admin approval.",
+
+"writer_application"
+
+);
+
 }catch(err){
 
 console.log(err);
@@ -1629,7 +1641,17 @@ await db.query(
 
 `
 SELECT
+
 title,
+
+message,
+
+type,
+
+reference_id,
+
+is_read,
+
 created_at
 
 FROM notifications
@@ -1652,6 +1674,182 @@ res.json(
 result.rows
 
 );
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.get(
+"/notifications/:userId/unread",
+async(req,res)=>{
+
+try{
+
+const result=await db.query(
+
+`
+SELECT
+
+COUNT(*) unread
+
+FROM notifications
+
+WHERE
+
+user_id=$1
+
+AND
+
+is_read=false
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json({
+
+unread:Number(result.rows[0].unread)
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.put(
+"/notifications/:userId/read",
+async(req,res)=>{
+
+try{
+
+await db.query(
+
+`
+UPDATE notifications
+
+SET
+
+is_read=true
+
+WHERE user_id=$1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.put(
+"/notifications/read/:id",
+async(req,res)=>{
+
+try{
+
+await db.query(
+
+`
+UPDATE notifications
+
+SET is_read=true
+
+WHERE id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+router.delete(
+"/notifications/:userId",
+async(req,res)=>{
+
+try{
+
+await db.query(
+
+`
+DELETE FROM notifications
+
+WHERE user_id=$1
+`,
+
+[
+req.params.userId
+]
+
+);
+
+res.json({
+
+success:true
+
+});
 
 }catch(err){
 
@@ -1873,6 +2071,59 @@ success:false
 
 });
 
+async function createNotification(
+
+userId,
+title,
+message,
+type,
+referenceId=null
+
+){
+
+await db.query(
+
+`
+INSERT INTO notifications(
+
+user_id,
+
+title,
+
+message,
+
+type,
+
+reference_id
+
+)
+
+VALUES(
+
+$1,
+
+$2,
+
+$3,
+
+$4,
+
+$5
+
+)
+`,
+
+[
+userId,
+title,
+message,
+type,
+referenceId
+]
+
+);
+
+}
 
 router.get(
 "/payment-details/:writerId",
@@ -2329,5 +2580,12 @@ res.status(500).json([]);
 });
 
 
-module.exports = router;
-module.exports.publishChapter = publishChapter;
+module.exports = {
+
+router,
+
+publishChapter,
+
+createNotification
+
+};
