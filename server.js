@@ -85,8 +85,10 @@ const upload = multer({
 
 const authRoutes =
 require("./routes/auth");
-const writerRoutes =
-require("./routes/writers");
+const {
+    router: writerRoutes,
+    publishChapter
+} = require("./routes/writers");
 const publishRoutes=require("./routes/publish.routes");
 const{
 
@@ -123,18 +125,9 @@ app.use(express.urlencoded({
 }));
 
 app.use("/api/auth", authLimiter, authRoutes);
-const{
-
-router:writerRoutes
-
-}=require("./routes/writers");
-
 app.use(
-
 "/api/writers",
-
 writerRoutes
-
 );
 app.use("/api/publish",publishRoutes);
 app.use("/api/wallet", walletRoutes);
@@ -4909,7 +4902,7 @@ publish_at<=NOW()
 
 for(const chapter of chapters.rows){
 
-await writerRoutes.publishChapter(chapter.id);
+await publishChapter(chapter.id);
 
 }
 
