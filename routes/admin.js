@@ -139,7 +139,7 @@ req.params.id
 
 );
 
-const writer=await db.query(
+const writerData=await db.query(
 
 `
 SELECT user_id
@@ -157,7 +157,7 @@ req.params.id
 
 await createNotification(
 
-writer.rows[0].user_id,
+writerData.rows[0].user_id,
 
 "✅ Writer Application Approved",
 
@@ -182,7 +182,7 @@ WHERE id=$1
 `,
 
 [
-writer.user_id
+writerData.rows[0].user_id
 ]
 
 );
@@ -569,7 +569,7 @@ req.params.id
 
 );
 
-const novel=await db.query(
+const novelData=await db.query(
 
 `
 SELECT
@@ -590,11 +590,11 @@ req.params.id
 
 await createNotification(
 
-novel.rows[0].author_id,
+novelData.rows[0].author_id,
 
 "📚 Novel Approved",
 
-`Congratulations! Your novel "${novel.rows[0].title}" has been approved and is now available to readers.`,
+`Congratulations! Your novel "${novelData.rows[0].title}" has been approved and is now available to readers.`,
 
 "novel",
 
@@ -615,7 +615,7 @@ WHERE user_id=$1
 `,
 
 [
-novel.rows[0].author_id
+novelData.rows[0].author_id
 ]
 
 );
