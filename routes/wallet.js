@@ -4,6 +4,8 @@ const router = express.Router();
 
 const db = require("../db");
 
+const auth = require("../middleware/auth");
+
 const{
 
 createNotification
@@ -14,12 +16,20 @@ const crypto = require("crypto");
 
 const axios = require("axios");
 
+router.use(auth);
 
 /* ===========================
    GET WALLET
 =========================== */
 
 router.get("/:userId", async (req, res) => {
+
+    if (Number(req.params.userId) !== req.user.id) {
+        return res.status(403).json({
+            success: false,
+            message: "Unauthorized."
+        });
+    }
 
     try {
 
@@ -69,7 +79,7 @@ $1,
 
     } catch (err) {
 
-        console.log(err);
+        console.error(err);
 
         res.status(500).json({
             success: false
@@ -85,6 +95,13 @@ $1,
 =========================== */
 
 router.get("/:userId/history", async (req, res) => {
+
+    if (Number(req.params.userId) !== req.user.id) {
+        return res.status(403).json({
+            success: false,
+            message: "Unauthorized."
+        });
+    }
 
     try {
 
@@ -114,7 +131,7 @@ ORDER BY id DESC
 
     } catch (err) {
 
-        console.log(err);
+        console.error(err);
 
         res.status(500).json({
             success: false
@@ -135,11 +152,12 @@ router.post("/credit", async (req, res) => {
 
         const {
 
-            user_id,
-            amount,
-            description
+    amount,
+    description
 
-        } = req.body;
+} = req.body;
+
+const user_id = req.user.id;
 
         await db.query(
 
@@ -187,7 +205,7 @@ router.post("/credit", async (req, res) => {
 
     } catch (err) {
 
-        console.log(err);
+        console.error(err);
 
         res.status(500).json({
             success: false
@@ -208,11 +226,12 @@ router.post("/debit", async (req, res) => {
 
         const {
 
-            user_id,
-            amount,
-            description
+    amount,
+    description
 
-        } = req.body;
+} = req.body;
+
+const user_id = req.user.id;
 
         const wallet = await db.query(
 
@@ -301,7 +320,7 @@ FROM wallets
 
     } catch (err) {
 
-        console.log(err);
+        console.error(err);
 
         res.status(500).json({
 
@@ -319,6 +338,13 @@ FROM wallets
 =========================== */
 
 router.get("/:userId/summary", async (req, res) => {
+
+    if (Number(req.params.userId) !== req.user.id) {
+        return res.status(403).json({
+            success: false,
+            message: "Unauthorized."
+        });
+    }
 
     try {
 
@@ -424,7 +450,7 @@ Number(total.rows[0].total)
 
     } catch (err) {
 
-        console.log(err);
+        console.error(err);
 
         res.status(500).json({
 
@@ -462,7 +488,7 @@ res.json(result.rows);
 
 }catch(err){
 
-console.log(err);
+console.error(err);
 
 res.status(500).json({
 
@@ -482,7 +508,9 @@ router.post("/create-order", async (req, res) => {
 
     try {
 
-        const { user_id, package_id } = req.body;
+        const { package_id } = req.body;
+
+const user_id = req.user.id;
 
         const pkg = await db.query(
             `
@@ -856,7 +884,7 @@ console.log(checkWallet.rows[0]);
 
     console.log(err.message);
 
-    console.log(err);
+    console.error(err);
 
     console.log("====================================");
 
