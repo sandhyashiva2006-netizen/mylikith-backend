@@ -16,7 +16,7 @@ const crypto = require("crypto");
 
 const axios = require("axios");
 
-router.use(auth);
+
 
 /* ===========================
    GET WALLET
