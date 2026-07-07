@@ -1,15 +1,12 @@
-const Brevo = require("@getbrevo/brevo");
+const { BrevoClient } = require("@getbrevo/brevo");
 
-const apiInstance = new Brevo.TransactionalEmailsApi();
-
-apiInstance.setApiKey(
-    Brevo.TransactionalEmailsApiApiKeys.apiKey,
-    process.env.BREVO_API_KEY
-);
+const brevo = new BrevoClient({
+    apiKey: process.env.BREVO_API_KEY
+});
 
 async function sendPasswordResetEmail(email, resetLink) {
 
-    const emailData = {
+    await brevo.transactionalEmails.sendTransacEmail({
 
         sender: {
             name: "MyLikith",
@@ -25,7 +22,6 @@ async function sendPasswordResetEmail(email, resetLink) {
         subject: "Reset your MyLikith password",
 
         htmlContent: `
-
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 
             <h2 style="color:#7c3aed">
@@ -37,63 +33,39 @@ async function sendPasswordResetEmail(email, resetLink) {
             </p>
 
             <p>
-                Click the button below to create a new password.
+                Click the button below to reset your password.
             </p>
 
             <p style="margin:30px 0">
-
                 <a
                     href="${resetLink}"
                     style="
                         background:#7c3aed;
-                        color:white;
+                        color:#fff;
                         padding:14px 24px;
                         border-radius:8px;
                         text-decoration:none;
-                        display:inline-block;
                     "
                 >
-
                     Reset Password
-
                 </a>
-
             </p>
 
             <p>
-
-                This link expires in
-                <strong>15 minutes</strong>.
-
-            </p>
-
-            <p>
-
-                If you did not request this,
-                you can safely ignore this email.
-
+                This link expires in <strong>15 minutes</strong>.
             </p>
 
             <hr>
 
-            <small>
-
-                © MyLikith
-
-            </small>
+            <small>© MyLikith</small>
 
         </div>
-
         `
 
-    };
-
-    await apiInstance.sendTransacEmail(emailData);
+    });
 
 }
 
 module.exports = {
-
     sendPasswordResetEmail
-
 };
