@@ -12,6 +12,8 @@ const pool = require("./db");
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is missing.");
 }
