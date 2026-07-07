@@ -2,6 +2,12 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+const crypto = require("crypto");
+
+const {
+    sendPasswordResetEmail
+} = require("../utils/email");
+
 const db = require("../db");
 
 const { rewardCoins } = require("./wallet");
@@ -392,6 +398,296 @@ success:false
 });
 
 }
+
+});
+
+/* ==========================================
+   FORGOT PASSWORD
+========================================== */
+
+router.post("/forgot-password", async (req, res) => {
+
+    try {
+
+        const { email } = req.body;
+
+        if (!email) {
+
+            return res.status(400).json({
+
+                success: false,
+                message: "Email is required."
+
+            });
+
+        }
+
+        const user = await db.query(
+
+            `
+            SELECT id,email
+            FROM users
+            WHERE email=$1
+            `,
+
+            [email]
+
+        );
+
+        // Always return success
+        // Prevents email enumeration
+
+        if (user.rows.length === 0) {
+
+            return res.json({
+
+                success: true,
+                message:
+                    "If an account exists, a reset email has been sent."
+
+            });
+
+        }
+
+        const token =
+            crypto.randomBytes(32).toString("hex");
+
+        await db.query(
+
+            `
+            DELETE FROM password_reset_tokens
+            WHERE user_id=$1
+            `,
+
+            [
+                user.rows[0].id
+            ]
+
+        );
+
+        await db.query(
+
+            `
+            INSERT INTO password_reset_tokens
+            (
+
+                user_id,
+
+                token,
+
+                expires_at
+
+            )
+
+            VALUES
+
+            (
+
+                $1,
+
+                $2,
+
+                NOW()+INTERVAL '15 minutes'
+
+            )
+            `,
+
+            [
+
+                user.rows[0].id,
+
+                token
+
+            ]
+
+        );
+
+        const resetLink =
+
+`${process.env.APP_URL}/reset-password.html?token=${token}`;
+
+        await sendPasswordResetEmail(
+
+            email,
+
+            resetLink
+
+        );
+
+        res.json({
+
+            success: true,
+
+            message:
+                "If an account exists, a reset email has been sent."
+
+        });
+
+    }
+
+    catch (err) {
+
+        console.error(err);
+
+        res.status(500).json({
+
+            success: false,
+
+            message: "Internal server error."
+
+        });
+
+    }
+
+});
+
+
+/* ==========================================
+   RESET PASSWORD
+========================================== */
+
+router.post("/reset-password", async (req, res) => {
+
+    try {
+
+        const {
+
+            token,
+
+            password
+
+        } = req.body;
+
+        if (!token || !password) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    "Token and password are required."
+
+            });
+
+        }
+
+        const result = await db.query(
+
+            `
+            SELECT *
+
+            FROM password_reset_tokens
+
+            WHERE
+
+            token=$1
+
+            AND
+
+            expires_at > NOW()
+            `,
+
+            [
+
+                token
+
+            ]
+
+        );
+
+        if (!result.rows.length) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    "Invalid or expired reset link."
+
+            });
+
+        }
+
+if (password.length < 8) {
+
+    return res.status(400).json({
+
+        success: false,
+
+        message: "Password must be at least 8 characters long."
+
+    });
+
+}
+
+        const hashed =
+
+await bcrypt.hash(password,10);
+
+        await db.query(
+
+            `
+            UPDATE users
+
+            SET password_hash=$1
+
+            WHERE id=$2
+            `,
+
+            [
+
+                hashed,
+
+                result.rows[0].user_id
+
+            ]
+
+        );
+
+        await db.query(
+
+            `
+            DELETE FROM password_reset_tokens
+
+            WHERE token=$1
+            `,
+
+            [
+
+                token
+
+            ]
+
+        );
+
+await db.query(`
+DELETE FROM password_reset_tokens
+WHERE expires_at < NOW()
+`);
+
+        res.json({
+
+            success:true,
+
+            message:"Password updated successfully."
+
+        });
+
+    }
+
+    catch(err){
+
+        console.error(err);
+
+        res.status(500).json({
+
+            success:false,
+
+            message:"Internal server error."
+
+        });
+
+    }
 
 });
 
