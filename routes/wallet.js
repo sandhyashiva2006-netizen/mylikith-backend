@@ -24,12 +24,7 @@ const axios = require("axios");
 
 router.get("/:userId", async (req, res) => {
 
-    if (Number(req.params.userId) !== req.user.id) {
-        return res.status(403).json({
-            success: false,
-            message: "Unauthorized."
-        });
-    }
+    
 
     try {
 
@@ -96,12 +91,7 @@ $1,
 
 router.get("/:userId/history", async (req, res) => {
 
-    if (Number(req.params.userId) !== req.user.id) {
-        return res.status(403).json({
-            success: false,
-            message: "Unauthorized."
-        });
-    }
+    
 
     try {
 
@@ -151,13 +141,10 @@ router.post("/credit", async (req, res) => {
     try {
 
         const {
-
+    user_id,
     amount,
     description
-
 } = req.body;
-
-const user_id = req.user.id;
 
         await db.query(
 
@@ -225,13 +212,10 @@ router.post("/debit", async (req, res) => {
     try {
 
         const {
-
+    user_id,
     amount,
     description
-
 } = req.body;
-
-const user_id = req.user.id;
 
         const wallet = await db.query(
 
@@ -339,12 +323,7 @@ FROM wallets
 
 router.get("/:userId/summary", async (req, res) => {
 
-    if (Number(req.params.userId) !== req.user.id) {
-        return res.status(403).json({
-            success: false,
-            message: "Unauthorized."
-        });
-    }
+  
 
     try {
 
@@ -510,7 +489,7 @@ router.post("/create-order", async (req, res) => {
 
         const { package_id } = req.body;
 
-const user_id = req.user.id;
+const { user_id, package_id } = req.body;
 
         const pkg = await db.query(
             `
