@@ -1,24 +1,31 @@
-const nodemailer = require("nodemailer");
+const Brevo = require("@getbrevo/brevo");
 
-const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
-});
+const apiInstance = new Brevo.TransactionalEmailsApi();
+
+apiInstance.setApiKey(
+    Brevo.TransactionalEmailsApiApiKeys.apiKey,
+    process.env.BREVO_API_KEY
+);
 
 async function sendPasswordResetEmail(email, resetLink) {
 
-    await transporter.sendMail({
+    const emailData = {
 
-        from: `"MyLikith" <${process.env.EMAIL_USER}>`,
+        sender: {
+            name: "MyLikith",
+            email: process.env.EMAIL_USER
+        },
 
-        to: email,
+        to: [
+            {
+                email
+            }
+        ],
 
         subject: "Reset your MyLikith password",
 
-        html: `
+        htmlContent: `
+
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 
             <h2 style="color:#7c3aed">
@@ -34,41 +41,59 @@ async function sendPasswordResetEmail(email, resetLink) {
             </p>
 
             <p style="margin:30px 0">
+
                 <a
                     href="${resetLink}"
                     style="
                         background:#7c3aed;
-                        color:#fff;
+                        color:white;
                         padding:14px 24px;
-                        text-decoration:none;
                         border-radius:8px;
+                        text-decoration:none;
                         display:inline-block;
                     "
                 >
+
                     Reset Password
+
                 </a>
+
             </p>
 
             <p>
-                This link expires in <strong>15 minutes</strong>.
+
+                This link expires in
+                <strong>15 minutes</strong>.
+
             </p>
 
             <p>
-                If you didn't request this, you can safely ignore this email.
+
+                If you did not request this,
+                you can safely ignore this email.
+
             </p>
 
             <hr>
 
             <small>
+
                 © MyLikith
+
             </small>
 
         </div>
+
         `
-    });
+
+    };
+
+    await apiInstance.sendTransacEmail(emailData);
 
 }
 
 module.exports = {
+
     sendPasswordResetEmail
+
 };
