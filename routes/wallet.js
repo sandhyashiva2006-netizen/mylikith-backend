@@ -487,7 +487,6 @@ router.post("/create-order", async (req, res) => {
 
     try {
 
-        const { package_id } = req.body;
 
 const { user_id, package_id } = req.body;
 
