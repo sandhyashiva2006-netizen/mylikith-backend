@@ -8,6 +8,8 @@ const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const compression = require("compression");
 
+const bcrypt = require("bcryptjs");
+
 const pool = require("./db");
 
 const app = express();
@@ -1186,6 +1188,153 @@ app.get("/api/profile/comments/:userId", async (req, res) => {
         });
 
     }
+
+});
+
+app.post("/api/profile/change-password", async (req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+current_password,
+
+new_password,
+
+confirm_password
+
+}=req.body;
+
+if(!user_id||!current_password||!new_password||!confirm_password){
+
+return res.status(400).json({
+
+success:false,
+
+message:"All fields are required."
+
+});
+
+}
+
+if(new_password!==confirm_password){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Passwords do not match."
+
+});
+
+}
+
+if(new_password.length<8){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Password must be at least 8 characters."
+
+});
+
+}
+
+const user=await pool.query(
+
+`
+SELECT password_hash
+
+FROM users
+
+WHERE id=$1
+`,
+
+[user_id]
+
+);
+
+if(user.rows.length===0){
+
+return res.status(404).json({
+
+success:false,
+
+message:"User not found."
+
+});
+
+}
+
+const valid=await bcrypt.compare(
+
+current_password,
+
+user.rows[0].password_hash
+
+);
+
+if(!valid){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Current password is incorrect."
+
+});
+
+}
+
+const hash=await bcrypt.hash(
+
+new_password,
+
+10
+
+);
+
+await pool.query(
+
+`
+UPDATE users
+
+SET password_hash=$1
+
+WHERE id=$2
+`,
+
+[
+hash,
+user_id
+]
+
+);
+
+res.json({
+
+success:true,
+
+message:"Password changed successfully."
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false,
+
+message:"Internal server error."
+
+});
+
+}
 
 });
 
