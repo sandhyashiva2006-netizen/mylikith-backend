@@ -117,13 +117,14 @@ app.use(helmet({
 
 app.use(cors({
     origin: [
+        "https://mylikith-frontend.pages.dev",
         "https://mylikith.pages.dev",
         "https://mylikith.in",
         "https://www.mylikith.in"
     ],
     credentials: true,
-    methods: ["GET","POST","PUT","DELETE","OPTIONS"],
-    allowedHeaders: ["Content-Type","Authorization"]
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
 app.use(compression());
