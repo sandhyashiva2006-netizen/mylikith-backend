@@ -1565,6 +1565,84 @@ success:false
 
 });
 
+app.put("/api/users/:id", async (req,res)=>{
+
+try{
+
+const{
+
+bio,
+
+website,
+
+instagram,
+
+facebook,
+
+x,
+
+youtube
+
+}=req.body;
+
+await pool.query(
+
+`
+UPDATE users
+
+SET
+
+bio=$1,
+
+website=$2,
+
+instagram=$3,
+
+facebook=$4,
+
+x=$5,
+
+youtube=$6
+
+WHERE id=$7
+`,
+
+[
+bio||null,
+website||null,
+instagram||null,
+facebook||null,
+x||null,
+youtube||null,
+req.params.id
+]
+
+);
+
+res.json({
+
+success:true,
+
+message:"Author profile updated successfully."
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false,
+
+message:"Unable to update author profile."
+
+});
+
+}
+
+});
+
 app.post("/api/library",async(req,res)=>{
 
 try{
