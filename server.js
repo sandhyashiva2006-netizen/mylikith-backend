@@ -5090,7 +5090,17 @@ name,
 
 bio,
 
-profile_image
+profile_image,
+
+website,
+
+instagram,
+
+facebook,
+
+x,
+
+youtube
 
 FROM users
 
