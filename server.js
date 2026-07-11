@@ -1646,6 +1646,50 @@ const PORT = process.env.PORT || 5000;
 
 if (process.env.NODE_ENV !== "production") {
 
+app.post(
+"/api/upload/payment-proof",
+upload.single("image"),
+async(req,res)=>{
+
+try{
+
+if(!req.file){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Image required."
+
+});
+
+}
+
+res.json({
+
+success:true,
+
+url:req.file.path
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false,
+
+message:"Upload failed."
+
+});
+
+}
+
+});
+
+
 app.get("/api/debug-users-columns", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -5260,6 +5304,50 @@ success:false
 });
 
 }
+
+});
+
+});
+
+app.post(
+"/api/payment/upload",
+require("./middleware/auth"),
+
+(req,res)=>{
+
+upload.single("payment")(req,res,function(err){
+
+if(err){
+
+return res.status(400).json({
+
+success:false,
+
+message:err.message
+
+});
+
+}
+
+if(!req.file){
+
+return res.status(400).json({
+
+success:false,
+
+message:"No image selected."
+
+});
+
+}
+
+res.json({
+
+success:true,
+
+url:req.file.path
+
+});
 
 });
 

@@ -16,35 +16,219 @@ router.post("/submit", async (req, res) => {
 
         const {
 
-            payment_type,
-            package_id,
-            plan_id,
-            amount,
-            coins,
-            transaction_id,
-            screenshot
+    payment_type,
+    package_id,
+    plan_id,
+    transaction_id,
+    screenshot
 
-        } = req.body;
+} = req.body;
+
+if(
+
+payment_type!=="coin"
+
+&&
+
+payment_type!=="premium"
+
+){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Invalid payment type."
+
+});
+
+}
 
         const user_id = req.user.id;
 
+let amount = 0;
+let coins = 0;
+
+if(
+
+payment_type==="coin"
+
+&&
+
+!package_id
+
+){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Package is required."
+
+});
+
+}
+
+if(
+
+payment_type==="premium"
+
+&&
+
+!plan_id
+
+){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Premium plan is required."
+
+});
+
+}
+
+if(
+
+!payment_type||
+
+!transaction_id
+
+){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Missing required fields."
+
+});
+
+}
+
+/* ==========================
+   VALIDATE PACKAGE
+========================== */
+
+if(payment_type==="coin"){
+
+const pkg=await db.query(
+
+`
+SELECT *
+
+FROM coin_packages
+
+WHERE id=$1
+`,
+
+[
+package_id
+]
+
+);
+
+if(!pkg.rows.length){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Invalid package."
+
+});
+
+}
+
+amount=Number(pkg.rows[0].price);
+
+coins=
+
+Number(pkg.rows[0].coins)
+
++
+
+Number(pkg.rows[0].bonus_coins);
+
+}
+
+/* ==========================
+   VALIDATE PREMIUM PLAN
+========================== */
+
+if(payment_type==="premium"){
+
+const plan=await db.query(
+
+`
+SELECT
+price,
+coins
+FROM premium_plans
+WHERE id=$1
+`,
+
+[
+plan_id
+]
+
+);
+
+if(!plan.rows.length){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Invalid plan."
+
+});
+
+}
+
+amount=Number(plan.rows[0].price);
+
+coins=Number(plan.rows[0].coins);
+
+}
+
         const exists = await db.query(
             `
-            SELECT id
-            FROM manual_payments
-            WHERE transaction_id=$1
+            SELECT id,status
+
+FROM manual_payments
+
+WHERE transaction_id=$1
             `,
             [transaction_id]
         );
 
-        if (exists.rows.length) {
+        if(exists.rows.length){
 
-            return res.json({
-                success: false,
-                message: "Transaction ID already submitted."
-            });
+return res.status(400).json({
 
-        }
+success:false,
+
+message:
+
+"This UPI Transaction ID has already been submitted."
+
+});
+
+}
+
+if(transaction_id.length<8){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Invalid Transaction ID."
+
+});
+
+}
 
         await db.query(
 
@@ -73,7 +257,7 @@ router.post("/submit", async (req, res) => {
                 package_id || null,
                 plan_id || null,
                 amount,
-                coins || 0,
+                coins,
                 transaction_id,
                 screenshot || null
             ]
@@ -219,7 +403,37 @@ success:false
 
 }
 
+const{
+
+admin_note
+
+}=req.body;
+
 const p=payment.rows[0];
+
+if(p.status!=="Pending"){
+
+return res.status(400).json({
+
+success:false,
+
+message:"This payment has already been processed."
+
+});
+
+}
+
+if(p.status!=="Pending"){
+
+return res.json({
+
+success:false,
+
+message:"Payment already processed."
+
+});
+
+}
 
 if(p.status==="Approved"){
 
@@ -240,13 +454,19 @@ SET
 
 status='Approved',
 
+admin_note=$2,
+
 verified_at=NOW()
 
 WHERE id=$1
+
 `,
 
 [
-p.id
+p.id,
+
+admin_note||null
+
 ]
 
 );
@@ -256,6 +476,59 @@ p.id
 =========================== */
 
 if(p.payment_type==="coin"){
+
+const pkg = await db.query(
+
+`
+SELECT
+coins,
+bonus_coins,
+price
+FROM coin_packages
+WHERE id=$1
+`,
+
+[
+p.package_id
+]
+
+);
+
+if(!pkg.rows.length){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Coin package not found."
+
+});
+
+}
+
+const totalCoins =
+
+Number(pkg.rows[0].coins)
+
++
+
+Number(pkg.rows[0].bonus_coins);
+
+const packageAmount =
+
+Number(pkg.rows[0].price);
+
+if(Number(p.amount)!==packageAmount){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Payment amount mismatch."
+
+});
+
+}
 
 let wallet=await db.query(
 
@@ -330,7 +603,7 @@ WHERE user_id=$2
 `,
 
 [
-p.coins,
+totalCoins,
 p.user_id
 ]
 
@@ -381,8 +654,8 @@ $5
 [
 wallet.rows[0].id,
 p.user_id,
-p.coins,
-p.amount,
+totalCoins,
+packageAmount,
 p.transaction_id
 ]
 
@@ -395,6 +668,99 @@ p.transaction_id
 =========================== */
 
 if(p.payment_type==="premium"){
+
+const premium = await db.query(
+
+`
+SELECT
+coins,
+price,
+duration_days
+FROM premium_plans
+WHERE id=$1
+`,
+
+[
+p.plan_id
+]
+
+);
+
+if(!premium.rows.length){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Premium plan not found."
+
+});
+
+}
+
+const premiumCoins =
+
+Number(premium.rows[0].coins);
+
+const premiumPrice =
+
+Number(premium.rows[0].price);
+
+if(Number(p.amount)!==premiumPrice){
+
+return res.status(400).json({
+
+success:false,
+
+message:"Payment amount mismatch."
+
+});
+
+}
+
+const durationDays =
+
+Number(premium.rows[0].duration_days);
+
+const activePremium=await db.query(
+
+`
+SELECT id
+
+FROM user_premium
+
+WHERE
+
+user_id=$1
+
+AND
+
+status='Active'
+
+AND
+
+expiry_date>NOW()
+
+LIMIT 1
+`,
+
+[
+p.user_id
+]
+
+);
+
+if(activePremium.rows.length){
+
+return res.json({
+
+success:true,
+
+message:"Premium already active."
+
+});
+
+}
 
 const plan=await db.query(
 
@@ -412,8 +778,7 @@ p.plan_id
 
 );
 
-const days=
-plan.rows[0].duration_days;
+const days = durationDays;
 
 await db.query(
 
@@ -469,13 +834,65 @@ WHERE user_id=$2
 `,
 
 [
-plan.rows[0].coins,
+premiumCoins,
 p.user_id
 ]
 
 );
 
 }
+
+await db.query(
+
+`
+INSERT INTO reader_notifications
+(
+
+user_id,
+
+title,
+
+message,
+
+type,
+
+created_at
+
+)
+
+VALUES
+
+(
+
+$1,
+
+$2,
+
+$3,
+
+$4,
+
+NOW()
+
+)
+`,
+
+[
+p.user_id,
+
+"✅ Payment Approved",
+
+p.payment_type==="coin"
+
+? `Your payment has been verified. ${totalCoins} coins have been added to your wallet.`
+
+: "Your Premium Membership has been activated successfully.",
+
+"payment"
+
+]
+
+);
 
 res.json({
 
@@ -572,6 +989,58 @@ WHERE id=$1
 [
 req.params.id,
 admin_note||null
+]
+
+);
+
+await db.query(
+
+`
+INSERT INTO reader_notifications
+(
+
+user_id,
+
+title,
+
+message,
+
+type,
+
+created_at
+
+)
+
+VALUES
+
+(
+
+$1,
+
+$2,
+
+$3,
+
+$4,
+
+NOW()
+
+)
+`,
+
+[
+payment.rows[0].user_id,
+
+"❌ Payment Rejected",
+
+admin_note
+
+? `Reason: ${admin_note}`
+
+: "Your payment request was rejected. Please contact support.",
+
+"payment"
+
 ]
 
 );
