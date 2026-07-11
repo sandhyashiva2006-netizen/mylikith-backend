@@ -5019,11 +5019,23 @@ req.params.id
 
 );
 
+const followers = await pool.query(
+`
+SELECT COUNT(*) total
+FROM follows
+WHERE author_id=$1
+`,
+[req.params.id]
+);
+
 res.json({
 
 author:author.rows[0],
 
-stats:stats.rows[0],
+stats:{
+...stats.rows[0],
+followers:Number(followers.rows[0].total)
+},
 
 novels:novels.rows
 
