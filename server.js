@@ -802,11 +802,31 @@ result.rows[0].count
 
 });
 
-app.get("/api/authors/:id/followers", async(req,res)=>{
+app.get("/api/authors/:id/followers",async(req,res)=>{
 
 try{
 
-const result=await pool.query(
+const limit=12;
+
+const offset=
+
+(Number(req.query.page||1)-1)*limit;
+
+const total=await pool.query(
+
+`
+SELECT COUNT(*) total
+FROM follows
+WHERE author_id=$1
+`,
+
+[
+req.params.id
+]
+
+);
+
+const followers=await pool.query(
 
 `
 SELECT
@@ -814,6 +834,8 @@ SELECT
 u.id,
 
 u.name,
+
+u.role,
 
 u.profile_image
 
@@ -825,16 +847,34 @@ ON f.user_id=u.id
 
 WHERE f.author_id=$1
 
-ORDER BY u.name
+ORDER BY f.id DESC
+
+LIMIT $2
+
+OFFSET $3
 `,
 
 [
-req.params.id
+req.params.id,
+limit,
+offset
 ]
 
 );
 
-res.json(result.rows);
+res.json({
+
+followers:followers.rows,
+
+totalFollowers:Number(total.rows[0].total),
+
+hasMore:
+
+offset+limit<
+
+Number(total.rows[0].total)
+
+});
 
 }catch(err){
 
