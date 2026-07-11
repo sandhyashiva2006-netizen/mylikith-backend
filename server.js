@@ -109,6 +109,8 @@ const lockedRoutes =
 require("./routes/locked-chapters");
 const adminRoutes = require("./routes/admin");
 const premiumRoutes=require("./routes/premium");
+const manualPaymentRoutes =
+require("./routes/manual-payments");
 const pageRoutes = require("./routes/pages");
 
 
@@ -166,7 +168,10 @@ require("./routes/referrals")
 
 app.use("/api/admin", adminRoutes);
 app.use("/api/premium",premiumRoutes);
-
+app.use(
+"/api/manual-payments",
+manualPaymentRoutes
+);
 
 
 app.get("/", (req, res) => {
