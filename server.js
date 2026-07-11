@@ -802,6 +802,103 @@ result.rows[0].count
 
 });
 
+app.get("/api/authors/:id/followers", async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+u.id,
+
+u.name,
+
+u.profile_image
+
+FROM follows f
+
+JOIN users u
+
+ON f.user_id=u.id
+
+WHERE f.author_id=$1
+
+ORDER BY u.name
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+app.post("/api/authors/:id/contact",async(req,res)=>{
+
+try{
+
+const{
+
+user_id,
+
+message
+
+}=req.body;
+
+await createNotification(
+
+req.params.id,
+
+"📩 New Reader Message",
+
+message,
+
+"author_contact",
+
+user_id
+
+);
+
+res.json({
+
+success:true,
+
+message:"Your message has been sent."
+
+});
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false,
+
+message:"Unable to send message."
+
+});
+
+}
+
+});
 
 app.post(
 "/api/novels/:id/view",
@@ -836,6 +933,54 @@ console.log(err);
 
 res.status(500).json({
 success:false
+});
+
+}
+
+});
+
+app.get("/api/authors/:id/followers", async(req,res)=>{
+
+try{
+
+const result=await pool.query(
+
+`
+SELECT
+
+u.id,
+
+u.name,
+
+u.profile_image
+
+FROM follows f
+
+JOIN users u
+
+ON f.user_id=u.id
+
+WHERE f.author_id=$1
+
+ORDER BY u.name
+`,
+
+[
+req.params.id
+]
+
+);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.log(err);
+
+res.status(500).json({
+
+success:false
+
 });
 
 }
