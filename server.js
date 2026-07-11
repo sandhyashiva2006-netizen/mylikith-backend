@@ -1500,7 +1500,12 @@ SELECT
 id,
 name,
 bio,
-profile_image
+profile_image,
+website,
+instagram,
+facebook,
+x,
+youtube
 FROM users
 WHERE id=$1
 `,
@@ -5038,24 +5043,69 @@ const stats=await pool.query(
 
 `
 SELECT
-COUNT(*) novels,
-COALESCE(SUM(views),0) views,
+
+COUNT(n.id) AS novels,
+
+COALESCE(SUM(n.views),0) AS views,
+
 COALESCE(
 ROUND(
 AVG(
 CASE
-WHEN rating > 0 THEN rating
+WHEN n.rating > 0 THEN n.rating
 END
 ),
 1
 ),
 0
-) rating
-FROM novels
+) AS rating,
+
+(
+SELECT COUNT(*)
+FROM follows
+WHERE author_id=$1
+) AS followers,
+
+(
+SELECT COUNT(*)
+FROM chapters c
+JOIN novels n2
+ON c.novel_id=n2.id
 WHERE
-author_id=$1
-AND LOWER(publish_status)='published'
-AND LOWER(approval_status)='approved';
+n2.author_id=$1
+AND LOWER(n2.publish_status)='published'
+AND LOWER(n2.approval_status)='approved'
+) AS chapters,
+
+(
+SELECT COALESCE(COUNT(*),0)
+FROM chapter_likes cl
+JOIN chapters c
+ON cl.chapter_id=c.id
+JOIN novels n3
+ON c.novel_id=n3.id
+WHERE
+n3.author_id=$1
+AND LOWER(n3.publish_status)='published'
+AND LOWER(n3.approval_status)='approved'
+) AS likes,
+
+COALESCE(
+ROUND(
+SUM(n.views)::numeric
+/
+NULLIF(COUNT(n.id),0),
+0
+),
+0
+) AS average_views
+
+FROM novels n
+
+WHERE
+n.author_id=$1
+AND LOWER(n.publish_status)='published'
+AND LOWER(n.approval_status)='approved';
 `,
 
 [
@@ -5114,7 +5164,7 @@ author:author.rows[0],
 
 stats:{
 ...stats.rows[0],
-followers:Number(followers.rows[0].total)
+followers:Number(stats.rows[0].followers)
 },
 
 novels:novels.rows
