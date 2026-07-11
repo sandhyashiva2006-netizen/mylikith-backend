@@ -4956,26 +4956,24 @@ const stats=await pool.query(
 
 `
 SELECT
-
 COUNT(*) novels,
-
 COALESCE(SUM(views),0) views,
-
-ROUND(AVG(rating),1) rating
-
+COALESCE(
+ROUND(
+AVG(
+CASE
+WHEN rating > 0 THEN rating
+END
+),
+1
+),
+0
+) rating
 FROM novels
-
 WHERE
-
 author_id=$1
-
-AND
-
-LOWER(publish_status)='published'
-
-AND
-
-LOWER(approval_status)='approved'
+AND LOWER(publish_status)='published'
+AND LOWER(approval_status)='approved';
 `,
 
 [
