@@ -1475,6 +1475,86 @@ app.get("/api/debug-users-columns", async (req, res) => {
 
 if (process.env.NODE_ENV !== "production") {
 
+app.post(
+"/api/profile/upload",
+
+(req,res)=>{
+
+upload.single("photo")(req,res,async function(err){
+
+try{
+
+if(err){
+
+return res.status(400).json({
+
+success:false,
+
+message:err.message
+
+});
+
+}
+
+if(!req.file){
+
+return res.status(400).json({
+
+success:false,
+
+message:"No image selected."
+
+});
+
+}
+
+const{
+
+user_id
+
+}=req.body;
+
+await pool.query(
+
+`
+UPDATE users
+
+SET profile_image=$1
+
+WHERE id=$2
+`,
+
+[
+req.file.path,
+user_id
+]
+
+);
+
+res.json({
+
+success:true,
+
+url:req.file.path
+
+});
+
+}catch(e){
+
+console.log(e);
+
+res.status(500).json({
+
+success:false
+
+});
+
+}
+
+});
+
+});
+
 app.get("/api/debug-db", async (req, res) => {
   try {
     const result = await pool.query(`
