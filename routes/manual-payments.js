@@ -34,6 +34,7 @@ payment_type!=="premium"
 
 ){
 
+
 return res.status(400).json({
 
 success:false,
@@ -59,6 +60,7 @@ payment_type==="coin"
 
 ){
 
+
 return res.status(400).json({
 
 success:false,
@@ -79,6 +81,7 @@ payment_type==="premium"
 
 ){
 
+
 return res.status(400).json({
 
 success:false,
@@ -96,6 +99,7 @@ if(
 !transaction_id
 
 ){
+
 
 return res.status(400).json({
 
@@ -130,6 +134,7 @@ package_id
 );
 
 if(!pkg.rows.length){
+
 
 return res.status(400).json({
 
@@ -177,6 +182,7 @@ plan_id
 
 if(!plan.rows.length){
 
+
 return res.status(400).json({
 
 success:false,
@@ -206,6 +212,7 @@ WHERE transaction_id=$1
 
         if(exists.rows.length){
 
+
 return res.status(400).json({
 
 success:false,
@@ -219,6 +226,7 @@ message:
 }
 
 if(transaction_id.length<8){
+
 
 return res.status(400).json({
 
@@ -331,6 +339,7 @@ router.get("/admin/list", async (req, res) => {
 
         if (req.user.role !== "admin") {
 
+
             return res.status(403).json({
                 success:false,
                 message:"Access denied."
@@ -371,6 +380,7 @@ try{
 
 if(req.user.role!=="admin"){
 
+
 return res.status(403).json({
 
 success:false
@@ -379,12 +389,15 @@ success:false
 
 }
 
+await db.query("BEGIN");
+
 const payment=await db.query(
 
 `
 SELECT *
 FROM manual_payments
 WHERE id=$1
+FOR UPDATE
 `,
 
 [
@@ -394,6 +407,8 @@ req.params.id
 );
 
 if(payment.rows.length===0){
+
+await db.query("ROLLBACK");
 
 return res.status(404).json({
 
@@ -411,7 +426,11 @@ admin_note
 
 const p=payment.rows[0];
 
+let notificationMessage = "";
+
 if(p.status!=="Pending"){
+
+await db.query("ROLLBACK");
 
 return res.status(400).json({
 
@@ -423,53 +442,9 @@ message:"This payment has already been processed."
 
 }
 
-if(p.status!=="Pending"){
 
-return res.json({
 
-success:false,
 
-message:"Payment already processed."
-
-});
-
-}
-
-if(p.status==="Approved"){
-
-return res.json({
-
-success:true
-
-});
-
-}
-
-await db.query(
-
-`
-UPDATE manual_payments
-
-SET
-
-status='Approved',
-
-admin_note=$2,
-
-verified_at=NOW()
-
-WHERE id=$1
-
-`,
-
-[
-p.id,
-
-admin_note||null
-
-]
-
-);
 
 /* ===========================
    COIN PURCHASE
@@ -496,6 +471,8 @@ p.package_id
 
 if(!pkg.rows.length){
 
+await db.query("ROLLBACK");
+
 return res.status(400).json({
 
 success:false,
@@ -519,6 +496,8 @@ const packageAmount =
 Number(pkg.rows[0].price);
 
 if(Number(p.amount)!==packageAmount){
+
+await db.query("ROLLBACK");
 
 return res.status(400).json({
 
@@ -661,7 +640,12 @@ p.transaction_id
 
 );
 
+notificationMessage =
+`Your payment has been verified. ${totalCoins} coins have been added to your wallet.`;
+
 }
+
+
 
 /* ===========================
    PREMIUM PURCHASE
@@ -688,6 +672,8 @@ p.plan_id
 
 if(!premium.rows.length){
 
+await db.query("ROLLBACK");
+
 return res.status(400).json({
 
 success:false,
@@ -708,6 +694,8 @@ Number(premium.rows[0].price);
 
 if(Number(p.amount)!==premiumPrice){
 
+await db.query("ROLLBACK");
+
 return res.status(400).json({
 
 success:false,
@@ -717,6 +705,9 @@ message:"Payment amount mismatch."
 });
 
 }
+
+notificationMessage =
+"Your Premium Membership has been activated successfully.";
 
 const durationDays =
 
@@ -752,12 +743,11 @@ p.user_id
 
 if(activePremium.rows.length){
 
+await db.query("ROLLBACK");
+
 return res.json({
-
-success:true,
-
-message:"Premium already active."
-
+    success:true,
+    message:"Premium already active."
 });
 
 }
@@ -882,17 +872,41 @@ p.user_id,
 
 "✅ Payment Approved",
 
-p.payment_type==="coin"
-
-? `Your payment has been verified. ${totalCoins} coins have been added to your wallet.`
-
-: "Your Premium Membership has been activated successfully.",
+notificationMessage,
 
 "payment"
 
 ]
 
 );
+
+await db.query(
+
+`
+UPDATE manual_payments
+
+SET
+
+status='Approved',
+
+admin_note=$2,
+
+verified_at=NOW()
+
+WHERE id=$1
+
+`,
+
+[
+p.id,
+
+admin_note||null
+
+]
+
+);
+
+await db.query("COMMIT");
 
 res.json({
 
@@ -904,11 +918,15 @@ message:"Payment approved."
 
 }catch(err){
 
+await db.query("ROLLBACK");
+
 console.log(err);
 
 res.status(500).json({
 
-success:false
+success:false,
+
+message:err.message
 
 });
 
@@ -926,6 +944,7 @@ try{
 
 if(req.user.role!=="admin"){
 
+
 return res.status(403).json({
 
 success:false,
@@ -935,6 +954,8 @@ message:"Access denied."
 });
 
 }
+
+await db.query("BEGIN");
 
 const{
 
@@ -959,6 +980,8 @@ req.params.id
 );
 
 if(payment.rows.length===0){
+
+await db.query("ROLLBACK");
 
 return res.status(404).json({
 
@@ -1045,6 +1068,8 @@ admin_note
 
 );
 
+await db.query("COMMIT");
+
 res.json({
 
 success:true,
@@ -1056,6 +1081,8 @@ message:"Payment rejected."
 }catch(err){
 
 console.log(err);
+
+await db.query("ROLLBACK");
 
 res.status(500).json({
 
@@ -1109,6 +1136,7 @@ req.user.id
 );
 
 if(payment.rows.length===0){
+
 
 return res.status(404).json({
 
