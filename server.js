@@ -420,11 +420,27 @@ SELECT *
 FROM novels
 
 WHERE
+
 LOWER(publish_status)='published'
+
 AND
+
 LOWER(approval_status)='approved'
+
 AND
+(
+
 LOWER(title) LIKE LOWER($1)
+
+OR
+
+LOWER(language) LIKE LOWER($1)
+
+OR
+
+LOWER(category) LIKE LOWER($1)
+
+)
 
 ORDER BY id DESC
 `,
