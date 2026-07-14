@@ -193,16 +193,9 @@ SELECT *
 FROM novels
 
 WHERE
-
-LOWER(status)='published'
-
-AND
-
-LOWER(approval_status)='approved'
-
-AND
-
 LOWER(publish_status)='published'
+AND
+LOWER(approval_status)='approved'
 
 ORDER BY id DESC
 `
@@ -427,19 +420,10 @@ SELECT *
 FROM novels
 
 WHERE
-
-LOWER(status)='published'
-
-AND
-
-LOWER(approval_status)='approved'
-
-AND
-
 LOWER(publish_status)='published'
-
 AND
-
+LOWER(approval_status)='approved'
+AND
 LOWER(title) LIKE LOWER($1)
 
 ORDER BY id DESC
