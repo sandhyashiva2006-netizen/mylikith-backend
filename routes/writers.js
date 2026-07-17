@@ -398,41 +398,146 @@ success:false
 
 });
 
-router.delete(
-"/novels/:id",
-async (req,res)=>{
+router.delete("/novels/:id", async (req, res) => {
+    const client = await db.connect();
 
-try{
+    try {
+        const novelId = req.params.id;
 
-await db.query(
+        await client.query("BEGIN");
 
-`
-DELETE FROM novels
-WHERE id=$1
-`,
+        // Chapter ids
+        const chapters = await client.query(
+            `SELECT id FROM chapters WHERE novel_id=$1`,
+            [novelId]
+        );
 
-[
-req.params.id
-]
+        const chapterIds = chapters.rows.map(r => r.id);
 
-);
+        if (chapterIds.length) {
 
-res.json({
-success:true
-});
+            await client.query(
+                `DELETE FROM comments
+                 WHERE chapter_id = ANY($1::int[])`,
+                [chapterIds]
+            );
 
-}
+            await client.query(
+                `DELETE FROM bookmarks
+                 WHERE chapter_id = ANY($1::int[])`,
+                [chapterIds]
+            );
 
-catch(err){
+            await client.query(
+                `DELETE FROM chapter_likes
+                 WHERE chapter_id = ANY($1::int[])`,
+                [chapterIds]
+            );
 
-console.log(err);
+            await client.query(
+                `DELETE FROM reading_progress
+                 WHERE chapter_id = ANY($1::int[])`,
+                [chapterIds]
+            );
 
-res.status(500).json({
-success:false
-});
+            await client.query(
+                `DELETE FROM reading_history
+                 WHERE chapter_id = ANY($1::int[])`,
+                [chapterIds]
+            );
 
-}
+            await client.query(
+                `DELETE FROM reader_feed
+                 WHERE chapter_id = ANY($1::int[])`,
+                [chapterIds]
+            );
 
+            await client.query(
+                `DELETE FROM reader_notifications
+                 WHERE type='chapter'
+                 AND reference_id = ANY($1::int[])`,
+                [chapterIds]
+            );
+
+            await client.query(
+                `DELETE FROM writer_earnings
+                 WHERE chapter_id = ANY($1::int[])`,
+                [chapterIds]
+            );
+        }
+
+        await client.query(
+            `DELETE FROM bookmarks WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM reading_history WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM library WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM novel_ratings WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM locked_chapters WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM unlocked_chapters WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM writer_earnings WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM reader_feed WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM chapters WHERE novel_id=$1`,
+            [novelId]
+        );
+
+        await client.query(
+            `DELETE FROM novels WHERE id=$1`,
+            [novelId]
+        );
+
+        await client.query("COMMIT");
+
+        res.json({
+            success: true,
+            message: "Novel deleted successfully."
+        });
+
+    } catch (err) {
+
+        await client.query("ROLLBACK");
+        console.error(err);
+
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+
+    } finally {
+
+        client.release();
+
+    }
 });
 
 router.post(
