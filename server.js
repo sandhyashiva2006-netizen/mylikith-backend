@@ -188,16 +188,30 @@ app.get("/api/novels", async (req, res) => {
     const result = await pool.query(
 
 `
-SELECT *
+SELECT
+    n.*,
+    COALESCE((
+        SELECT COUNT(*)
+        FROM chapter_likes cl
+        JOIN chapters c
+        ON cl.chapter_id = c.id
+        WHERE c.novel_id = n.id
+    ),0) AS likes,
 
-FROM novels
+    COALESCE((
+        SELECT COUNT(*)
+        FROM reviews r
+        WHERE r.novel_id = n.id
+    ),0) AS reviews
+
+FROM novels n
 
 WHERE
-LOWER(publish_status)='published'
+LOWER(n.publish_status)='published'
 AND
-LOWER(approval_status)='approved'
+LOWER(n.approval_status)='approved'
 
-ORDER BY id DESC
+ORDER BY n.id DESC;
 `
 
 );
