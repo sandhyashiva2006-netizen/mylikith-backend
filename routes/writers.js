@@ -172,6 +172,53 @@ success:false
 
 });
 
+router.get("/featured", async (req, res) => {
+
+    try {
+
+        const result = await db.query(`
+            SELECT
+                u.id,
+                u.name,
+                u.profile_image,
+                COUNT(DISTINCT n.id) AS novels,
+                COUNT(DISTINCT f.user_id) AS followers
+            FROM users u
+            JOIN writer_profiles wp
+                ON wp.user_id = u.id
+            LEFT JOIN novels n
+                ON n.author_id = u.id
+                AND LOWER(n.publish_status) = 'published'
+                AND LOWER(n.approval_status) = 'approved'
+            LEFT JOIN follows f
+                ON f.author_id = u.id
+            WHERE LOWER(wp.status) = 'approved'
+            GROUP BY
+                u.id,
+                u.name,
+                u.profile_image
+            ORDER BY
+                followers DESC,
+                novels DESC,
+                u.name ASC
+            LIMIT 4
+        `);
+
+        res.json(result.rows);
+
+    } catch (err) {
+
+        console.error(err);
+
+        res.status(500).json({
+            success: false,
+            message: "Unable to load featured writers."
+        });
+
+    }
+
+});
+
 router.post("/novels", async (req, res) => {
 
 try {
