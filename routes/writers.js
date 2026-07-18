@@ -197,9 +197,10 @@ GREATEST(
                 ON f.author_id = u.id
             WHERE LOWER(wp.status) = 'approved'
             GROUP BY
-                u.id,
-                u.name,
-                u.profile_image
+    u.id,
+    u.name,
+    u.profile_image,
+    wp.followers
             ORDER BY
                 followers DESC,
                 novels DESC,
