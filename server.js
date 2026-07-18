@@ -211,7 +211,11 @@ LOWER(n.publish_status)='published'
 AND
 LOWER(n.approval_status)='approved'
 
-ORDER BY n.id DESC;
+ORDER BY
+n.views DESC,
+likes DESC,
+n.rating DESC,
+n.id DESC;
 `
 
 );
