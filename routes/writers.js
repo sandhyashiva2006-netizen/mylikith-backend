@@ -182,7 +182,10 @@ router.get("/featured", async (req, res) => {
                 u.name,
                 u.profile_image,
                 COUNT(DISTINCT n.id) AS novels,
-                COUNT(DISTINCT f.user_id) AS followers
+GREATEST(
+    wp.followers,
+    COUNT(DISTINCT f.user_id)
+) AS followers
             FROM users u
             JOIN writer_profiles wp
                 ON wp.user_id = u.id
