@@ -190,13 +190,7 @@ app.get("/api/novels", async (req, res) => {
 `
 SELECT
     n.*,
-    COALESCE((
-        SELECT COUNT(*)
-        FROM chapter_likes cl
-        JOIN chapters c
-        ON cl.chapter_id = c.id
-        WHERE c.novel_id = n.id
-    ),0) AS likes,
+    
 
     COALESCE((
         SELECT COUNT(*)
@@ -213,7 +207,7 @@ LOWER(n.approval_status)='approved'
 
 ORDER BY
 n.views DESC,
-likes DESC,
+n.likes DESC,
 n.rating DESC,
 n.id DESC;
 `
