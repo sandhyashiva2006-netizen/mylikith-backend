@@ -3353,24 +3353,34 @@ const result=await pool.query(
 SELECT
 
 u.id,
-
 u.name,
+u.profile_image,
 
-u.email,
+COUNT(DISTINCT n.id) AS novels,
 
-COUNT(n.id) AS novels
+COUNT(DISTINCT f.id) AS followers
 
 FROM users u
 
 LEFT JOIN novels n
+ON u.id = n.author_id
 
-ON u.id=n.author_id
+LEFT JOIN follows f
+ON u.id = f.author_id
 
 WHERE u.role='writer'
 
-GROUP BY u.id
+GROUP BY
+u.id,
+u.name,
+u.profile_image
 
-ORDER BY u.id DESC
+ORDER BY
+followers DESC,
+novels DESC,
+u.name ASC
+
+LIMIT 4;
 `
 
 );
