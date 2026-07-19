@@ -5616,6 +5616,15 @@ console.log(err);
 
 });
 
+app.get("/health", (req, res) => {
+    res.status(200).json({
+        success: true,
+        status: "OK",
+        service: "MyLikith Backend",
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}`
