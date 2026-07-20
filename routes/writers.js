@@ -7,170 +7,99 @@ const router = express.Router();
    APPLY FOR WRITER
 ========================================== */
 
-router.post("/apply", async (req,res)=>{
+router.post("/become-writer", async (req, res) => {
+    try {
 
-try{
+        const {
+            user_id,
+            pen_name,
+            bio,
+            experience
+        } = req.body;
 
-const{
+        const existing = await db.query(
+            `
+            SELECT id
+            FROM writer_profiles
+            WHERE user_id=$1
+            `,
+            [user_id]
+        );
 
-user_id,
-pen_name,
-bio,
-experience
+        if (existing.rows.length) {
+            return res.json({
+                success: true,
+alreadyWriter: true,
+message: "Already a writer."
+            });
+        }
 
-}=req.body;
+        await db.query(
+            `
+            INSERT INTO writer_profiles
+            (
+                user_id,
+                pen_name,
+                bio,
+                experience,
+                agreement,
+                agreement_accepted_at,
+                status,
+                approved_at,
+                first_novel_approved
+            )
+            VALUES
+            (
+                $1,
+                $2,
+                $3,
+                $4,
+                true,
+                NOW(),
+                'Approved',
+                NOW(),
+                false
+            )
+            `,
+            [
+                user_id,
+                pen_name || "",
+                bio || "",
+                experience || ""
+            ]
+        );
 
-const existing=await db.query(
+        await db.query(
+            `
+            UPDATE users
+            SET role='writer'
+            WHERE id=$1
+            `,
+            [user_id]
+        );
 
-`
-SELECT id
-FROM writer_profiles
-WHERE user_id=$1
-`,
+        await createNotification(
+            user_id,
+            "🎉 Welcome to MyLikith Writers",
+            "You are now a writer. Start publishing your stories!",
+            "writer"
+        );
 
-[user_id]
+        res.json({
+            success: true
+        });
 
-);
+    } catch (err) {
 
-if(existing.rows.length){
+        console.log(err);
 
-return res.json({
+        res.status(500).json({
+            success: false
+        });
 
-success:false,
-
-message:"Application already submitted."
-
+    }
 });
 
-}
-
-await db.query(
-
-`
-INSERT INTO writer_profiles
-(
-
-user_id,
-
-pen_name,
-
-bio,
-
-experience,
-
-agreement,
-
-agreement_accepted_at
-
-)
-
-VALUES
-
-($1,$2,$3,$4,true,NOW())
-`,
-
-[
-user_id,
-pen_name,
-bio,
-experience
-]
-
-);
-
-res.json({
-
-success:true,
-
-message:"Application submitted successfully."
-
-});
-
-await createNotification(
-
-user_id,
-
-"✍️ Writer Application Submitted",
-
-"Your application has been submitted successfully and is awaiting admin approval.",
-
-"writer_application"
-
-);
-
-}catch(err){
-
-console.log(err);
-
-res.status(500).json({
-
-success:false
-
-});
-
-}
-
-});
-
-/* ==========================================
-   WRITER APPLICATION STATUS
-========================================== */
-
-router.get(
-"/application/:userId",
-async(req,res)=>{
-
-try{
-
-const result=
-
-await db.query(
-
-`
-SELECT *
-
-FROM writer_profiles
-
-WHERE user_id=$1
-`,
-
-[
-req.params.userId
-]
-
-);
-
-if(result.rows.length===0){
-
-return res.json({
-
-exists:false
-
-});
-
-}
-
-res.json({
-
-exists:true,
-
-application:result.rows[0]
-
-});
-
-}catch(err){
-
-console.log(err);
-
-res.status(500).json({
-
-success:false
-
-});
-
-}
-
-});
 
 router.get("/featured", async (req, res) => {
 
