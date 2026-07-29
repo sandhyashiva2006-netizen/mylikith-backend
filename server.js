@@ -4758,6 +4758,7 @@ success:false
 
 });
 
+/*
 setInterval(async()=>{
 
 try{
@@ -4777,6 +4778,7 @@ method:"POST"
 }catch(e){}
 
 },3600000);
+*/
 
 app.get("/api/recommendations/:userId", async (req, res) => {
 
