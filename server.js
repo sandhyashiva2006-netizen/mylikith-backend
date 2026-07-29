@@ -4758,6 +4758,7 @@ success:false
 
 });
 
+/*
 setInterval(async()=>{
 
 try{
@@ -4777,6 +4778,7 @@ method:"POST"
 }catch(e){}
 
 },3600000);
+*/
 
 app.get("/api/recommendations/:userId", async (req, res) => {
 
@@ -5576,6 +5578,7 @@ success:false
 
 const cron=require("node-cron");
 
+/*
 cron.schedule("* * * * *",async()=>{
 
 try{
@@ -5615,6 +5618,7 @@ console.log(err);
 }
 
 });
+*/
 
 app.get("/health", (req, res) => {
     res.status(200).json({
