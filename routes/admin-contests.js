@@ -1,15 +1,32 @@
 const express = require("express");
 const router = express.Router();
-const pool = require("../config/db");
+const db = require("../db");
 const auth = require("../middleware/auth");
-const admin = require("../middleware/admin");
+
+
+router.use(auth);
+
+router.use((req, res, next) => {
+
+    if (req.user.role !== "admin") {
+
+        return res.status(403).json({
+            success: false,
+            message: "Admin access required."
+        });
+
+    }
+
+    next();
+
+});
 
 // Get all contests
-router.get("/", auth, admin, async (req, res) => {
+router.get("/", async (req, res) => {
 
     try {
 
-        const result = await pool.query(`
+        const result = await db.query(`
             SELECT
                 c.*,
                 (
@@ -36,11 +53,11 @@ router.get("/", auth, admin, async (req, res) => {
 });
 
 // Get single contest
-router.get("/:id", auth, admin, async (req, res) => {
+router.get("/:id", async (req, res) => {
 
     try {
 
-        const result = await pool.query(
+        const result = await db.query(
             "SELECT * FROM contests WHERE id=$1",
             [req.params.id]
         );
@@ -70,7 +87,7 @@ router.get("/:id", auth, admin, async (req, res) => {
 });
 
 // Create contest
-router.post("/", auth, admin, async (req, res) => {
+router.post("/", async (req, res) => {
 
     try {
 
@@ -79,7 +96,6 @@ router.post("/", auth, admin, async (req, res) => {
             description,
             language,
             prize_pool,
-            registration_start,
             registration_end,
             start_date,
             end_date,
@@ -87,22 +103,20 @@ router.post("/", auth, admin, async (req, res) => {
             rules
         } = req.body;
 
-        const result = await pool.query(`
+        const result = await db.query(`
             INSERT INTO contests
             (
                 title,
                 description,
                 language,
                 prize_pool,
-                registration_start,
                 registration_end,
                 start_date,
                 end_date,
                 status,
                 rules
             )
-            VALUES
-            ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
             RETURNING *
         `,
         [
@@ -110,7 +124,6 @@ router.post("/", auth, admin, async (req, res) => {
             description,
             language,
             prize_pool,
-            registration_start,
             registration_end,
             start_date,
             end_date,
@@ -137,7 +150,7 @@ router.post("/", auth, admin, async (req, res) => {
 });
 
 // Update contest
-router.put("/:id", auth, admin, async (req, res) => {
+router.put("/:id", async (req, res) => {
 
     try {
 
@@ -153,7 +166,7 @@ router.put("/:id", auth, admin, async (req, res) => {
             rules
         } = req.body;
 
-        const result = await pool.query(`
+        const result = await db.query(`
             UPDATE contests
             SET
                 title=$1,
@@ -200,11 +213,11 @@ router.put("/:id", auth, admin, async (req, res) => {
 });
 
 // Delete contest
-router.delete("/:id", auth, admin, async (req, res) => {
+router.delete("/:id", async (req, res) => {
 
     try {
 
-        await pool.query(
+        await db.query(
             "DELETE FROM contests WHERE id=$1",
             [req.params.id]
         );
