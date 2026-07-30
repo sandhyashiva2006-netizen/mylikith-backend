@@ -173,6 +173,7 @@ app.use(
 "/api/manual-payments",
 manualPaymentRoutes
 );
+app.use("/api/admin/contests", require("./routes/admin-contests"));
 
 
 app.get("/", (req, res) => {
