@@ -593,9 +593,10 @@ AND LOWER(approval_status) = 'approved'
 AND language = $3
             `,
             [
-                novel_id,
-                req.user.id
-            ]
+    novel_id,
+    req.user.id,
+    contestData.language
+]
         );
 
         if (!novel.rows.length) {
