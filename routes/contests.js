@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require("../db");
 const auth = require("../middleware/auth");
 
-router.use(auth);
+
 
 /* ===============================
    GET ALL CONTESTS
@@ -36,7 +36,7 @@ router.get("/", async (req, res) => {
    CREATE CONTEST
 ================================ */
 
-router.post("/", async (req, res) => {
+router.post("/", auth, async (req, res) => {
 
     try {
 
@@ -155,7 +155,7 @@ router.get("/active", async (req, res) => {
    ELIGIBLE NOVELS
 ================================ */
 
-router.get("/eligible-novels", async (req, res) => {
+router.get("/eligible-novels", auth, async (req, res) => {
 
     try {
 
@@ -262,7 +262,7 @@ router.get("/winners", async (req, res) => {
    UPDATE CONTEST
 ================================ */
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", auth, async (req, res) => {
 
     try {
 
@@ -333,7 +333,7 @@ router.put("/:id", async (req, res) => {
    DELETE CONTEST
 ================================ */
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", auth, async (req, res) => {
 
     try {
 
@@ -451,7 +451,7 @@ router.get("/:id/categories", async (req, res) => {
    ADD CATEGORY
 ================================ */
 
-router.post("/:id/categories", async (req, res) => {
+router.post("/:id/categories", auth, async (req, res) => {
 
     try {
 
@@ -497,7 +497,7 @@ router.post("/:id/categories", async (req, res) => {
    DELETE CATEGORY
 ================================ */
 
-router.delete("/categories/:id", async (req, res) => {
+router.delete("/categories/:id", auth, async (req, res) => {
 
     try {
 
@@ -538,7 +538,7 @@ router.delete("/categories/:id", async (req, res) => {
    REGISTER FOR CONTEST
 ================================ */
 
-router.post("/:id/register", async (req, res) => {
+router.post("/:id/register", auth, async (req, res) => {
 
     try {
 
@@ -684,7 +684,7 @@ if (!category.rows.length) {
    MY CONTEST ENTRY
 ================================ */
 
-router.get("/:id/my-entry", async (req, res) => {
+router.get("/:id/my-entry", auth, async (req, res) => {
 
     try {
 
@@ -726,7 +726,7 @@ router.get("/:id/my-entry", async (req, res) => {
    ADMIN - VIEW CONTEST ENTRIES
 ================================ */
 
-router.get("/:id/entries", async (req, res) => {
+router.get("/:id/entries", auth, async (req, res) => {
 
     try {
 
@@ -775,7 +775,7 @@ router.get("/:id/entries", async (req, res) => {
    ADMIN - REMOVE ENTRY
 ================================ */
 
-router.delete("/entries/:entryId", async (req, res) => {
+router.delete("/entries/:entryId", auth, async (req, res) => {
 
     try {
 
@@ -815,7 +815,7 @@ router.delete("/entries/:entryId", async (req, res) => {
    VOTE FOR CONTEST ENTRY
 ================================ */
 
-router.post("/entries/:entryId/vote", async (req, res) => {
+router.post("/entries/:entryId/vote", auth, async (req, res) => {
 
     try {
 
