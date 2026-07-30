@@ -83,13 +83,10 @@ try{
 await pool.query(
 
 `UPDATE novels
-
 SET
-
-publish_status='published',
-
-published_at=NOW()
-
+    publish_status='published',
+    visibility='public',
+    published_at=NOW()
 WHERE id=$1`,
 
 [req.params.id]

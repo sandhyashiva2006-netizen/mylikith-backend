@@ -185,9 +185,10 @@ router.get("/eligible-novels", auth, async (req, res) => {
                 n.title
             FROM novels n
             WHERE
-                n.author_id=$1
-                AND n.status='published'
-                AND NOT EXISTS (
+    n.author_id = $1
+    AND LOWER(n.publish_status) = 'published'
+    AND LOWER(n.approval_status) = 'approved'
+    AND NOT EXISTS (
                     SELECT 1
                     FROM contest_entries ce
                     WHERE ce.contest_id=$2
@@ -587,7 +588,7 @@ if (new Date() > new Date(contestData.registration_end)) {
 FROM novels
 WHERE id=$1
 AND author_id=$2
-AND status='published'
+AND LOWER(n.publish_status) = 'published'
             `,
             [
                 novel_id,
