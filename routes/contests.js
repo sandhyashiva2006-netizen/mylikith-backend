@@ -249,7 +249,7 @@ router.get("/winners", async (req, res) => {
 
     } catch (err) {
 
-        console.log(err);
+        console.error("Winners Error:", err);
 
         res.status(500).json({
             success: false
@@ -912,7 +912,7 @@ router.get("/:id/leaderboard", async (req, res) => {
 
     } catch(err){
 
-        console.error(err);
+        console.error("Leaderboard Error:", err);
 
         res.status(500).json({
             success:false
