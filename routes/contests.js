@@ -742,7 +742,7 @@ router.get("/:id/entries", auth, async (req, res) => {
             `
             SELECT
                 ce.id,
-                ce.registered_at,
+                ce.created_at AS registered_at,
                 u.name AS writer_name,
                 n.title AS novel_title,
                 cc.category
@@ -754,7 +754,7 @@ router.get("/:id/entries", auth, async (req, res) => {
             JOIN contest_categories cc
                 ON ce.category_id = cc.id
             WHERE ce.contest_id = $1
-            ORDER BY ce.registered_at DESC
+            ORDER BY ce.created_at DESC
             `,
             [req.params.id]
         );
