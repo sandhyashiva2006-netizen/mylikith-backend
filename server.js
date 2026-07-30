@@ -112,6 +112,7 @@ const premiumRoutes=require("./routes/premium");
 const manualPaymentRoutes =
 require("./routes/manual-payments");
 const pageRoutes = require("./routes/pages");
+const contestRoutes = require("./routes/contests");
 
 
 app.use(helmet({
@@ -163,7 +164,7 @@ app.use(
 require("./routes/referrals")
 
 );
-
+app.use("/api/contests", contestRoutes);
 
 
 app.use("/api/admin", adminRoutes);
