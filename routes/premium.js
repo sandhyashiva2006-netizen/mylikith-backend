@@ -353,27 +353,6 @@ days
 
 );
 
-await db.query(
-
-`
-UPDATE wallets
-
-SET
-
-coins=coins+$1
-
-WHERE user_id=$2
-`,
-
-[
-
-plan.rows[0].coins,
-
-user_id
-
-]
-
-);
 
 res.json({
 
@@ -475,17 +454,6 @@ days
 ]
 );
 
-await db.query(
-`
-UPDATE wallets
-SET coins=coins+$1
-WHERE user_id=$2
-`,
-[
-plan.rows[0].coins,
-user_id
-]
-);
 
 res.json({
 
@@ -801,27 +769,6 @@ days
 
 );
 
-await db.query(
-
-`
-UPDATE wallets
-
-SET
-
-coins=coins+$1
-
-WHERE user_id=$2
-`,
-
-[
-
-plan.rows[0].coins,
-
-user_id
-
-]
-
-);
 
 res.json({
 
