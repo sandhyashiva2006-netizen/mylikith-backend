@@ -586,9 +586,11 @@ if (new Date() > new Date(contestData.registration_end)) {
             `
             SELECT id
 FROM novels
-WHERE id=$1
-AND author_id=$2
-AND LOWER(n.publish_status) = 'published'
+WHERE id = $1
+AND author_id = $2
+AND LOWER(publish_status) = 'published'
+AND LOWER(approval_status) = 'approved'
+AND language = $3
             `,
             [
                 novel_id,
