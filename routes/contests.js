@@ -89,6 +89,30 @@ router.post("/", auth, async (req, res) => {
             ]
         );
 
+const contestId = result.rows[0].id;
+
+for (const category of categories) {
+
+    if (!category.trim()) continue;
+
+    await db.query(
+        `
+        INSERT INTO contest_categories
+        (
+            contest_id,
+            category
+        )
+        VALUES
+        ($1,$2)
+        `,
+        [
+            contestId,
+            category.trim()
+        ]
+    );
+
+}
+
         res.json({
             success: true,
             contest: result.rows[0]

@@ -60,16 +60,18 @@ router.post("/", async (req, res) => {
     try {
 
         const {
-            title,
-            description,
-            language,
-            prize_pool,
-            registration_end,
-            start_date,
-            end_date,
-            status,
-            rules
-        } = req.body;
+    title,
+    description,
+    language,
+    prize_pool,
+    registration_end,
+    start_date,
+    end_date,
+    status,
+    banner_url,
+    rules,
+    categories = []
+} = req.body;
 
         const result = await db.query(`
             INSERT INTO contests
@@ -98,6 +100,30 @@ router.post("/", async (req, res) => {
             status,
             rules
         ]);
+
+const contestId = result.rows[0].id;
+
+for (const category of categories) {
+
+    if (!category.trim()) continue;
+
+    await db.query(
+        `
+        INSERT INTO contest_categories
+        (
+            contest_id,
+            category
+        )
+        VALUES
+        ($1,$2)
+        `,
+        [
+            contestId,
+            category.trim()
+        ]
+    );
+
+}
 
         res.json({
             success: true,
@@ -177,16 +203,18 @@ router.put("/:id", async (req, res) => {
     try {
 
         const {
-            title,
-            description,
-            language,
-            prize_pool,
-            registration_end,
-            start_date,
-            end_date,
-            status,
-            rules
-        } = req.body;
+    title,
+    description,
+    language,
+    prize_pool,
+    registration_end,
+    start_date,
+    end_date,
+    status,
+    banner_url,
+    rules,
+    categories = []
+} = req.body;
 
         const result = await db.query(`
             UPDATE contests
@@ -215,6 +243,37 @@ router.put("/:id", async (req, res) => {
             rules,
             req.params.id
         ]);
+
+await db.query(
+    `
+    DELETE
+    FROM contest_categories
+    WHERE contest_id=$1
+    `,
+    [req.params.id]
+);
+
+for (const category of categories) {
+
+    if (!category.trim()) continue;
+
+    await db.query(
+        `
+        INSERT INTO contest_categories
+        (
+            contest_id,
+            category
+        )
+        VALUES
+        ($1,$2)
+        `,
+        [
+            req.params.id,
+            category.trim()
+        ]
+    );
+
+}
 
         res.json({
             success: true,
