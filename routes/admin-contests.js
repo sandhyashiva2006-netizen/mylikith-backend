@@ -52,39 +52,7 @@ router.get("/", async (req, res) => {
 
 });
 
-// Get single contest
-router.get("/:id", async (req, res) => {
 
-    try {
-
-        const result = await db.query(
-            "SELECT * FROM contests WHERE id=$1",
-            [req.params.id]
-        );
-
-        if (!result.rows.length) {
-
-            return res.status(404).json({
-                success: false,
-                message: "Contest not found."
-            });
-
-        }
-
-        res.json(result.rows[0]);
-
-    } catch (err) {
-
-        console.error(err);
-
-        res.status(500).json({
-            success: false,
-            message: "Server error."
-        });
-
-    }
-
-});
 
 // Create contest
 router.post("/", async (req, res) => {
@@ -143,6 +111,60 @@ router.post("/", async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Failed to create contest."
+        });
+
+    }
+
+});
+
+// Get single contest
+router.get("/:id", async (req, res) => {
+
+    try {
+
+        const contestResult = await db.query(
+            `
+            SELECT *
+            FROM contests
+            WHERE id=$1
+            `,
+            [req.params.id]
+        );
+
+        if (!contestResult.rows.length) {
+
+            return res.status(404).json({
+                success: false,
+                message: "Contest not found."
+            });
+
+        }
+
+        const categoryResult = await db.query(
+            `
+            SELECT
+                id,
+                category
+            FROM contest_categories
+            WHERE contest_id=$1
+            ORDER BY id
+            `,
+            [req.params.id]
+        );
+
+        const contest = contestResult.rows[0];
+
+        contest.categories = categoryResult.rows;
+
+        res.json(contest);
+
+    } catch (err) {
+
+        console.error(err);
+
+        res.status(500).json({
+            success: false,
+            message: "Server error."
         });
 
     }
@@ -279,31 +301,6 @@ router.delete("/:id", async (req, res) => {
 
 });
 
-// Delete contest
-router.delete("/:id", async (req, res) => {
 
-    try {
-
-        await db.query(
-            "DELETE FROM contests WHERE id=$1",
-            [req.params.id]
-        );
-
-        res.json({
-            success: true
-        });
-
-    } catch (err) {
-
-        console.error(err);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to delete contest."
-        });
-
-    }
-
-});
 
 module.exports = router;
