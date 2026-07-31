@@ -212,6 +212,73 @@ router.put("/:id", async (req, res) => {
 
 });
 
+router.delete("/:id", async (req, res) => {
+
+    try {
+
+        await db.query("BEGIN");
+
+        await db.query(
+            `
+            DELETE FROM contest_winners
+            WHERE contest_id=$1
+            `,
+            [req.params.id]
+        );
+
+        await db.query(
+            `
+            DELETE FROM contest_votes
+            WHERE contest_id=$1
+            `,
+            [req.params.id]
+        );
+
+        await db.query(
+            `
+            DELETE FROM contest_entries
+            WHERE contest_id=$1
+            `,
+            [req.params.id]
+        );
+
+        await db.query(
+            `
+            DELETE FROM contest_categories
+            WHERE contest_id=$1
+            `,
+            [req.params.id]
+        );
+
+        await db.query(
+            `
+            DELETE FROM contests
+            WHERE id=$1
+            `,
+            [req.params.id]
+        );
+
+        await db.query("COMMIT");
+
+        res.json({
+            success: true
+        });
+
+    } catch (err) {
+
+        await db.query("ROLLBACK");
+
+        console.error(err);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to delete contest."
+        });
+
+    }
+
+});
+
 // Delete contest
 router.delete("/:id", async (req, res) => {
 
