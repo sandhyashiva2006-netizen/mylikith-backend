@@ -891,34 +891,52 @@ router.get("/:id/leaderboard", async (req, res) => {
     try {
 
         const result = await db.query(
-    `
-    SELECT
-        ce.id,
-        n.title AS novel_title,
-        u.name AS writer_name,
-        cc.category AS category_name,
-        0 AS votes
-    FROM contest_entries ce
-    JOIN novels n
-        ON ce.novel_id = n.id
-    JOIN users u
-        ON ce.writer_id = u.id
-    JOIN contest_categories cc
-        ON ce.category_id = cc.id
-    WHERE ce.contest_id = $1
-    ORDER BY ce.created_at ASC
-    `,
-    [req.params.id]
-);
+            `
+            SELECT
+                ce.id,
+                ce.created_at,
+                n.title AS novel_title,
+                u.name AS writer_name,
+                cc.category AS category_name,
+                COUNT(cv.id) AS votes
+            FROM contest_entries ce
+
+            JOIN novels n
+                ON ce.novel_id = n.id
+
+            JOIN users u
+                ON ce.writer_id = u.id
+
+            JOIN contest_categories cc
+                ON ce.category_id = cc.id
+
+            LEFT JOIN contest_votes cv
+                ON cv.entry_id = ce.id
+
+            WHERE ce.contest_id = $1
+
+            GROUP BY
+                ce.id,
+                ce.created_at,
+                n.title,
+                u.name,
+                cc.category
+
+            ORDER BY
+                votes DESC,
+                ce.created_at ASC
+            `,
+            [req.params.id]
+        );
 
         res.json(result.rows);
 
-    } catch(err){
+    } catch (err) {
 
-        console.error("Leaderboard Error:", err);
+        console.error(err);
 
         res.status(500).json({
-            success:false
+            success: false
         });
 
     }

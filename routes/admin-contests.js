@@ -301,6 +301,34 @@ router.delete("/:id", async (req, res) => {
 
 });
 
+router.delete("/contest-entries/:id", async (req, res) => {
 
+    try {
+
+        await db.query(
+            `
+            DELETE
+            FROM contest_entries
+            WHERE id=$1
+            `,
+            [req.params.id]
+        );
+
+        res.json({
+            success: true
+        });
+
+    } catch (err) {
+
+        console.error(err);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to remove entry."
+        });
+
+    }
+
+});
 
 module.exports = router;
