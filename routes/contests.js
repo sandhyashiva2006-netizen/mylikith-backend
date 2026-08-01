@@ -424,9 +424,18 @@ router.get("/:id", async (req, res) => {
         );
 
         res.json({
-            ...contest.rows[0],
-            categories: categories.rows
-        });
+
+    success: true,
+
+    contest: {
+
+        ...contest.rows[0],
+
+        categories: categories.rows
+
+    }
+
+});
 
     } catch (err) {
 
