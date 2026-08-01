@@ -247,6 +247,14 @@ router.get("/eligible-novels", async (req, res) => {
             ]
         );
 
+console.log("Contest ID:", contestId);
+
+console.log("User ID:", userId);
+
+console.log("Contest Language:", contestLanguage);
+
+console.log("Novels:", novels.rows);
+
         res.json(novels.rows);
 
     } catch (err) {
