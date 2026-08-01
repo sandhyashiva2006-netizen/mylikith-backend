@@ -593,4 +593,66 @@ await db.query(
 
 });
 
+router.get("/:id/entries", auth, async (req, res) => {
+
+    try {
+
+        if (req.user.role !== "admin") {
+
+            return res.status(403).json({
+                success: false,
+                message: "Admin only."
+            });
+
+        }
+
+        const result = await db.query(
+            `
+            SELECT
+
+                ce.id,
+                ce.novel_id,
+                ce.category_id,
+                ce.created_at,
+                ce.votes,
+
+                n.title AS novel_title,
+
+                u.name AS writer_name,
+
+                cc.category AS category_name
+
+            FROM contest_entries ce
+
+            JOIN novels n
+                ON ce.novel_id = n.id
+
+            JOIN users u
+                ON ce.writer_id = u.id
+
+            JOIN contest_categories cc
+                ON ce.category_id = cc.id
+
+            WHERE ce.contest_id = $1
+
+            ORDER BY ce.created_at
+
+            `,
+            [req.params.id]
+        );
+
+        res.json(result.rows);
+
+    } catch (err) {
+
+        console.log(err);
+
+        res.status(500).json({
+            success: false
+        });
+
+    }
+
+});
+
 module.exports = router;
