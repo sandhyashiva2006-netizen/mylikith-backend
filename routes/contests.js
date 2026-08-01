@@ -247,13 +247,6 @@ router.get("/eligible-novels", async (req, res) => {
             ]
         );
 
-console.log("Contest ID:", contestId);
-
-console.log("User ID:", userId);
-
-console.log("Contest Language:", contestLanguage);
-
-console.log("Novels:", novels.rows);
 
         res.json(novels.rows);
 
@@ -604,6 +597,10 @@ router.delete("/categories/:id", auth, async (req, res) => {
 ================================ */
 
 router.post("/:id/register", auth, async (req, res) => {
+
+console.log("Register body:", req.body);
+
+console.log("Register user:", req.user);
 
     try {
 
