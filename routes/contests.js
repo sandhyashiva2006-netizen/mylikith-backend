@@ -1008,6 +1008,51 @@ router.get("/:id/leaderboard", async (req, res) => {
 
 });
 
+router.get("/:id/winners", async (req, res) => {
 
+    try {
+
+        const result = await db.query(
+            `
+            SELECT
+
+                cw.position,
+
+                cw.prize_amount,
+
+                cw.badge,
+
+                n.title AS novel_title,
+
+                u.name AS writer_name
+
+            FROM contest_winners cw
+
+            JOIN novels n
+                ON cw.novel_id = n.id
+
+            JOIN users u
+                ON cw.writer_id = u.id
+
+            WHERE cw.contest_id = $1
+
+            ORDER BY cw.position
+            `,
+            [req.params.id]
+        );
+
+        res.json(result.rows);
+
+    } catch (err) {
+
+        console.log(err);
+
+        res.status(500).json({
+            success: false
+        });
+
+    }
+
+});
 
 module.exports = router;

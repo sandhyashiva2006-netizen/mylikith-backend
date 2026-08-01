@@ -390,4 +390,198 @@ router.delete("/contest-entries/:id", async (req, res) => {
 
 });
 
+router.post("/:id/winners", auth, adminAuth, async (req, res) => {
+
+    try {
+
+        const { winners } = req.body;
+
+        if (!Array.isArray(winners) || winners.length !== 3) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Exactly 3 winners are required."
+            });
+
+        }
+
+        const contest = await db.query(
+            `
+            SELECT prize_pool
+            FROM contests
+            WHERE id=$1
+            `,
+            [req.params.id]
+        );
+
+const contestData = contest.rows[0];
+
+if (new Date() < new Date(contestData.end_date)) {
+
+    return res.status(400).json({
+        success: false,
+        message: "Winners can only be announced after the contest ends."
+    });
+
+}
+
+        if (!contest.rows.length) {
+
+            return res.status(404).json({
+                success: false,
+                message: "Contest not found."
+            });
+
+        }
+
+        const prizePool = Number(contest.rows[0].prize_pool || 0);
+
+        const prizes = [
+            Math.round(prizePool * 0.60),
+            Math.round(prizePool * 0.30),
+            Math.round(prizePool * 0.10)
+        ];
+
+        const badges = [
+            "Gold Winner",
+            "Silver Winner",
+            "Bronze Winner"
+        ];
+
+        await db.query(
+            `
+            DELETE
+            FROM contest_winners
+            WHERE contest_id=$1
+            `,
+            [req.params.id]
+        );
+
+const unique = new Set(winners);
+
+if (unique.size !== 3) {
+
+    return res.status(400).json({
+        success: false,
+        message: "Please select three different winners."
+    });
+
+}
+
+        for (let i = 0; i < winners.length; i++) {
+
+            const entry = await db.query(
+                `
+                SELECT
+                    novel_id,
+                    writer_id
+                FROM contest_entries
+                WHERE id=$1
+                `,
+                [winners[i]]
+            );
+
+            if (!entry.rows.length)
+                continue;
+
+            await db.query(
+                `
+                INSERT INTO contest_winners
+                (
+                    contest_id,
+                    novel_id,
+                    writer_id,
+                    position,
+                    prize_amount,
+                    badge
+                )
+                VALUES
+                ($1,$2,$3,$4,$5,$6)
+                `,
+                [
+                    req.params.id,
+                    entry.rows[0].novel_id,
+                    entry.rows[0].writer_id,
+                    i + 1,
+                    prizes[i],
+                    badges[i]
+                ]
+            );
+
+        }
+
+await db.query(
+    `
+    UPDATE contests
+    SET status='Completed'
+    WHERE id=$1
+    `,
+    [req.params.id]
+);
+
+await db.query(
+    `
+    INSERT INTO contest_winners
+    (
+        contest_id,
+        novel_id,
+        writer_id,
+        position,
+        prize_amount,
+        badge
+    )
+    VALUES
+    ($1,$2,$3,$4,$5,$6)
+    `,
+    [
+        req.params.id,
+        entry.rows[0].novel_id,
+        entry.rows[0].writer_id,
+        i + 1,
+        prizes[i],
+        badges[i]
+    ]
+);
+
+await db.query(
+    `
+    UPDATE novels
+    SET winner_badge = $1
+    WHERE id = $2
+    `,
+    [
+        badges[i],
+        entry.rows[0].novel_id
+    ]
+);
+
+await db.query(
+    `
+    UPDATE users
+    SET winner_badge = $1
+    WHERE id = $2
+    `,
+    [
+        badges[i],
+        entry.rows[0].writer_id
+    ]
+);
+
+        res.json({
+            success: true,
+            message: "Winners announced successfully."
+        });
+
+    } catch (err) {
+
+        console.log(err);
+
+        res.status(500).json({
+            success: false
+        });
+
+    }
+
+});
+
 module.exports = router;
