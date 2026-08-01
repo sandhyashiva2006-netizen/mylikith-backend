@@ -617,7 +617,12 @@ console.log("Contest ID:", req.params.id);
                 ce.novel_id,
                 ce.category_id,
                 ce.created_at,
-                ce.votes,
+
+(
+    SELECT COUNT(*)
+    FROM contest_votes cv
+    WHERE cv.entry_id = ce.id
+) AS votes,
 
                 n.title AS novel_title,
 
