@@ -179,25 +179,37 @@ res.json({
    ELIGIBLE NOVELS
 ================================ */
 
-router.get("/eligible-novels", auth, async (req, res) => {
+router.get("/eligible-novels", async (req, res) => {
 
     try {
 
-        const activeContest = await db.query(
+        const contestId = req.query.contest_id;
+
+        const userId = req.query.user_id;
+
+        if (!contestId || !userId) {
+
+            return res.json([]);
+
+        }
+
+        const contest = await db.query(
             `
-            SELECT id
-FROM contests
-WHERE id = $1
-            `
+            SELECT id, language
+            FROM contests
+            WHERE id=$1
+            `,
+            [contestId]
         );
 
-        if (!contestId) {
+        if (!contest.rows.length) {
 
-    return res.json([]);
+            return res.json([]);
 
-}
+        }
 
-        const contestId = req.query.contest_id;
+        const contestLanguage =
+            contest.rows[0].language;
 
         const novels = await db.query(
             `
@@ -206,19 +218,31 @@ WHERE id = $1
                 n.title
             FROM novels n
             WHERE
-    n.author_id = $1
-    AND LOWER(n.publish_status) = 'published'
-    AND LOWER(n.approval_status) = 'approved'
-    AND NOT EXISTS (
+                n.author_id=$1
+
+                AND LOWER(n.publish_status)='published'
+
+                AND LOWER(n.approval_status)='approved'
+
+                AND LOWER(n.language)=LOWER($2)
+
+                AND NOT EXISTS (
+
                     SELECT 1
+
                     FROM contest_entries ce
-                    WHERE ce.contest_id=$2
+
+                    WHERE ce.contest_id=$3
+
                     AND ce.novel_id=n.id
+
                 )
+
             ORDER BY n.title
             `,
             [
-                req.user.id,
+                userId,
+                contestLanguage,
                 contestId
             ]
         );
@@ -227,10 +251,11 @@ WHERE id = $1
 
     } catch (err) {
 
-        console.log(err);
+        console.error(err);
 
         res.status(500).json({
-            success: false
+            success: false,
+            message: "Failed to load eligible novels."
         });
 
     }
