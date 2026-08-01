@@ -595,6 +595,9 @@ await db.query(
 
 router.get("/:id/entries", auth, async (req, res) => {
 
+console.log("User:", req.user);
+console.log("Contest ID:", req.params.id);
+
     try {
 
         if (req.user.role !== "admin") {
@@ -640,6 +643,8 @@ router.get("/:id/entries", auth, async (req, res) => {
             `,
             [req.params.id]
         );
+
+console.log("Entries:", result.rows);
 
         res.json(result.rows);
 
