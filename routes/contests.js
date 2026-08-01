@@ -186,20 +186,18 @@ router.get("/eligible-novels", auth, async (req, res) => {
         const activeContest = await db.query(
             `
             SELECT id
-            FROM contests
-            WHERE status='Active'
-            ORDER BY start_date DESC
-            LIMIT 1
+FROM contests
+WHERE id = $1
             `
         );
 
-        if (!activeContest.rows.length) {
+        if (!contestId) {
 
-            return res.json([]);
+    return res.json([]);
 
-        }
+}
 
-        const contestId = activeContest.rows[0].id;
+        const contestId = req.query.contest_id;
 
         const novels = await db.query(
             `
