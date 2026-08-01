@@ -390,7 +390,16 @@ router.delete("/contest-entries/:id", async (req, res) => {
 
 });
 
-router.post("/:id/winners", auth, adminAuth, async (req, res) => {
+router.post("/:id/winners", auth, async (req, res) => {
+
+    if (req.user.role !== "admin") {
+
+        return res.status(403).json({
+            success: false,
+            message: "Admin only."
+        });
+
+    }
 
     try {
 
