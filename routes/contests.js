@@ -48,15 +48,16 @@ router.post("/", auth, async (req, res) => {
         }
 
         const {
-            title,
-            description,
-            banner_url,
-            prize_pool,
-            start_date,
-            end_date,
-            registration_end,
-            rules
-        } = req.body;
+    title,
+    description,
+    banner_url,
+    prize_pool,
+    start_date,
+    end_date,
+    registration_end,
+    rules,
+    categories = []
+} = req.body;
 
         const result = await db.query(
             `
@@ -596,7 +597,7 @@ router.delete("/categories/:id", auth, async (req, res) => {
    REGISTER FOR CONTEST
 ================================ */
 
-router.post("/:id/register", auth, async (req, res) => {
+router.post("/:id/register", async (req, res) => {
 
 console.log("Register body:", req.body);
 
@@ -604,7 +605,11 @@ console.log("Register user:", req.user);
 
     try {
 
-        const { novel_id, category_id } = req.body;
+        const {
+    novel_id,
+    category_id,
+    user_id
+} = req.body;
 
         const contest = await db.query(
             `
@@ -654,7 +659,7 @@ AND language = $3
             `,
             [
     novel_id,
-    req.user.id,
+    user_id,
     contestData.language
 ]
         );
@@ -711,12 +716,12 @@ if (!category.rows.length) {
         await db.query(
             `
             INSERT INTO contest_entries
-            (
-                contest_id,
-                category_id,
-                novel_id,
-                writer_id
-            )
+(
+    contest_id,
+    category_id,
+    novel_id,
+    writer_id
+)
             VALUES
             ($1,$2,$3,$4)
             `,
@@ -724,7 +729,7 @@ if (!category.rows.length) {
                 req.params.id,
                 category_id,
                 novel_id,
-                req.user.id
+                user_id
             ]
         );
 
