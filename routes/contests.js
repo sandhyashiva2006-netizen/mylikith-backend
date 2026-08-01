@@ -142,26 +142,25 @@ router.get("/active", async (req, res) => {
         const result = await db.query(
             `
             SELECT *
-            FROM contests
-            WHERE status='Active'
-            ORDER BY start_date DESC
-            LIMIT 1
+FROM contests
+WHERE LOWER(status)='active'
+ORDER BY start_date ASC
             `
         );
 
         if (!result.rows.length) {
 
-            return res.status(404).json({
-                success: false,
-                message: "No active contest found."
-            });
+    return res.status(404).json({
+        success: false,
+        message: "No active contest found."
+    });
 
-        }
+}
 
-        res.json({
-            success: true,
-            contest: result.rows[0]
-        });
+res.json({
+    success: true,
+    contests: result.rows
+});
 
     } catch (err) {
 
