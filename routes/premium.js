@@ -134,15 +134,9 @@ await db.query(
 
 `
 SELECT
-
-up.*,
-
-pp.name,
-
-pp.coins
-
+    up.*,
+    pp.name
 FROM user_premium up
-
 JOIN premium_plans pp
 
 ON up.plan_id=pp.id
