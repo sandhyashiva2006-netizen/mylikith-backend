@@ -1722,7 +1722,7 @@ app.get("/api/debug-users-columns", async (req, res) => {
     res.status(500).json(err.message);
   }
 });
-}
+
 
 if (process.env.NODE_ENV !== "production") {
 
