@@ -156,16 +156,17 @@ router.post("/novels", async (req, res) => {
 
 try {
 
-const {
+const{
 
 author_id,
 title,
 description,
 language,
 category,
+categories,
 cover_url
 
-} = req.body;
+}=req.body;
 
 /* ==========================================
    CHECK WRITER STATUS
@@ -242,6 +243,7 @@ description,
 cover_url,
 language,
 category,
+categories,
 story_status,
 publish_status,
 approval_status
@@ -255,9 +257,10 @@ $3,
 $4,
 $5,
 $6,
-'Ongoing',
 $7,
-$8
+'Ongoing',
+$8,
+$9
 )
 
 RETURNING *;
@@ -270,6 +273,7 @@ description,
 cover_url,
 language,
 category,
+categories,
 publishStatus,
 approvalStatus
 ]
@@ -704,6 +708,7 @@ title,
 description,
 language,
 category,
+categories,
 status,
 cover_url
 } = req.body;
@@ -720,10 +725,11 @@ title=COALESCE($1,title),
 description=COALESCE($2,description),
 language=COALESCE($3,language),
 category=COALESCE($4,category),
-status=COALESCE($5,status),
-cover_url=COALESCE($6,cover_url)
+categories=COALESCE($5,categories),
+status=COALESCE($6,status),
+cover_url=COALESCE($7,cover_url)
 
-WHERE id=$7
+WHERE id=$8
 
 RETURNING *
 `,
@@ -733,6 +739,7 @@ title,
 description,
 language,
 category,
+categories,
 status,
 cover_url,
 req.params.id
