@@ -1660,48 +1660,51 @@ const PORT = process.env.PORT || 5000;
 
 if (process.env.NODE_ENV !== "production") {
 
+}
+
 app.post(
-"/api/upload/payment-proof",
-upload.single("image"),
-async(req,res)=>{
+    "/api/upload/payment-proof",
+    upload.single("image"),
+    async (req, res) => {
 
-try{
+        try {
 
-if(!req.file){
+            if (!req.file) {
 
-return res.status(400).json({
+                return res.status(400).json({
 
-success:false,
+                    success: false,
 
-message:"Image required."
+                    message: "Image required."
 
-});
+                });
 
-}
+            }
 
-res.json({
+            res.json({
 
-success:true,
+                success: true,
 
-url:req.file.path
+                url: req.file.path
 
-});
+            });
 
-}catch(err){
+        } catch (err) {
 
-console.log(err);
+            console.log(err);
 
-res.status(500).json({
+            res.status(500).json({
 
-success:false,
+                success: false,
 
-message:"Upload failed."
+                message: "Upload failed."
 
-});
+            });
 
-}
+        }
 
-});
+    }
+);
 
 
 app.get("/api/debug-users-columns", async (req, res) => {
