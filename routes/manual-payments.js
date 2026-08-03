@@ -168,8 +168,7 @@ const plan=await db.query(
 
 `
 SELECT
-price,
-coins
+price
 FROM premium_plans
 WHERE id=$1
 `,
@@ -195,7 +194,7 @@ message:"Invalid plan."
 
 amount=Number(plan.rows[0].price);
 
-coins=Number(plan.rows[0].coins);
+coins=0;
 
 }
 
@@ -657,7 +656,6 @@ const premium = await db.query(
 
 `
 SELECT
-coins,
 price,
 duration_days
 FROM premium_plans
@@ -684,9 +682,7 @@ message:"Premium plan not found."
 
 }
 
-const premiumCoins =
-
-Number(premium.rows[0].coins);
+const premiumCoins = 0;
 
 const premiumPrice =
 
@@ -805,27 +801,6 @@ p.user_id,
 p.plan_id,
 p.transaction_id,
 days
-]
-
-);
-
-await db.query(
-
-`
-UPDATE wallets
-
-SET
-
-coins=coins+$1,
-
-earned_coins=earned_coins+$1
-
-WHERE user_id=$2
-`,
-
-[
-premiumCoins,
-p.user_id
 ]
 
 );
