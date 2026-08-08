@@ -5,15 +5,98 @@ const db = require("../db");
 
 
 /* =========================================================
-   GET ALL PUBLISHED CLASSICS
+   GET PUBLISHED CLASSICS
    GET /api/classics
+   Supports:
+   ?search=
+   ?language=
+   ?category=
 ========================================================= */
 
 router.get("/", async (req, res) => {
 
     try {
 
-        const result = await db.query(`
+        const {
+            search,
+            language,
+            category
+        } = req.query;
+
+
+        const conditions = [
+            "is_published = TRUE"
+        ];
+
+
+        const values = [];
+
+
+        /* =====================================================
+           SEARCH
+           Searches title + author
+        ===================================================== */
+
+        if (
+            search &&
+            search.trim()
+        ) {
+
+            values.push(
+                `%${search.trim()}%`
+            );
+
+            conditions.push(`
+                (
+                    title ILIKE $${values.length}
+                    OR author_name ILIKE $${values.length}
+                )
+            `);
+
+        }
+
+
+        /* =====================================================
+           LANGUAGE FILTER
+        ===================================================== */
+
+        if (
+            language &&
+            language.trim()
+        ) {
+
+            values.push(
+                language.trim()
+            );
+
+            conditions.push(
+                `language = $${values.length}`
+            );
+
+        }
+
+
+        /* =====================================================
+           CATEGORY FILTER
+        ===================================================== */
+
+        if (
+            category &&
+            category.trim()
+        ) {
+
+            values.push(
+                category.trim()
+            );
+
+            conditions.push(
+                `category = $${values.length}`
+            );
+
+        }
+
+
+        const query = `
             SELECT
                 id,
                 title,
@@ -30,23 +113,43 @@ router.get("/", async (req, res) => {
                 is_featured,
                 view_count,
                 created_at
+
             FROM classics
-            WHERE is_published = TRUE
-            ORDER BY is_featured DESC, title ASC
-        `);
+
+            WHERE
+                ${conditions.join(" AND ")}
+
+            ORDER BY
+                is_featured DESC,
+                title ASC
+        `;
+
+
+        const result =
+            await db.query(
+                query,
+                values
+            );
+
 
         res.json({
             success: true,
             classics: result.rows
         });
 
+
     } catch (err) {
 
-        console.error("Classics API error:", err);
+        console.error(
+            "Classics API error:",
+            err
+        );
+
 
         res.status(500).json({
             success: false,
-            message: "Unable to load Classics."
+            message:
+                "Unable to load Classics."
         });
 
     }
