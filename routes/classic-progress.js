@@ -11,6 +11,69 @@ const auth = require("../middleware/auth");
 
 router.use(auth);
 
+/* =========================================================
+   GET ALL CLASSIC READING PROGRESS
+   GET /api/classic-progress
+========================================================= */
+
+router.get("/", async (req, res) => {
+
+    try {
+
+        const result = await db.query(`
+            SELECT
+                crp.id,
+                crp.classic_id,
+                crp.chapter_id,
+                crp.chapter_number,
+                crp.progress_percent,
+                crp.last_read_at,
+
+                c.title AS classic_title,
+                c.author_name,
+                c.cover_image,
+                c.language,
+                c.category
+
+            FROM classic_reading_progress crp
+
+            JOIN classics c
+                ON c.id = crp.classic_id
+
+            WHERE
+                crp.user_id = $1
+                AND c.is_published = TRUE
+
+            ORDER BY
+                crp.last_read_at DESC
+        `, [
+            req.user.id
+        ]);
+
+
+        res.json({
+            success: true,
+            progress: result.rows
+        });
+
+
+    } catch (err) {
+
+        console.error(
+            "Get all Classic progress error:",
+            err
+        );
+
+
+        res.status(500).json({
+            success: false,
+            message:
+                "Unable to load Classic reading progress."
+        });
+
+    }
+
+});
 
 /* =========================================================
    GET READING PROGRESS
