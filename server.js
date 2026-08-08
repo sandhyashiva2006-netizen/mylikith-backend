@@ -166,6 +166,10 @@ require("./routes/referrals")
 );
 app.use("/api/contests", contestRoutes);
 app.use("/api/universe", require("./routes/universe"));
+app.use(
+    "/api/classics",
+    require("./routes/classics")
+);
 
 
 app.use("/api/admin", adminRoutes);
