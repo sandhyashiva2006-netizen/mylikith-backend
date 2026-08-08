@@ -1,19 +1,41 @@
 const express = require("express");
 const router = express.Router();
 
-const pool = require("../db");
+const db = require("../db");
+const auth = require("../middleware/auth");
 
 
-/* =========================================================
+/* ==========================================
+   ADMIN AUTHENTICATION
+========================================== */
+
+router.use(auth);
+
+router.use((req, res, next) => {
+
+    if (req.user.role !== "admin") {
+
+        return res.status(403).json({
+            success: false,
+            message: "Admin access required."
+        });
+
+    }
+
+    next();
+
+});
+
+
+/* ==========================================
    GET ALL UNIVERSE MODULES
-   GET /api/admin/universe/modules
-   ========================================================= */
+========================================== */
 
 router.get("/modules", async (req, res) => {
 
     try {
 
-        const result = await pool.query(`
+        const result = await db.query(`
             SELECT
                 id,
                 name,
@@ -30,17 +52,18 @@ router.get("/modules", async (req, res) => {
             ORDER BY display_order ASC
         `);
 
-        res.json(result.rows);
+        res.json({
+            success: true,
+            modules: result.rows
+        });
 
-    } catch (error) {
+    } catch (err) {
 
-        console.error(
-            "Admin Universe modules error:",
-            error
-        );
+        console.log("Universe modules error:", err);
 
         res.status(500).json({
-            message: "Failed to load Universe modules"
+            success: false,
+            message: "Unable to load Universe modules."
         });
 
     }
@@ -48,16 +71,13 @@ router.get("/modules", async (req, res) => {
 });
 
 
-/* =========================================================
+/* ==========================================
    UPDATE UNIVERSE MODULE
-   PUT /api/admin/universe/modules/:id
-   ========================================================= */
+========================================== */
 
 router.put("/modules/:id", async (req, res) => {
 
     try {
-
-        const { id } = req.params;
 
         const {
             title,
@@ -70,7 +90,8 @@ router.put("/modules/:id", async (req, res) => {
         } = req.body;
 
 
-        const result = await pool.query(`
+        const result = await db.query(`
+
             UPDATE universe_modules
 
             SET
@@ -81,11 +102,12 @@ router.put("/modules/:id", async (req, res) => {
                 enabled = COALESCE($5, enabled),
                 coming_soon = COALESCE($6, coming_soon),
                 display_order = COALESCE($7, display_order),
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = NOW()
 
             WHERE id = $8
 
             RETURNING *
+
         `, [
             title,
             description,
@@ -94,34 +116,34 @@ router.put("/modules/:id", async (req, res) => {
             enabled,
             coming_soon,
             display_order,
-            id
+            req.params.id
         ]);
 
 
-        if (result.rows.length === 0) {
+        if (!result.rows.length) {
 
             return res.status(404).json({
-                message: "Universe module not found"
+                success: false,
+                message: "Universe module not found."
             });
 
         }
 
 
         res.json({
-            message: "Universe module updated successfully",
+            success: true,
+            message: "Universe module updated successfully.",
             module: result.rows[0]
         });
 
 
-    } catch (error) {
+    } catch (err) {
 
-        console.error(
-            "Update Universe module error:",
-            error
-        );
+        console.log("Universe module update error:", err);
 
         res.status(500).json({
-            message: "Failed to update Universe module"
+            success: false,
+            message: "Unable to update Universe module."
         });
 
     }
