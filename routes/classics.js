@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 
 const db = require("../db");
+const auth = require("../middleware/auth");
+
 
 
 /* =========================================================
@@ -211,6 +213,366 @@ router.get("/featured", async (req, res) => {
 
 });
 
+/* =========================================================
+   GET MY CLASSIC BOOKMARKS
+   GET /api/classics/bookmarks
+========================================================= */
+
+router.get(
+    "/bookmarks",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(`
+                    SELECT
+                        cb.id,
+                        cb.classic_id,
+                        cb.classic_chapter_id,
+                        cb.created_at,
+
+                        c.title AS classic_title,
+                        c.author_name,
+                        c.cover_image,
+
+                        cc.chapter_number,
+                        cc.title AS chapter_title
+
+                    FROM classic_bookmarks cb
+
+                    JOIN classics c
+                        ON c.id = cb.classic_id
+
+                    JOIN classic_chapters cc
+                        ON cc.id =
+                            cb.classic_chapter_id
+
+                    WHERE
+                        cb.user_id = $1
+
+                    ORDER BY
+                        cb.created_at DESC
+                `, [
+                    req.user.id
+                ]);
+
+
+            res.json({
+                success: true,
+                bookmarks: result.rows
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Classic bookmarks error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load Classic bookmarks."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   ADD CLASSIC BOOKMARK
+   POST /api/classics/:id/bookmark
+========================================================= */
+
+router.post(
+    "/:id/bookmark",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const classicId =
+                Number(req.params.id);
+
+            const chapterId =
+                Number(req.body.chapter_id);
+
+
+            if (
+                !Number.isInteger(classicId) ||
+                !Number.isInteger(chapterId)
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Valid Classic and chapter are required."
+                });
+
+            }
+
+
+            /* ================================================
+               VERIFY CLASSIC
+            ================================================= */
+
+            const classicCheck =
+                await db.query(`
+                    SELECT id
+                    FROM classics
+
+                    WHERE
+                        id = $1
+                        AND is_published = TRUE
+                `, [
+                    classicId
+                ]);
+
+
+            if (!classicCheck.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Classic not found."
+                });
+
+            }
+
+
+            /* ================================================
+               VERIFY CHAPTER BELONGS TO CLASSIC
+            ================================================= */
+
+            const chapterCheck =
+                await db.query(`
+                    SELECT id
+                    FROM classic_chapters
+
+                    WHERE
+                        id = $1
+                        AND classic_id = $2
+                `, [
+                    chapterId,
+                    classicId
+                ]);
+
+
+            if (!chapterCheck.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Classic chapter not found."
+                });
+
+            }
+
+
+            /* ================================================
+               INSERT BOOKMARK
+            ================================================= */
+
+            const result =
+                await db.query(`
+                    INSERT INTO classic_bookmarks (
+                        user_id,
+                        classic_id,
+                        classic_chapter_id
+                    )
+
+                    VALUES (
+                        $1,
+                        $2,
+                        $3
+                    )
+
+                    ON CONFLICT (
+                        user_id,
+                        classic_chapter_id
+                    )
+
+                    DO NOTHING
+
+                    RETURNING
+                        id,
+                        classic_id,
+                        classic_chapter_id,
+                        created_at
+                `, [
+                    req.user.id,
+                    classicId,
+                    chapterId
+                ]);
+
+
+            if (!result.rows.length) {
+
+                return res.json({
+                    success: true,
+                    bookmarked: true,
+                    message:
+                        "Chapter is already bookmarked."
+                });
+
+            }
+
+
+            res.status(201).json({
+                success: true,
+                bookmarked: true,
+                bookmark:
+                    result.rows[0]
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Add Classic bookmark error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to bookmark chapter."
+            });
+
+        }
+
+    }
+);
+
+
+/* =========================================================
+   CHECK CLASSIC BOOKMARK
+   GET /api/classics/:id/bookmark/:chapterId
+========================================================= */
+
+router.get(
+    "/:id/bookmark/:chapterId",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(`
+                    SELECT id
+                    FROM classic_bookmarks
+
+                    WHERE
+                        user_id = $1
+                        AND classic_id = $2
+                        AND classic_chapter_id = $3
+
+                    LIMIT 1
+                `, [
+                    req.user.id,
+                    req.params.id,
+                    req.params.chapterId
+                ]);
+
+
+            res.json({
+                success: true,
+                bookmarked:
+                    result.rows.length > 0
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Classic bookmark status error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to check bookmark."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   REMOVE CLASSIC BOOKMARK
+   DELETE /api/classics/:id/bookmark/:chapterId
+========================================================= */
+
+router.delete(
+    "/:id/bookmark/:chapterId",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(`
+                    DELETE FROM classic_bookmarks
+
+                    WHERE
+                        user_id = $1
+                        AND classic_id = $2
+                        AND classic_chapter_id = $3
+
+                    RETURNING id
+                `, [
+                    req.user.id,
+                    req.params.id,
+                    req.params.chapterId
+                ]);
+
+
+            if (!result.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Bookmark not found."
+                });
+
+            }
+
+
+            res.json({
+                success: true,
+                bookmarked: false,
+                message:
+                    "Bookmark removed."
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Remove Classic bookmark error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to remove bookmark."
+            });
+
+        }
+
+    }
+);
 
 /* =========================================================
    GET SINGLE CLASSIC
