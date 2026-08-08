@@ -170,6 +170,10 @@ app.use(
     "/api/classics",
     require("./routes/classics")
 );
+app.use(
+    "/api/classic-progress",
+    require("./routes/classic-progress")
+);
 
 
 app.use("/api/admin", adminRoutes);
