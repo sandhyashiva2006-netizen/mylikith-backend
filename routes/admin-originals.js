@@ -12,8 +12,9 @@ const {
     CompleteMultipartUploadCommand,
     AbortMultipartUploadCommand,
     HeadObjectCommand,
-    PutBucketCorsCommand
-} = require("@aws-sdk/client-s3");
+    PutBucketCorsCommand,
+    GetBucketCorsCommand
+} = require("@aws-sdk/client-s3");;
 
 const {
     getSignedUrl
@@ -302,6 +303,50 @@ router.post(
                 message:
                     "Unable to configure B2 S3 CORS."
 
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   TEMPORARY — CHECK B2 S3 CORS
+========================================================= */
+
+router.get(
+    "/b2-check-cors",
+    async (req, res) => {
+
+        try {
+
+            const command =
+                new GetBucketCorsCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME
+
+                });
+
+            const result =
+                await b2S3.send(command);
+
+            res.json({
+                success: true,
+                cors: result.CORSRules || []
+            });
+
+        } catch (err) {
+
+            console.error(
+                "B2 S3 CORS check error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to read B2 S3 CORS configuration."
             });
 
         }
