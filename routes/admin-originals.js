@@ -10,7 +10,8 @@ const {
     CreateMultipartUploadCommand,
     UploadPartCommand,
     CompleteMultipartUploadCommand,
-    AbortMultipartUploadCommand
+    AbortMultipartUploadCommand,
+    HeadObjectCommand
 } = require("@aws-sdk/client-s3");
 
 const {
@@ -539,6 +540,408 @@ router.post(
 
                 message:
                     "Unable to create upload URL."
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   COMPLETE B2 MULTIPART UPLOAD
+
+   POST /api/admin/originals/chapters/:chapterId/media/complete
+========================================================= */
+
+router.post(
+    "/chapters/:chapterId/media/complete",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const {
+                upload_id,
+                object_key,
+                parts
+            } = req.body;
+
+
+            if (!Number.isInteger(chapterId)) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !upload_id ||
+                !object_key ||
+                !Array.isArray(parts) ||
+                !parts.length
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Upload ID, object key and uploaded parts are required."
+                });
+
+            }
+
+
+            /* -------------------------------------------------
+               VERIFY CHAPTER / UPLOAD SESSION
+            ------------------------------------------------- */
+
+            const chapter =
+                await db.query(`
+
+                    SELECT
+                        id,
+                        media_object_key,
+                        media_size_bytes
+
+                    FROM original_chapters
+
+                    WHERE
+                        id = $1
+                        AND media_provider = 'b2'
+                        AND media_object_key = $2
+
+                `, [
+
+                    chapterId,
+                    object_key
+
+                ]);
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Upload session not found."
+                });
+
+            }
+
+
+            /* -------------------------------------------------
+               NORMALIZE PARTS
+            ------------------------------------------------- */
+
+            const normalizedParts =
+                parts
+                    .map(part => ({
+
+                        ETag:
+                            part.etag ||
+                            part.ETag,
+
+                        PartNumber:
+                            Number(
+                                part.part_number ||
+                                part.PartNumber
+                            )
+
+                    }))
+                    .filter(
+                        part =>
+                            part.ETag &&
+                            Number.isInteger(
+                                part.PartNumber
+                            )
+                    )
+                    .sort(
+                        (a, b) =>
+                            a.PartNumber -
+                            b.PartNumber
+                    );
+
+
+            if (!normalizedParts.length) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "No valid uploaded parts were provided."
+                });
+
+            }
+
+
+            /* -------------------------------------------------
+               COMPLETE MULTIPART UPLOAD
+            ------------------------------------------------- */
+
+            const completeCommand =
+                new CompleteMultipartUploadCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        object_key,
+
+                    UploadId:
+                        upload_id,
+
+                    MultipartUpload: {
+
+                        Parts:
+                            normalizedParts
+
+                    }
+
+                });
+
+
+            await b2S3.send(
+                completeCommand
+            );
+
+
+            /* -------------------------------------------------
+               VERIFY OBJECT EXISTS
+            ------------------------------------------------- */
+
+            const headCommand =
+                new HeadObjectCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        object_key
+
+                });
+
+
+            const head =
+                await b2S3.send(
+                    headCommand
+                );
+
+
+            /* -------------------------------------------------
+               MARK MEDIA READY
+            ------------------------------------------------- */
+
+            await db.query(`
+
+                UPDATE original_chapters
+
+                SET
+                    media_status = 'ready',
+                    media_size_bytes =
+                        COALESCE($1, media_size_bytes),
+                    media_uploaded_at = NOW(),
+                    updated_at = NOW()
+
+                WHERE
+                    id = $2
+                    AND media_object_key = $3
+
+            `, [
+
+                head.ContentLength || null,
+                chapterId,
+                object_key
+
+            ]);
+
+
+            res.json({
+
+                success: true,
+
+                message:
+                    "Video uploaded successfully.",
+
+                chapter_id:
+                    chapterId,
+
+                object_key:
+                    object_key,
+
+                size_bytes:
+                    head.ContentLength || null,
+
+                content_type:
+                    head.ContentType || null
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "B2 multipart complete error:",
+                err
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to complete video upload."
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   ABORT B2 MULTIPART UPLOAD
+
+   POST /api/admin/originals/chapters/:chapterId/media/abort
+========================================================= */
+
+router.post(
+    "/chapters/:chapterId/media/abort",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const {
+                upload_id,
+                object_key
+            } = req.body;
+
+
+            if (!Number.isInteger(chapterId)) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !upload_id ||
+                !object_key
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Upload ID and object key are required."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(`
+
+                    SELECT id
+
+                    FROM original_chapters
+
+                    WHERE
+                        id = $1
+                        AND media_object_key = $2
+
+                `, [
+
+                    chapterId,
+                    object_key
+
+                ]);
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Upload session not found."
+                });
+
+            }
+
+
+            const abortCommand =
+                new AbortMultipartUploadCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        object_key,
+
+                    UploadId:
+                        upload_id
+
+                });
+
+
+            await b2S3.send(
+                abortCommand
+            );
+
+
+            await db.query(`
+
+                UPDATE original_chapters
+
+                SET
+                    media_status = 'pending',
+                    media_object_key = NULL,
+                    media_original_name = NULL,
+                    media_mime_type = NULL,
+                    media_size_bytes = NULL,
+                    media_uploaded_at = NULL,
+                    updated_at = NOW()
+
+                WHERE id = $1
+
+            `, [
+                chapterId
+            ]);
+
+
+            res.json({
+
+                success: true,
+
+                message:
+                    "Video upload cancelled."
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "B2 multipart abort error:",
+                err
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to cancel video upload."
 
             });
 
