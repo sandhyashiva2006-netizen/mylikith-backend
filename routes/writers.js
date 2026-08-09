@@ -1751,19 +1751,19 @@ router.post(
             }
 
             const existing = await db.query(
-                `
-                SELECT id
-                FROM classic_bookmarks
-                WHERE user_id=$1
-                AND classic_id=$2
-                AND chapter_id=$3
-                `,
-                [
-                    req.user.id,
-                    classic_id,
-                    chapter_id
-                ]
-            );
+    `
+    SELECT id
+    FROM classic_bookmarks
+    WHERE user_id=$1
+    AND classic_id=$2
+    AND classic_chapter_id=$3
+    `,
+    [
+        req.user.id,
+        classic_id,
+        chapter_id
+    ]
+);
 
             /* REMOVE BOOKMARK */
 
@@ -1790,27 +1790,24 @@ router.post(
             const result = await db.query(
                 `
                 INSERT INTO classic_bookmarks
-                (
-                    user_id,
-                    classic_id,
-                    chapter_id,
-                    chapter_number
-                )
+(
+    user_id,
+    classic_id,
+    classic_chapter_id
+)
                 VALUES
                 (
                     $1,
                     $2,
-                    $3,
-                    $4
+                    $3
                 )
                 RETURNING *
                 `,
                 [
-                    req.user.id,
-                    classic_id,
-                    chapter_id,
-                    chapter_number
-                ]
+    req.user.id,
+    classic_id,
+    chapter_id
+]
             );
 
             res.json({
@@ -1853,7 +1850,7 @@ router.get(
                 FROM classic_bookmarks
                 WHERE user_id=$1
                 AND classic_id=$2
-                AND chapter_id=$3
+                AND classic_chapter_id=$3
                 `,
                 [
                     req.user.id,
@@ -1911,8 +1908,7 @@ router.get(
                 SELECT
                     cb.id,
                     cb.classic_id,
-                    cb.chapter_id,
-                    cb.chapter_number,
+                    cb.classic_chapter_id,
                     cb.created_at,
                     c.title AS classic_title,
                     c.cover_image,
@@ -1924,7 +1920,7 @@ router.get(
                     ON cb.classic_id=c.id
 
                 JOIN classic_chapters cc
-                    ON cb.chapter_id=cc.id
+                    ON cb.classic_chapter_id=cc.id
 
                 WHERE cb.user_id=$1
 
