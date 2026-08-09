@@ -3,7 +3,7 @@ const router = express.Router();
 
 const db = require("../db");
 const auth = require("../middleware/auth");
-
+const axios = require("axios");
 
 /* =========================================================
    ADMIN AUTHENTICATION
@@ -27,86 +27,161 @@ router.use((req, res, next) => {
 });
 
 /* =========================================================
-   CLOUDFLARE STREAM CONNECTION TEST
-   GET /api/admin/originals/stream-test
+   B2 CONNECTION TEST
+   GET /api/admin/originals/b2-test
 ========================================================= */
 
-router.get("/stream-test", async (req, res) => {
+router.get("/b2-test", async (req, res) => {
 
     try {
 
-        const accountId =
-            process.env.CLOUDFLARE_ACCOUNT_ID;
+        const keyId =
+            process.env.B2_KEY_ID;
 
-        const apiToken =
-            process.env.CLOUDFLARE_API_TOKEN;
+        const applicationKey =
+            process.env.B2_APPLICATION_KEY;
 
 
-        if (!accountId || !apiToken) {
+        if (!keyId || !applicationKey) {
 
             return res.status(500).json({
                 success: false,
                 message:
-                    "Cloudflare Stream environment variables are missing."
+                    "Backblaze B2 environment variables are missing."
             });
 
         }
 
 
-        const response = await fetch(
-            `https://api.cloudflare.com/client/v4/accounts/${accountId}/stream`,
-            {
-                method: "GET",
+        const credentials =
+            Buffer
+                .from(
+                    `${keyId}:${applicationKey}`
+                )
+                .toString("base64");
 
-                headers: {
-                    "Authorization":
-                        `Bearer ${apiToken}`,
 
-                    "Content-Type":
-                        "application/json"
+        /* -------------------------------------------------
+           AUTHORIZE B2 ACCOUNT
+        ------------------------------------------------- */
+
+        const authResponse =
+            await axios.post(
+                "https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
+                null,
+                {
+                    headers: {
+                        Authorization:
+                            `Basic ${credentials}`
+                    }
                 }
-            }
-        );
-
-
-        const data =
-            await response.json();
-
-
-        if (!response.ok || !data.success) {
-
-            console.error(
-                "Cloudflare Stream test failed:",
-                data
             );
+
+
+        const b2 =
+            authResponse.data;
+
+
+        if (!b2.authorizationToken) {
 
             return res.status(502).json({
                 success: false,
                 message:
-                    "Cloudflare Stream connection failed."
+                    "Backblaze authorization failed."
+            });
+
+        }
+
+
+        /* -------------------------------------------------
+           VERIFY ACCESS TO OUR BUCKET
+        ------------------------------------------------- */
+
+        const bucketResponse =
+            await axios.post(
+
+                `${b2.apiUrl}/b2api/v2/b2_list_buckets`,
+
+                {
+                    accountId:
+                        b2.accountId,
+
+                    bucketId:
+                        b2.allowed?.bucketId || null
+                },
+
+                {
+                    headers: {
+                        Authorization:
+                            b2.authorizationToken
+                    }
+                }
+
+            );
+
+
+        const buckets =
+            bucketResponse.data.buckets || [];
+
+
+        const ourBucket =
+            buckets.find(
+                bucket =>
+                    bucket.bucketName ===
+                    process.env.B2_BUCKET_NAME
+            );
+
+
+        if (!ourBucket) {
+
+            return res.status(403).json({
+                success: false,
+                message:
+                    "B2 connected, but the MyLikith Originals bucket was not accessible."
             });
 
         }
 
 
         res.json({
+
             success: true,
+
             message:
-                "Cloudflare Stream connection successful."
+                "Backblaze B2 connection successful.",
+
+            bucket: {
+
+                name:
+                    ourBucket.bucketName,
+
+                type:
+                    ourBucket.bucketType,
+
+                bucketId:
+                    ourBucket.bucketId
+
+            }
+
         });
 
 
     } catch (err) {
 
         console.error(
-            "Cloudflare Stream test error:",
-            err
+            "B2 connection test error:",
+            err.response?.data ||
+            err.message
         );
 
+
         res.status(500).json({
+
             success: false,
+
             message:
-                "Unable to connect to Cloudflare Stream."
+                "Unable to connect to Backblaze B2."
+
         });
 
     }
