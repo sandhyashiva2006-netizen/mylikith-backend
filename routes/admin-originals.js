@@ -959,7 +959,6 @@ router.post(
 ========================================================= */
 
 router.get("/", async (req, res) => {
-
     try {
 
         const result = await db.query(`
@@ -987,11 +986,12 @@ router.get("/", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "Unable to load Originals."
+            message: "Unable to load Originals.",
+            error: err.message,
+            detail: err.detail || null,
+            code: err.code || null
         });
-
     }
-
 });
 
 
