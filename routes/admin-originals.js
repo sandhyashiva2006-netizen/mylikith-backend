@@ -26,6 +26,92 @@ router.use((req, res, next) => {
 
 });
 
+/* =========================================================
+   CLOUDFLARE STREAM CONNECTION TEST
+   GET /api/admin/originals/stream-test
+========================================================= */
+
+router.get("/stream-test", async (req, res) => {
+
+    try {
+
+        const accountId =
+            process.env.CLOUDFLARE_ACCOUNT_ID;
+
+        const apiToken =
+            process.env.CLOUDFLARE_API_TOKEN;
+
+
+        if (!accountId || !apiToken) {
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Cloudflare Stream environment variables are missing."
+            });
+
+        }
+
+
+        const response = await fetch(
+            `https://api.cloudflare.com/client/v4/accounts/${accountId}/stream`,
+            {
+                method: "GET",
+
+                headers: {
+                    "Authorization":
+                        `Bearer ${apiToken}`,
+
+                    "Content-Type":
+                        "application/json"
+                }
+            }
+        );
+
+
+        const data =
+            await response.json();
+
+
+        if (!response.ok || !data.success) {
+
+            console.error(
+                "Cloudflare Stream test failed:",
+                data
+            );
+
+            return res.status(502).json({
+                success: false,
+                message:
+                    "Cloudflare Stream connection failed."
+            });
+
+        }
+
+
+        res.json({
+            success: true,
+            message:
+                "Cloudflare Stream connection successful."
+        });
+
+
+    } catch (err) {
+
+        console.error(
+            "Cloudflare Stream test error:",
+            err
+        );
+
+        res.status(500).json({
+            success: false,
+            message:
+                "Unable to connect to Cloudflare Stream."
+        });
+
+    }
+
+});
 
 /* =========================================================
    GET ALL ORIGINALS
