@@ -2000,6 +2000,540 @@ router.delete(
     }
 );
 
+/* =========================================================
+   CLASSIC RATINGS
+========================================================= */
+
+
+/* ---------------------------------------------------------
+   GET CLASSIC RATING SUMMARY + USER RATING
+   GET /api/writers/classic-rating/:classicId
+--------------------------------------------------------- */
+
+router.get(
+    "/classic-rating/:classicId",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const classicId =
+                Number(req.params.classicId);
+
+
+            const summary =
+                await db.query(
+                    `
+                    SELECT
+                        COALESCE(
+                            ROUND(
+                                AVG(rating)::numeric,
+                                1
+                            ),
+                            0
+                        ) AS average_rating,
+
+                        COUNT(*) AS rating_count
+
+                    FROM classic_ratings
+
+                    WHERE classic_id=$1
+                    `,
+                    [
+                        classicId
+                    ]
+                );
+
+
+            const userRating =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        rating,
+                        created_at
+
+                    FROM classic_ratings
+
+                    WHERE
+                        classic_id=$1
+                        AND user_id=$2
+
+                    LIMIT 1
+                    `,
+                    [
+                        classicId,
+                        req.user.id
+                    ]
+                );
+
+
+            res.json({
+
+                success: true,
+
+                average_rating:
+                    Number(
+                        summary.rows[0]
+                            .average_rating
+                    ),
+
+                rating_count:
+                    Number(
+                        summary.rows[0]
+                            .rating_count
+                    ),
+
+                user_rating:
+                    userRating.rows.length
+                        ? userRating.rows[0]
+                        : null
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Classic rating load error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load Classic rating."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   ADD / UPDATE CLASSIC RATING
+   POST /api/writers/classic-rating
+--------------------------------------------------------- */
+
+router.post(
+    "/classic-rating",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const classicId =
+                Number(req.body.classic_id);
+
+            const rating =
+                Number(req.body.rating);
+
+
+            if (
+                !Number.isInteger(classicId) ||
+                !Number.isInteger(rating) ||
+                rating < 1 ||
+                rating > 5
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Rating must be between 1 and 5."
+                });
+
+            }
+
+
+            const classic =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM classics
+
+                    WHERE
+                        id=$1
+                        AND is_published=TRUE
+
+                    LIMIT 1
+                    `,
+                    [
+                        classicId
+                    ]
+                );
+
+
+            if (!classic.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Classic not found."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    INSERT INTO classic_ratings
+                    (
+                        classic_id,
+                        user_id,
+                        rating
+                    )
+
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        $3
+                    )
+
+                    ON CONFLICT
+                    (
+                        classic_id,
+                        user_id
+                    )
+
+                    DO UPDATE SET
+                        rating =
+                            EXCLUDED.rating
+
+                    RETURNING *
+                    `,
+                    [
+                        classicId,
+                        req.user.id,
+                        rating
+                    ]
+                );
+
+
+            res.json({
+                success: true,
+                rating: result.rows[0]
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Classic rating save error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to save rating."
+            });
+
+        }
+
+    }
+);
+
+
+/* =========================================================
+   CLASSIC REVIEWS
+========================================================= */
+
+
+/* ---------------------------------------------------------
+   GET CLASSIC REVIEWS
+   GET /api/writers/classic-reviews/:classicId
+--------------------------------------------------------- */
+
+router.get(
+    "/classic-reviews/:classicId",
+    async (req, res) => {
+
+        try {
+
+            const classicId =
+                Number(req.params.classicId);
+
+
+            const result =
+                await db.query(
+                    `
+                    SELECT
+
+                        cr.id,
+                        cr.classic_id,
+                        cr.user_id,
+                        cr.rating,
+                        cr.review,
+                        cr.created_at,
+
+                        u.name,
+                        u.profile_image
+
+                    FROM classic_reviews cr
+
+                    JOIN users u
+                        ON u.id=cr.user_id
+
+                    WHERE
+                        cr.classic_id=$1
+
+                    ORDER BY
+                        cr.created_at DESC
+                    `,
+                    [
+                        classicId
+                    ]
+                );
+
+
+            res.json({
+                success: true,
+                reviews:
+                    result.rows
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Classic reviews load error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load Classic reviews."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   ADD / UPDATE CLASSIC REVIEW
+   POST /api/writers/classic-review
+--------------------------------------------------------- */
+
+router.post(
+    "/classic-review",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const classicId =
+                Number(req.body.classic_id);
+
+            const rating =
+                Number(req.body.rating);
+
+            const review =
+                typeof req.body.review === "string"
+                    ? req.body.review.trim()
+                    : "";
+
+
+            if (
+                !Number.isInteger(classicId) ||
+                !Number.isInteger(rating) ||
+                rating < 1 ||
+                rating > 5
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Rating must be between 1 and 5."
+                });
+
+            }
+
+
+            if (review.length > 5000) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Review is too long."
+                });
+
+            }
+
+
+            const classic =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM classics
+
+                    WHERE
+                        id=$1
+                        AND is_published=TRUE
+
+                    LIMIT 1
+                    `,
+                    [
+                        classicId
+                    ]
+                );
+
+
+            if (!classic.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Classic not found."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    INSERT INTO classic_reviews
+                    (
+                        classic_id,
+                        user_id,
+                        rating,
+                        review
+                    )
+
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        $3,
+                        $4
+                    )
+
+                    ON CONFLICT
+                    (
+                        classic_id,
+                        user_id
+                    )
+
+                    DO UPDATE SET
+
+                        rating =
+                            EXCLUDED.rating,
+
+                        review =
+                            EXCLUDED.review
+
+                    RETURNING *
+                    `,
+                    [
+                        classicId,
+                        req.user.id,
+                        rating,
+                        review || null
+                    ]
+                );
+
+
+            res.json({
+                success: true,
+                review:
+                    result.rows[0]
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Classic review save error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to save review."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   DELETE CLASSIC REVIEW
+   DELETE /api/writers/classic-review/:id
+--------------------------------------------------------- */
+
+router.delete(
+    "/classic-review/:id",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(
+                    `
+                    DELETE FROM classic_reviews
+
+                    WHERE
+                        id=$1
+                        AND user_id=$2
+
+                    RETURNING id
+                    `,
+                    [
+                        req.params.id,
+                        req.user.id
+                    ]
+                );
+
+
+            if (!result.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Review not found."
+                });
+
+            }
+
+
+            res.json({
+                success: true
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Classic review delete error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to delete review."
+            });
+
+        }
+
+    }
+);
+
 router.get(
 "/notifications/:userId",
 async(req,res)=>{
