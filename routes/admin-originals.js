@@ -958,7 +958,7 @@ router.get("/:id/chapters", async (req, res) => {
 
 
 /* =========================================================
-   CREATE CHAPTER
+   CREATE CHAPTER / EPISODE
    POST /api/admin/originals/:id/chapters
 ========================================================= */
 
@@ -970,6 +970,7 @@ router.post("/:id/chapters", async (req, res) => {
             chapter_no,
             title,
             content,
+            media_type,
             is_premium,
             coins_required,
             early_access,
@@ -979,29 +980,91 @@ router.post("/:id/chapters", async (req, res) => {
         } = req.body;
 
 
+        /* -------------------------------------------------
+           VALIDATE CHAPTER NUMBER
+        ------------------------------------------------- */
+
         if (
             chapter_no === undefined ||
             chapter_no === null ||
-            !content ||
-            !content.trim()
+            !Number.isInteger(Number(chapter_no)) ||
+            Number(chapter_no) < 1
         ) {
 
             return res.status(400).json({
                 success: false,
-                message:
-                    "Chapter number and content are required."
+                message: "Valid chapter number is required."
             });
 
         }
 
 
-        const original = await db.query(`
-            SELECT id
-            FROM originals
-            WHERE id = $1
-        `, [
-            req.params.id
-        ]);
+        /* -------------------------------------------------
+           VALIDATE MEDIA TYPE
+        ------------------------------------------------- */
+
+        const allowedMediaTypes = [
+            "video",
+            "audio",
+            "text"
+        ];
+
+        const selectedMediaType =
+            media_type || "video";
+
+
+        if (
+            !allowedMediaTypes.includes(
+                selectedMediaType
+            )
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid media type. Allowed values: video, audio, text."
+            });
+
+        }
+
+
+        /* -------------------------------------------------
+           TEXT EPISODES REQUIRE CONTENT
+        ------------------------------------------------- */
+
+        if (
+            selectedMediaType === "text" &&
+            (
+                !content ||
+                !content.trim()
+            )
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Content is required for text episodes."
+            });
+
+        }
+
+
+        /* -------------------------------------------------
+           VIDEO / AUDIO CONTENT IS OPTIONAL
+        ------------------------------------------------- */
+
+        const original =
+            await db.query(`
+
+                SELECT id
+
+                FROM originals
+
+                WHERE id = $1
+
+            `, [
+                req.params.id
+            ]);
 
 
         if (!original.rows.length) {
@@ -1014,53 +1077,84 @@ router.post("/:id/chapters", async (req, res) => {
         }
 
 
-        const result = await db.query(`
-            INSERT INTO original_chapters (
-                original_id,
-                chapter_no,
-                title,
-                content,
-                is_premium,
-                coins_required,
-                early_access,
-                is_draft,
-                is_published,
-                publish_at
-            )
-            VALUES (
-                $1,
-                $2,
-                $3,
-                $4,
-                $5,
-                $6,
-                $7,
-                $8,
-                $9,
-                $10
-            )
-            RETURNING *
-        `, [
+        /* -------------------------------------------------
+           CREATE EPISODE
+        ------------------------------------------------- */
 
-            req.params.id,
-            Number(chapter_no),
-            title ||
-                `Chapter ${Number(chapter_no)}`,
-            content.trim(),
-            Boolean(is_premium),
-            Number(coins_required) || 0,
-            Boolean(early_access),
-            is_draft !== false,
-            Boolean(is_published),
-            publish_at || null
+        const result =
+            await db.query(`
 
-        ]);
+                INSERT INTO original_chapters (
+                    original_id,
+                    chapter_no,
+                    title,
+                    content,
+                    media_type,
+                    is_premium,
+                    coins_required,
+                    early_access,
+                    is_draft,
+                    is_published,
+                    publish_at
+                )
+
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11
+                )
+
+                RETURNING *
+
+            `, [
+
+                req.params.id,
+
+                Number(chapter_no),
+
+                title ||
+                    `Episode ${Number(chapter_no)}`,
+
+                content &&
+                content.trim()
+                    ? content.trim()
+                    : null,
+
+                selectedMediaType,
+
+                Boolean(is_premium),
+
+                Number(coins_required) || 0,
+
+                Boolean(early_access),
+
+                is_draft !== false,
+
+                Boolean(is_published),
+
+                publish_at || null
+
+            ]);
 
 
         res.status(201).json({
+
             success: true,
-            message: "Chapter created successfully.",
-            chapter: result.rows[0]
+
+            message:
+                "Episode created successfully.",
+
+            chapter:
+                result.rows[0]
+
         });
 
 
@@ -1071,19 +1165,25 @@ router.post("/:id/chapters", async (req, res) => {
             err
         );
 
+
         if (err.code === "23505") {
 
             return res.status(409).json({
                 success: false,
                 message:
-                    "That chapter number already exists."
+                    "That episode number already exists."
             });
 
         }
 
+
         res.status(500).json({
+
             success: false,
-            message: "Unable to create chapter."
+
+            message:
+                "Unable to create episode."
+
         });
 
     }
