@@ -11,7 +11,8 @@ const {
     UploadPartCommand,
     CompleteMultipartUploadCommand,
     AbortMultipartUploadCommand,
-    HeadObjectCommand
+    HeadObjectCommand,
+    PutBucketCorsCommand
 } = require("@aws-sdk/client-s3");
 
 const {
@@ -213,6 +214,100 @@ if (!ourBucket) {
     }
 
 });
+
+/* =========================================================
+   TEMPORARY B2 S3 CORS CONFIGURATION
+
+   POST /api/admin/originals/b2-configure-cors
+
+   Use once, then remove this endpoint.
+========================================================= */
+
+router.post(
+    "/b2-configure-cors",
+    async (req, res) => {
+
+        try {
+
+            const command =
+                new PutBucketCorsCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    CORSConfiguration: {
+
+                        CORSRules: [
+
+                            {
+                                AllowedOrigins: [
+                                    "https://mylikith.in",
+                                    "https://mylikith-frontend.pages.dev"
+                                ],
+
+                                AllowedMethods: [
+                                    "GET",
+                                    "HEAD",
+                                    "PUT",
+                                    "POST"
+                                ],
+
+                                AllowedHeaders: [
+                                    "*"
+                                ],
+
+                                ExposeHeaders: [
+                                    "ETag",
+                                    "Content-Length",
+                                    "Content-Type"
+                                ],
+
+                                MaxAgeSeconds: 3600
+                            }
+
+                        ]
+
+                    }
+
+                });
+
+
+            await b2S3.send(
+                command
+            );
+
+
+            res.json({
+
+                success: true,
+
+                message:
+                    "S3-compatible CORS configuration applied successfully."
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "B2 S3 CORS configuration error:",
+                err
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to configure B2 S3 CORS."
+
+            });
+
+        }
+
+    }
+);
 
 /* =========================================================
    START B2 MULTIPART UPLOAD
