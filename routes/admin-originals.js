@@ -65,21 +65,18 @@ router.get("/b2-test", async (req, res) => {
            AUTHORIZE B2 ACCOUNT
         ------------------------------------------------- */
 
-        const authResponse =
-            await axios.post(
-                "https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
-                null,
-                {
-                    headers: {
-                        Authorization:
-                            `Basic ${credentials}`
-                    }
-                }
-            );
+const authResponse =
+    await axios.get(
+        "https://api.backblazeb2.com/b2api/v4/b2_authorize_account",
+        {
+            headers: {
+                Authorization:
+                    `Basic ${credentials}`
+            }
+        }
+    );
 
-
-        const b2 =
-            authResponse.data;
+const b2 = authResponse.data;
 
 
         if (!b2.authorizationToken) {
@@ -97,50 +94,40 @@ router.get("/b2-test", async (req, res) => {
            VERIFY ACCESS TO OUR BUCKET
         ------------------------------------------------- */
 
-        const bucketResponse =
-            await axios.post(
-
-                `${b2.apiUrl}/b2api/v2/b2_list_buckets`,
-
-                {
-                    accountId:
-                        b2.accountId,
-
-                    bucketId:
-                        b2.allowed?.bucketId || null
-                },
-
-                {
-                    headers: {
-                        Authorization:
-                            b2.authorizationToken
-                    }
-                }
-
-            );
-
-
-        const buckets =
-            bucketResponse.data.buckets || [];
-
-
-        const ourBucket =
-            buckets.find(
-                bucket =>
-                    bucket.bucketName ===
-                    process.env.B2_BUCKET_NAME
-            );
-
-
-        if (!ourBucket) {
-
-            return res.status(403).json({
-                success: false,
-                message:
-                    "B2 connected, but the MyLikith Originals bucket was not accessible."
-            });
-
+const bucketResponse =
+    await axios.get(
+        `${b2.apiInfo.storageApi.apiUrl}/b2api/v4/b2_list_buckets`,
+        {
+            params: {
+                accountId: b2.accountId,
+                bucketName: process.env.B2_BUCKET_NAME
+            },
+            headers: {
+                Authorization:
+                    b2.authorizationToken
+            }
         }
+    );
+
+const buckets =
+    bucketResponse.data.buckets || [];
+
+const ourBucket =
+    buckets.find(
+        bucket =>
+            bucket.bucketName ===
+            process.env.B2_BUCKET_NAME
+    );
+
+if (!ourBucket) {
+
+    return res.status(403).json({
+        success: false,
+        message:
+            "B2 connected, but the MyLikith Originals bucket was not accessible."
+    });
+
+}
 
 
         res.json({
