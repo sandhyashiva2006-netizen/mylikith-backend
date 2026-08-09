@@ -1912,6 +1912,7 @@ router.get(
                     cb.created_at,
                     c.title AS classic_title,
                     c.cover_image,
+cc.chapter_number,
                     cc.title AS chapter_title
 
                 FROM classic_bookmarks cb
