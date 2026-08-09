@@ -195,6 +195,10 @@ app.use(
     "/api/admin/classics",
     require("./routes/admin-classics")
 );
+app.use(
+    "/api/admin/originals",
+    require("./routes/admin-originals")
+);
 
 
 app.get("/", (req, res) => {

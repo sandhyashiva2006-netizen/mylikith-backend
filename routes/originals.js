@@ -169,82 +169,6 @@ router.get("/featured", async (req, res) => {
 
 });
 
-
-/* =========================================================
-   GET SINGLE ORIGINAL
-   GET /api/originals/:id
-========================================================= */
-
-router.get("/:id", async (req, res) => {
-
-    try {
-
-        const originalId = Number(req.params.id);
-
-        if (!Number.isInteger(originalId)) {
-
-            return res.status(400).json({
-                success: false,
-                message: "Invalid Original ID."
-            });
-
-        }
-
-        const result = await db.query(`
-            SELECT
-                id,
-                title,
-                description,
-                cover_url,
-                language,
-                category,
-                categories,
-                content_type,
-                status,
-                premium_only,
-                featured,
-                views,
-                likes,
-                rating,
-                release_date,
-                created_at
-            FROM originals
-            WHERE
-                id = $1
-                AND publish_status = 'published'
-                AND visibility = 'public'
-        `, [originalId]);
-
-        if (!result.rows.length) {
-
-            return res.status(404).json({
-                success: false,
-                message: "Original not found."
-            });
-
-        }
-
-        res.json({
-            success: true,
-            original: result.rows[0]
-        });
-
-    } catch (err) {
-
-        console.error(
-            "Original detail error:",
-            err
-        );
-
-        res.status(500).json({
-            success: false,
-            message: "Unable to load Original."
-        });
-
-    }
-
-});
-
 /* =========================================================
    GET SINGLE ORIGINAL CHAPTER LIST
    GET /api/originals/:id/chapters
@@ -468,5 +392,82 @@ router.get("/chapter/:chapterId", async (req, res) => {
     }
 
 });
+
+/* =========================================================
+   GET SINGLE ORIGINAL
+   GET /api/originals/:id
+========================================================= */
+
+router.get("/:id", async (req, res) => {
+
+    try {
+
+        const originalId = Number(req.params.id);
+
+        if (!Number.isInteger(originalId)) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid Original ID."
+            });
+
+        }
+
+        const result = await db.query(`
+            SELECT
+                id,
+                title,
+                description,
+                cover_url,
+                language,
+                category,
+                categories,
+                content_type,
+                status,
+                premium_only,
+                featured,
+                views,
+                likes,
+                rating,
+                release_date,
+                created_at
+            FROM originals
+            WHERE
+                id = $1
+                AND publish_status = 'published'
+                AND visibility = 'public'
+        `, [originalId]);
+
+        if (!result.rows.length) {
+
+            return res.status(404).json({
+                success: false,
+                message: "Original not found."
+            });
+
+        }
+
+        res.json({
+            success: true,
+            original: result.rows[0]
+        });
+
+    } catch (err) {
+
+        console.error(
+            "Original detail error:",
+            err
+        );
+
+        res.status(500).json({
+            success: false,
+            message: "Unable to load Original."
+        });
+
+    }
+
+});
+
+
 
 module.exports = router;
