@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../db");
+const auth = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -1720,6 +1721,287 @@ success:false
 }
 
 });
+
+/* =========================================================
+   CLASSIC BOOKMARKS
+========================================================= */
+
+router.post(
+    "/classic-bookmark",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const {
+                classic_id,
+                chapter_id,
+                chapter_number
+            } = req.body;
+
+            if (
+                !classic_id ||
+                !chapter_id ||
+                !chapter_number
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Classic chapter information is required."
+                });
+            }
+
+            const existing = await db.query(
+                `
+                SELECT id
+                FROM classic_bookmarks
+                WHERE user_id=$1
+                AND classic_id=$2
+                AND chapter_id=$3
+                `,
+                [
+                    req.user.id,
+                    classic_id,
+                    chapter_id
+                ]
+            );
+
+            /* REMOVE BOOKMARK */
+
+            if (existing.rows.length) {
+
+                await db.query(
+                    `
+                    DELETE FROM classic_bookmarks
+                    WHERE id=$1
+                    `,
+                    [
+                        existing.rows[0].id
+                    ]
+                );
+
+                return res.json({
+                    success: true,
+                    bookmarked: false
+                });
+            }
+
+            /* ADD BOOKMARK */
+
+            const result = await db.query(
+                `
+                INSERT INTO classic_bookmarks
+                (
+                    user_id,
+                    classic_id,
+                    chapter_id,
+                    chapter_number
+                )
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3,
+                    $4
+                )
+                RETURNING *
+                `,
+                [
+                    req.user.id,
+                    classic_id,
+                    chapter_id,
+                    chapter_number
+                ]
+            );
+
+            res.json({
+                success: true,
+                bookmarked: true,
+                bookmark: result.rows[0]
+            });
+
+        } catch (err) {
+
+            console.log(
+                "Classic bookmark error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false
+            });
+
+        }
+
+    }
+);
+
+
+/* =========================================================
+   CLASSIC BOOKMARK STATUS
+========================================================= */
+
+router.get(
+    "/classic-bookmark/status/:classicId/:chapterId",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const result = await db.query(
+                `
+                SELECT id
+                FROM classic_bookmarks
+                WHERE user_id=$1
+                AND classic_id=$2
+                AND chapter_id=$3
+                `,
+                [
+                    req.user.id,
+                    req.params.classicId,
+                    req.params.chapterId
+                ]
+            );
+
+            res.json({
+                success: true,
+                bookmarked: result.rows.length > 0
+            });
+
+        } catch (err) {
+
+            console.log(
+                "Classic bookmark status error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                bookmarked: false
+            });
+
+        }
+
+    }
+);
+
+
+/* =========================================================
+   GET USER CLASSIC BOOKMARKS
+========================================================= */
+
+router.get(
+    "/classic-bookmarks/:userId",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            if (
+                Number(req.params.userId) !==
+                Number(req.user.id)
+            ) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Unauthorized."
+                });
+            }
+
+            const result = await db.query(
+                `
+                SELECT
+                    cb.id,
+                    cb.classic_id,
+                    cb.chapter_id,
+                    cb.chapter_number,
+                    cb.created_at,
+                    c.title AS classic_title,
+                    c.cover_image,
+                    cc.title AS chapter_title
+
+                FROM classic_bookmarks cb
+
+                JOIN classics c
+                    ON cb.classic_id=c.id
+
+                JOIN classic_chapters cc
+                    ON cb.chapter_id=cc.id
+
+                WHERE cb.user_id=$1
+
+                ORDER BY cb.id DESC
+                `,
+                [
+                    req.user.id
+                ]
+            );
+
+            res.json({
+                success: true,
+                bookmarks: result.rows
+            });
+
+        } catch (err) {
+
+            console.log(
+                "Get Classic bookmarks error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                bookmarks: []
+            });
+
+        }
+
+    }
+);
+
+
+/* =========================================================
+   DELETE CLASSIC BOOKMARK
+========================================================= */
+
+router.delete(
+    "/classic-bookmark/:id",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const result = await db.query(
+                `
+                DELETE FROM classic_bookmarks
+                WHERE id=$1
+                AND user_id=$2
+                RETURNING id
+                `,
+                [
+                    req.params.id,
+                    req.user.id
+                ]
+            );
+
+            res.json({
+                success: true,
+                deleted: result.rows.length > 0
+            });
+
+        } catch (err) {
+
+            console.log(
+                "Delete Classic bookmark error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false
+            });
+
+        }
+
+    }
+);
 
 router.get(
 "/notifications/:userId",
