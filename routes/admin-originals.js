@@ -5,6 +5,44 @@ const db = require("../db");
 const auth = require("../middleware/auth");
 const axios = require("axios");
 
+const {
+    S3Client,
+    CreateMultipartUploadCommand,
+    UploadPartCommand,
+    CompleteMultipartUploadCommand,
+    AbortMultipartUploadCommand
+} = require("@aws-sdk/client-s3");
+
+const {
+    getSignedUrl
+} = require("@aws-sdk/s3-request-presigner");
+
+/* =========================================================
+   BACKBLAZE B2 S3 CLIENT
+========================================================= */
+
+const b2S3 = new S3Client({
+
+    region:
+        process.env.B2_REGION,
+
+    endpoint:
+        process.env.B2_ENDPOINT,
+
+    credentials: {
+
+        accessKeyId:
+            process.env.B2_KEY_ID,
+
+        secretAccessKey:
+            process.env.B2_APPLICATION_KEY
+
+    },
+
+    forcePathStyle: true
+
+});
+
 /* =========================================================
    ADMIN AUTHENTICATION
 ========================================================= */
@@ -174,6 +212,340 @@ if (!ourBucket) {
     }
 
 });
+
+/* =========================================================
+   START B2 MULTIPART UPLOAD
+
+   POST /api/admin/originals/chapters/:chapterId/media/start
+========================================================= */
+
+router.post(
+    "/chapters/:chapterId/media/start",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const {
+                file_name,
+                mime_type,
+                file_size
+            } = req.body;
+
+
+            if (!Number.isInteger(chapterId)) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (!file_name || !mime_type) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "File name and MIME type are required."
+                });
+
+            }
+
+
+            if (
+                !Number.isFinite(Number(file_size)) ||
+                Number(file_size) <= 0
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid file size."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(`
+
+                    SELECT
+                        oc.id,
+                        oc.original_id,
+                        o.title AS original_title
+
+                    FROM original_chapters oc
+
+                    JOIN originals o
+                        ON o.id = oc.original_id
+
+                    WHERE oc.id = $1
+
+                `, [
+                    chapterId
+                ]);
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Chapter not found."
+                });
+
+            }
+
+
+            const safeName =
+                file_name
+                    .replace(/[^a-zA-Z0-9._-]/g, "_");
+
+
+            const objectKey =
+                `originals/${chapter.rows[0].original_id}/chapters/${chapterId}/${Date.now()}-${safeName}`;
+
+
+            const command =
+                new CreateMultipartUploadCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        objectKey,
+
+                    ContentType:
+                        mime_type
+
+                });
+
+
+            const upload =
+                await b2S3.send(command);
+
+
+            if (!upload.UploadId) {
+
+                throw new Error(
+                    "B2 did not return a multipart upload ID."
+                );
+
+            }
+
+
+            await db.query(`
+
+                UPDATE original_chapters
+
+                SET
+                    media_type = 'video',
+                    media_provider = 'b2',
+                    media_object_key = $1,
+                    media_original_name = $2,
+                    media_mime_type = $3,
+                    media_size_bytes = $4,
+                    media_status = 'uploading',
+                    media_uploaded_at = NULL,
+                    updated_at = NOW()
+
+                WHERE id = $5
+
+            `, [
+
+                objectKey,
+                file_name,
+                mime_type,
+                Number(file_size),
+                chapterId
+
+            ]);
+
+
+            res.json({
+
+                success: true,
+
+                upload_id:
+                    upload.UploadId,
+
+                object_key:
+                    objectKey,
+
+                chapter_id:
+                    chapterId,
+
+                part_size:
+                    10 * 1024 * 1024
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "B2 multipart start error:",
+                err
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to start video upload."
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   SIGN ONE MULTIPART PART
+
+   POST /api/admin/originals/chapters/:chapterId/media/sign-part
+========================================================= */
+
+router.post(
+    "/chapters/:chapterId/media/sign-part",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const {
+                upload_id,
+                object_key,
+                part_number
+            } = req.body;
+
+
+            if (!Number.isInteger(chapterId)) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !upload_id ||
+                !object_key ||
+                !Number.isInteger(Number(part_number)) ||
+                Number(part_number) < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Upload ID, object key and part number are required."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(`
+
+                    SELECT id
+
+                    FROM original_chapters
+
+                    WHERE
+                        id = $1
+                        AND media_provider = 'b2'
+                        AND media_object_key = $2
+
+                `, [
+
+                    chapterId,
+                    object_key
+
+                ]);
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Upload session not found."
+                });
+
+            }
+
+
+            const command =
+                new UploadPartCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        object_key,
+
+                    UploadId:
+                        upload_id,
+
+                    PartNumber:
+                        Number(part_number)
+
+                });
+
+
+            const signedUrl =
+                await getSignedUrl(
+                    b2S3,
+                    command,
+                    {
+                        expiresIn: 900
+                    }
+                );
+
+
+            res.json({
+
+                success: true,
+
+                url:
+                    signedUrl,
+
+                expires_in:
+                    900
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "B2 sign part error:",
+                err
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to create upload URL."
+
+            });
+
+        }
+
+    }
+);
 
 /* =========================================================
    GET ALL ORIGINALS
