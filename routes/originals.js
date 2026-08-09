@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 
 const db = require("../db");
+const jwt = require("jsonwebtoken");
+
+const auth = require("../middleware/auth");
 
 const {
     S3Client,
@@ -33,6 +36,39 @@ const b2S3 = new S3Client({
     forcePathStyle: true
 
 });
+
+function getOptionalUserId(req) {
+
+    const authHeader =
+        req.headers.authorization;
+
+    if (
+        !authHeader ||
+        !authHeader.startsWith("Bearer ")
+    ) {
+        return null;
+    }
+
+    const token =
+        authHeader.split(" ")[1];
+
+    try {
+
+        const decoded =
+            jwt.verify(
+                token,
+                process.env.JWT_SECRET
+            );
+
+        return Number(decoded.id);
+
+    } catch (err) {
+
+        return null;
+
+    }
+
+}
 
 /* =========================================================
    GET ALL PUBLISHED ORIGINALS
@@ -424,6 +460,501 @@ router.get("/chapter/:chapterId", async (req, res) => {
 });
 
 /* =========================================================
+   UNLOCK PREMIUM ORIGINAL EPISODE
+   POST /api/originals/chapter/:chapterId/unlock
+========================================================= */
+
+router.post(
+    "/chapter/:chapterId/unlock",
+    auth,
+    async (req, res) => {
+
+        const client =
+            await db.connect();
+
+        try {
+
+            await client.query(
+                "BEGIN"
+            );
+
+            const chapterId =
+                Number(
+                    req.params.chapterId
+                );
+
+            const userId =
+                Number(
+                    req.user.id
+                );
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            /* -------------------------------------------------
+               GET EPISODE
+            ------------------------------------------------- */
+
+            const chapterResult =
+                await client.query(
+                    `
+                    SELECT
+                        oc.id,
+                        oc.original_id,
+                        oc.chapter_no,
+                        oc.title,
+                        oc.is_premium,
+                        oc.coins_required,
+                        oc.early_access,
+
+                        o.title AS original_title,
+                        o.premium_only,
+                        o.publish_status,
+                        o.visibility
+
+                    FROM original_chapters oc
+
+                    JOIN originals o
+                        ON o.id = oc.original_id
+
+                    WHERE
+                        oc.id = $1
+
+                        AND oc.is_draft = FALSE
+
+                        AND oc.is_published = TRUE
+
+                        AND (
+                            oc.publish_at IS NULL
+                            OR oc.publish_at <= NOW()
+                        )
+
+                        AND o.publish_status = 'published'
+
+                        AND o.visibility = 'public'
+
+                    LIMIT 1
+                    `,
+                    [chapterId]
+                );
+
+
+            if (
+                chapterResult.rows.length === 0
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Episode not found or not available."
+                });
+
+            }
+
+
+            const chapter =
+                chapterResult.rows[0];
+
+
+            /* -------------------------------------------------
+               FREE EPISODE
+            ------------------------------------------------- */
+
+            if (
+                !chapter.is_premium &&
+                !chapter.premium_only
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.json({
+                    success: true,
+                    unlocked: true,
+                    premium: false,
+                    coins_paid: 0
+                });
+
+            }
+
+
+            /* -------------------------------------------------
+               PREMIUM MEMBERSHIP CHECK
+            ------------------------------------------------- */
+
+            const premiumResult =
+                await client.query(
+                    `
+                    SELECT id
+
+                    FROM user_premium
+
+                    WHERE
+                        user_id = $1
+
+                        AND status = 'Active'
+
+                        AND expiry_date > NOW()
+
+                    LIMIT 1
+                    `,
+                    [userId]
+                );
+
+
+            const isPremiumMember =
+                premiumResult.rows.length > 0;
+
+
+            if (isPremiumMember) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.json({
+                    success: true,
+                    unlocked: true,
+                    premium: true,
+                    coins_paid: 0
+                });
+
+            }
+
+
+            /* -------------------------------------------------
+               CHECK EXISTING UNLOCK
+            ------------------------------------------------- */
+
+            const existingUnlock =
+                await client.query(
+                    `
+                    SELECT
+                        id,
+                        coins_paid,
+                        unlocked_at
+
+                    FROM original_chapter_unlocks
+
+                    WHERE
+                        user_id = $1
+
+                        AND chapter_id = $2
+
+                    LIMIT 1
+                    `,
+                    [
+                        userId,
+                        chapterId
+                    ]
+                );
+
+
+            if (
+                existingUnlock.rows.length > 0
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.json({
+                    success: true,
+                    unlocked: true,
+                    premium: false,
+                    already_unlocked: true,
+                    coins_paid:
+                        Number(
+                            existingUnlock
+                                .rows[0]
+                                .coins_paid
+                        )
+                });
+
+            }
+
+
+            const coinsRequired =
+                Math.max(
+                    0,
+                    Number(
+                        chapter.coins_required || 0
+                    )
+                );
+
+
+            if (coinsRequired <= 0) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "This premium episode has an invalid coin price."
+                });
+
+            }
+
+
+            /* -------------------------------------------------
+               LOCK WALLET ROW
+            ------------------------------------------------- */
+
+            const walletResult =
+                await client.query(
+                    `
+                    SELECT
+                        id,
+                        coins,
+                        earned_coins,
+                        spent_coins
+
+                    FROM wallets
+
+                    WHERE user_id = $1
+
+                    FOR UPDATE
+                    `,
+                    [userId]
+                );
+
+
+            if (
+                walletResult.rows.length === 0
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Wallet not found."
+                });
+
+            }
+
+
+            const wallet =
+                walletResult.rows[0];
+
+            const currentCoins =
+                Number(
+                    wallet.coins || 0
+                );
+
+
+            /* -------------------------------------------------
+               BALANCE CHECK
+            ------------------------------------------------- */
+
+            if (
+                currentCoins <
+                coinsRequired
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Not enough coins.",
+                    coins_required:
+                        coinsRequired,
+                    coins_balance:
+                        currentCoins
+                });
+
+            }
+
+
+            /* -------------------------------------------------
+               DEDUCT COINS
+            ------------------------------------------------- */
+
+            const updatedWallet =
+                await client.query(
+                    `
+                    UPDATE wallets
+
+                    SET
+                        coins =
+                            coins - $1,
+
+                        spent_coins =
+                            spent_coins + $1
+
+                    WHERE
+                        user_id = $2
+
+                    RETURNING
+                        coins
+                    `,
+                    [
+                        coinsRequired,
+                        userId
+                    ]
+                );
+
+
+            const newBalance =
+                Number(
+                    updatedWallet
+                        .rows[0]
+                        .coins
+                );
+
+
+            /* -------------------------------------------------
+               WALLET TRANSACTION
+            ------------------------------------------------- */
+
+            await client.query(
+                `
+                INSERT INTO wallet_transactions
+                (
+                    wallet_id,
+                    user_id,
+                    type,
+                    coins,
+                    amount,
+                    description,
+                    reference_id
+                )
+
+                VALUES
+                (
+                    $1,
+                    $2,
+                    'Debit',
+                    $3,
+                    0,
+                    'Original Episode Unlock',
+                    $4
+                )
+                `,
+                [
+                    wallet.id,
+                    userId,
+                    coinsRequired,
+                    `original_chapter:${chapterId}`
+                ]
+            );
+
+
+            /* -------------------------------------------------
+               RECORD ORIGINAL EPISODE UNLOCK
+            ------------------------------------------------- */
+
+            await client.query(
+                `
+                INSERT INTO original_chapter_unlocks
+                (
+                    user_id,
+                    chapter_id,
+                    coins_paid
+                )
+
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3
+                )
+                `,
+                [
+                    userId,
+                    chapterId,
+                    coinsRequired
+                ]
+            );
+
+
+            await client.query(
+                "COMMIT"
+            );
+
+
+            res.json({
+                success: true,
+                unlocked: true,
+                premium: false,
+                already_unlocked: false,
+                coins_paid:
+                    coinsRequired,
+                coins_balance:
+                    newBalance
+            });
+
+        } catch (err) {
+
+            await client.query(
+                "ROLLBACK"
+            );
+
+            console.error(
+                "Original episode unlock error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to unlock episode."
+            });
+
+        } finally {
+
+            client.release();
+
+        }
+
+    }
+);
+
+/* =========================================================
    GET ORIGINAL VIDEO PLAYBACK URL
    GET /api/originals/chapter/:chapterId/video
 ========================================================= */
@@ -525,51 +1056,175 @@ router.get(
 
 
             /* -------------------------------------------------
-               PREMIUM ACCESS
-            ------------------------------------------------- */
+   PREMIUM ACCESS
+------------------------------------------------- */
 
-            if (
-                chapter.is_premium ||
-                chapter.premium_only
-            ) {
+if (
+    chapter.is_premium ||
+    chapter.premium_only
+) {
 
-                return res.status(403).json({
+    const userId =
+        getOptionalUserId(req);
 
-                    success: false,
 
-                    locked: true,
+    /* ---------------------------------------------
+       NO LOGIN
+    --------------------------------------------- */
 
-                    message:
-                        "This episode requires premium access.",
+    if (!userId) {
 
-                    chapter: {
+        return res.status(403).json({
 
-                        id:
-                            chapter.id,
+            success: false,
 
-                        original_id:
-                            chapter.original_id,
+            locked: true,
 
-                        chapter_no:
-                            chapter.chapter_no,
+            requires_login: true,
 
-                        title:
-                            chapter.title,
+            message:
+                "Please login to watch this premium episode.",
 
-                        is_premium:
-                            true,
+            chapter: {
 
-                        coins_required:
-                            chapter.coins_required || 0,
+                id:
+                    chapter.id,
 
-                        original_title:
-                            chapter.original_title
+                original_id:
+                    chapter.original_id,
 
-                    }
+                chapter_no:
+                    chapter.chapter_no,
 
-                });
+                title:
+                    chapter.title,
+
+                is_premium:
+                    true,
+
+                coins_required:
+                    Number(
+                        chapter.coins_required || 0
+                    ),
+
+                original_title:
+                    chapter.original_title
 
             }
+
+        });
+
+    }
+
+
+    /* ---------------------------------------------
+       PREMIUM MEMBERSHIP
+    --------------------------------------------- */
+
+    const premiumResult =
+        await db.query(
+            `
+            SELECT id
+
+            FROM user_premium
+
+            WHERE
+                user_id = $1
+
+                AND status = 'Active'
+
+                AND expiry_date > NOW()
+
+            LIMIT 1
+            `,
+            [userId]
+        );
+
+
+    const isPremiumMember =
+        premiumResult.rows.length > 0;
+
+
+    if (isPremiumMember) {
+
+        // Premium members can watch directly.
+
+    } else {
+
+        /* -----------------------------------------
+           CHECK ORIGINAL EPISODE UNLOCK
+        ----------------------------------------- */
+
+        const unlockResult =
+            await db.query(
+                `
+                SELECT id
+
+                FROM original_chapter_unlocks
+
+                WHERE
+                    user_id = $1
+
+                    AND chapter_id = $2
+
+                LIMIT 1
+                `,
+                [
+                    userId,
+                    chapter.id
+                ]
+            );
+
+
+        if (
+            unlockResult.rows.length === 0
+        ) {
+
+            return res.status(403).json({
+
+                success: false,
+
+                locked: true,
+
+                requires_login: false,
+
+                message:
+                    "This episode requires coins to unlock.",
+
+                chapter: {
+
+                    id:
+                        chapter.id,
+
+                    original_id:
+                        chapter.original_id,
+
+                    chapter_no:
+                        chapter.chapter_no,
+
+                    title:
+                        chapter.title,
+
+                    is_premium:
+                        true,
+
+                    coins_required:
+                        Number(
+                            chapter.coins_required || 0
+                        ),
+
+                    original_title:
+                        chapter.original_title
+
+                }
+
+            });
+
+        }
+
+    }
+
+}
 
 
             /* -------------------------------------------------
