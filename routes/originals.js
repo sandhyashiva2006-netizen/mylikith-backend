@@ -1515,6 +1515,188 @@ router.post("/:id/view", async (req, res) => {
 });
 
 /* =========================================================
+   RATE ORIGINAL
+   POST /api/originals/:id/rating
+========================================================= */
+
+router.post(
+    "/:id/rating",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const originalId =
+                Number(req.params.id);
+
+            const userId =
+                Number(req.user.id);
+
+            const rating =
+                Number(req.body.rating);
+
+
+            if (
+                !Number.isInteger(originalId) ||
+                originalId < 1
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid Original ID."
+                });
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+                return res.status(401).json({
+                    success: false,
+                    message: "Authentication required."
+                });
+            }
+
+
+            if (
+                !Number.isInteger(rating) ||
+                rating < 1 ||
+                rating > 5
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Rating must be between 1 and 5."
+                });
+            }
+
+
+            const originalResult =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM originals
+                    WHERE
+                        id = $1
+                        AND publish_status = 'published'
+                        AND visibility = 'public'
+                    LIMIT 1
+                    `,
+                    [originalId]
+                );
+
+
+            if (!originalResult.rows.length) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Original not found."
+                });
+            }
+
+
+            await db.query(
+                `
+                INSERT INTO original_ratings
+                (
+                    user_id,
+                    original_id,
+                    rating,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3,
+                    NOW(),
+                    NOW()
+                )
+
+                ON CONFLICT
+                (
+                    user_id,
+                    original_id
+                )
+
+                DO UPDATE SET
+                    rating = EXCLUDED.rating,
+                    updated_at = NOW()
+                `,
+                [
+                    userId,
+                    originalId,
+                    rating
+                ]
+            );
+
+
+            const averageResult =
+                await db.query(
+                    `
+                    SELECT
+                        ROUND(
+                            AVG(rating)::numeric,
+                            1
+                        ) AS rating,
+                        COUNT(*)::integer AS rating_count
+                    FROM original_ratings
+                    WHERE original_id = $1
+                    `,
+                    [originalId]
+                );
+
+
+            const averageRating =
+                Number(
+                    averageResult.rows[0].rating || 0
+                );
+
+
+            const ratingCount =
+                Number(
+                    averageResult.rows[0].rating_count || 0
+                );
+
+
+            await db.query(
+                `
+                UPDATE originals
+                SET rating = $1
+                WHERE id = $2
+                `,
+                [
+                    averageRating,
+                    originalId
+                ]
+            );
+
+
+            return res.json({
+                success: true,
+                rating: averageRating,
+                rating_count: ratingCount,
+                user_rating: rating
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original rating error:",
+                err
+            );
+
+            return res.status(500).json({
+                success: false,
+                message: "Unable to save rating."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
    LIKE / UNLIKE ORIGINAL
    POST /api/originals/:id/like
 ========================================================= */
