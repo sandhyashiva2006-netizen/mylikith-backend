@@ -2529,6 +2529,209 @@ router.delete(
     }
 );
 
+/* ---------------------------------------------------------
+   REPORT COMMENT
+   POST /api/originals/:id/comments/:commentId/report
+--------------------------------------------------------- */
+
+router.post(
+    "/:id/comments/:commentId/report",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const originalId =
+                Number(req.params.id);
+
+            const commentId =
+                Number(req.params.commentId);
+
+            const userId =
+                Number(req.user.id);
+
+            const reason =
+                String(
+                    req.body.reason || ""
+                ).trim();
+
+
+            if (
+                !Number.isInteger(originalId) ||
+                originalId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Original ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(commentId) ||
+                commentId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid comment ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            if (reason.length > 1000) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Report reason is too long."
+                });
+
+            }
+
+
+            const comment =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM original_comments
+                    WHERE
+                        id = $1
+                        AND original_id = $2
+                    LIMIT 1
+                    `,
+                    [
+                        commentId,
+                        originalId
+                    ]
+                );
+
+
+            if (!comment.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Comment not found."
+                });
+
+            }
+
+
+            const existing =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM original_comment_reports
+                    WHERE
+                        comment_id = $1
+                        AND user_id = $2
+                    LIMIT 1
+                    `,
+                    [
+                        commentId,
+                        userId
+                    ]
+                );
+
+
+            if (existing.rows.length) {
+
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "You have already reported this comment."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    INSERT INTO original_comment_reports
+                    (
+                        comment_id,
+                        user_id,
+                        reason
+                    )
+                    VALUES
+                    ($1, $2, $3)
+                    RETURNING
+                        id,
+                        comment_id,
+                        user_id,
+                        reason,
+                        created_at
+                    `,
+                    [
+                        commentId,
+                        userId,
+                        reason || null
+                    ]
+                );
+
+
+            res.status(201).json({
+                success: true,
+                report:
+                    result.rows[0],
+                message:
+                    "Comment reported successfully."
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original comment report error:",
+                err
+            );
+
+
+            if (
+                err.code === "23505"
+            ) {
+
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "You have already reported this comment."
+                });
+
+            }
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to report comment."
+            });
+
+        }
+
+    }
+);
+
 /* =========================================================
    GET SINGLE ORIGINAL
    GET /api/originals/:id
