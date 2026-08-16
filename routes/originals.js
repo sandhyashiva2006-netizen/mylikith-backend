@@ -2149,6 +2149,253 @@ router.get(
 );
 
 /* =========================================================
+   ORIGINAL COMMENTS
+========================================================= */
+
+
+/* ---------------------------------------------------------
+   GET COMMENTS
+   GET /api/originals/:id/comments
+--------------------------------------------------------- */
+
+router.get(
+    "/:id/comments",
+    async (req, res) => {
+
+        try {
+
+            const originalId =
+                Number(req.params.id);
+
+
+            if (
+                !Number.isInteger(originalId) ||
+                originalId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Original ID."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    SELECT
+                        c.id,
+                        c.original_id,
+                        c.user_id,
+                        c.comment,
+                        c.created_at,
+                        u.name AS user_name,
+                        u.profile_image
+                    FROM original_comments c
+                    JOIN users u
+                        ON c.user_id = u.id
+                    WHERE c.original_id = $1
+                    ORDER BY c.created_at DESC, c.id DESC
+                    `,
+                    [originalId]
+                );
+
+
+            res.json({
+                success: true,
+                comments: result.rows
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original comments load error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load comments."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   POST COMMENT
+   POST /api/originals/:id/comments
+--------------------------------------------------------- */
+
+router.post(
+    "/:id/comments",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const originalId =
+                Number(req.params.id);
+
+            const userId =
+                Number(req.user.id);
+
+            const comment =
+                String(
+                    req.body.comment || ""
+                ).trim();
+
+
+            if (
+                !Number.isInteger(originalId) ||
+                originalId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Original ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            if (!comment) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Comment cannot be empty."
+                });
+
+            }
+
+
+            if (comment.length > 1000) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Comment is too long."
+                });
+
+            }
+
+
+            const original =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM originals
+                    WHERE id = $1
+                    LIMIT 1
+                    `,
+                    [originalId]
+                );
+
+
+            if (!original.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Original not found."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    INSERT INTO original_comments
+                    (
+                        user_id,
+                        original_id,
+                        comment
+                    )
+                    VALUES
+                    ($1, $2, $3)
+                    RETURNING
+                        id,
+                        original_id,
+                        user_id,
+                        comment,
+                        created_at
+                    `,
+                    [
+                        userId,
+                        originalId,
+                        comment
+                    ]
+                );
+
+
+            const user =
+                await db.query(
+                    `
+                    SELECT
+                        name,
+                        profile_image
+                    FROM users
+                    WHERE id = $1
+                    LIMIT 1
+                    `,
+                    [userId]
+                );
+
+
+            res.status(201).json({
+                success: true,
+                comment: {
+                    ...result.rows[0],
+                    user_name:
+                        user.rows[0]?.name || "Reader",
+                    profile_image:
+                        user.rows[0]?.profile_image || null
+                }
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original comment create error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to post comment."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
    GET SINGLE ORIGINAL
    GET /api/originals/:id
 ========================================================= */
