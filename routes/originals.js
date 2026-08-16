@@ -1449,6 +1449,283 @@ router.get("/:id", async (req, res) => {
 
 });
 
+/* =========================================================
+   SAVE ORIGINAL EPISODE READING PROGRESS
+   POST /api/originals/chapter/:chapterId/progress
+========================================================= */
 
+router.post(
+    "/chapter/:chapterId/progress",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            const progress =
+                Number(req.body.progress_percent);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            if (
+                !Number.isFinite(progress)
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid progress."
+                });
+
+            }
+
+
+            const progressPercent =
+                Math.min(
+                    100,
+                    Math.max(
+                        0,
+                        Math.round(progress)
+                    )
+                );
+
+
+            const chapterResult =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM original_chapters
+                    WHERE
+                        id = $1
+                        AND is_draft = FALSE
+                        AND is_published = TRUE
+                    LIMIT 1
+                    `,
+                    [chapterId]
+                );
+
+
+            if (
+                chapterResult.rows.length === 0
+            ) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Episode not found."
+                });
+
+            }
+
+
+            await db.query(
+                `
+                INSERT INTO original_reading_progress
+                (
+                    user_id,
+                    chapter_id,
+                    progress_percent,
+                    updated_at
+                )
+
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3,
+                    NOW()
+                )
+
+                ON CONFLICT
+                (
+                    user_id,
+                    chapter_id
+                )
+
+                DO UPDATE SET
+                    progress_percent =
+                        EXCLUDED.progress_percent,
+                    updated_at =
+                        NOW()
+                `,
+                [
+                    userId,
+                    chapterId,
+                    progressPercent
+                ]
+            );
+
+
+            res.json({
+                success: true,
+                progress_percent:
+                    progressPercent
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original progress save error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to save episode progress."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   GET ORIGINAL EPISODE READING PROGRESS
+   GET /api/originals/chapter/:chapterId/progress
+========================================================= */
+
+router.get(
+    "/chapter/:chapterId/progress",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    SELECT
+                        progress_percent,
+                        updated_at
+
+                    FROM original_reading_progress
+
+                    WHERE
+                        user_id = $1
+                        AND chapter_id = $2
+
+                    LIMIT 1
+                    `,
+                    [
+                        userId,
+                        chapterId
+                    ]
+                );
+
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return res.json({
+                    success: true,
+                    progress_percent: 0,
+                    updated_at: null
+                });
+
+            }
+
+
+            res.json({
+                success: true,
+
+                progress_percent:
+                    Number(
+                        result.rows[0]
+                            .progress_percent || 0
+                    ),
+
+                updated_at:
+                    result.rows[0]
+                        .updated_at
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original progress fetch error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load episode progress."
+            });
+
+        }
+
+    }
+);
 
 module.exports = router;
