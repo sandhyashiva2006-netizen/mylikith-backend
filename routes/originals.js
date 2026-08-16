@@ -4,6 +4,41 @@ const router = express.Router();
 const db = require("../db");
 const jwt = require("jsonwebtoken");
 
+function optionalAuth(req, res, next) {
+
+    const authHeader =
+        req.headers.authorization;
+
+    if (
+        !authHeader ||
+        !authHeader.startsWith("Bearer ")
+    ) {
+        req.user = null;
+        return next();
+    }
+
+    const token =
+        authHeader.split(" ")[1];
+
+    try {
+
+        const decoded =
+            jwt.verify(
+                token,
+                process.env.JWT_SECRET
+            );
+
+        req.user = decoded;
+
+    } catch (err) {
+
+        req.user = null;
+
+    }
+
+    next();
+}
+
 const auth = require("../middleware/auth");
 
 const {
@@ -240,7 +275,10 @@ router.get("/featured", async (req, res) => {
    GET /api/originals/:id/chapters
 ========================================================= */
 
-router.get("/:id/chapters", async (req, res) => {
+router.get(
+    "/:id/chapters",
+    optionalAuth,
+    async (req, res) => {
 
     try {
 
@@ -287,30 +325,50 @@ router.get("/:id/chapters", async (req, res) => {
 
         }
 
-        const result = await db.query(`
-            SELECT
-                id,
-                original_id,
-                chapter_no,
-                title,
-                is_premium,
-                coins_required,
-                early_access,
-                is_draft,
-                is_published,
-                publish_at,
-                created_at
-            FROM original_chapters
-            WHERE
-                original_id = $1
-                AND is_draft = FALSE
-                AND is_published = TRUE
-                AND (
-                    publish_at IS NULL
-                    OR publish_at <= NOW()
-                )
-            ORDER BY chapter_no ASC
-        `, [originalId]);
+const result = await db.query(`
+    SELECT
+        oc.id,
+        oc.original_id,
+        oc.chapter_no,
+        oc.title,
+        oc.is_premium,
+        oc.coins_required,
+        oc.early_access,
+        oc.is_draft,
+        oc.is_published,
+        oc.publish_at,
+        oc.created_at,
+
+        COALESCE(
+            (
+                SELECT
+                    rp.progress_percent
+                FROM original_reading_progress rp
+                WHERE
+                    rp.chapter_id = oc.id
+                    AND rp.user_id = $2
+                LIMIT 1
+            ),
+            0
+        ) AS progress_percent
+
+    FROM original_chapters oc
+
+    WHERE
+        oc.original_id = $1
+        AND oc.is_draft = FALSE
+        AND oc.is_published = TRUE
+        AND (
+            oc.publish_at IS NULL
+            OR oc.publish_at <= NOW()
+        )
+
+    ORDER BY
+        oc.chapter_no ASC
+`, [
+    originalId,
+    Number(req.user?.id || 0)
+]);
 
         res.json({
             success: true,
