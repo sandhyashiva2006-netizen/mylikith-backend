@@ -2160,6 +2160,7 @@ router.get(
 
 router.get(
     "/:id/comments",
+    optionalAuth,
     async (req, res) => {
 
         try {
@@ -2185,21 +2186,34 @@ router.get(
             const result =
                 await db.query(
                     `
-                    SELECT
-                        c.id,
-                        c.original_id,
-                        c.user_id,
-                        c.comment,
-                        c.created_at,
-                        u.name AS user_name,
-                        u.profile_image
-                    FROM original_comments c
-                    JOIN users u
-                        ON c.user_id = u.id
-                    WHERE c.original_id = $1
-                    ORDER BY c.created_at DESC, c.id DESC
+SELECT
+    c.id,
+    c.original_id,
+    c.user_id,
+    c.comment,
+    c.created_at,
+    u.name AS user_name,
+    u.profile_image,
+
+    (
+        c.user_id = $2
+    ) AS is_owner
+
+FROM original_comments c
+
+JOIN users u
+    ON c.user_id = u.id
+
+WHERE c.original_id = $1
+
+ORDER BY
+    c.created_at DESC,
+    c.id DESC
                     `,
-                    [originalId]
+                    [
+    originalId,
+    getOptionalUserId(req)
+]
                 );
 
 
@@ -2388,6 +2402,126 @@ router.post(
                 success: false,
                 message:
                     "Unable to post comment."
+            });
+
+        }
+
+    }
+);
+
+/* ---------------------------------------------------------
+   DELETE OWN COMMENT
+   DELETE /api/originals/:id/comments/:commentId
+--------------------------------------------------------- */
+
+router.delete(
+    "/:id/comments/:commentId",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const originalId =
+                Number(req.params.id);
+
+            const commentId =
+                Number(req.params.commentId);
+
+            const userId =
+                Number(req.user.id);
+
+
+            if (
+                !Number.isInteger(originalId) ||
+                originalId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Original ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(commentId) ||
+                commentId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid comment ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    DELETE FROM original_comments
+
+                    WHERE
+                        id = $1
+                        AND original_id = $2
+                        AND user_id = $3
+
+                    RETURNING id
+                    `,
+                    [
+                        commentId,
+                        originalId,
+                        userId
+                    ]
+                );
+
+
+            if (!result.rows.length) {
+
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You can only delete your own comment."
+                });
+
+            }
+
+
+            res.json({
+                success: true,
+                message:
+                    "Comment deleted successfully."
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original comment delete error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to delete comment."
             });
 
         }
