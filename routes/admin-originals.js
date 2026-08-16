@@ -1773,5 +1773,110 @@ router.delete(
     }
 );
 
+/* =========================================================
+   GET ORIGINAL COMMENT REPORTS
+   GET /api/admin/originals/comment-reports
+========================================================= */
+
+router.get(
+    "/comment-reports",
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(`
+                    SELECT
+
+                        r.id AS report_id,
+
+                        r.comment_id,
+
+                        r.reason AS report_reason,
+
+                        r.created_at AS reported_at,
+
+
+                        c.comment,
+
+                        c.created_at AS comment_created_at,
+
+
+                        o.id AS original_id,
+
+                        o.title AS original_title,
+
+
+                        commenter.id AS commenter_id,
+
+                        commenter.name AS commenter_name,
+
+                        commenter.email AS commenter_email,
+
+
+                        reporter.id AS reporter_id,
+
+                        reporter.name AS reporter_name,
+
+                        reporter.email AS reporter_email
+
+
+                    FROM original_comment_reports r
+
+
+                    JOIN original_comments c
+                        ON c.id = r.comment_id
+
+
+                    JOIN originals o
+                        ON o.id = c.original_id
+
+
+                    JOIN users commenter
+                        ON commenter.id = c.user_id
+
+
+                    JOIN users reporter
+                        ON reporter.id = r.user_id
+
+
+                    ORDER BY
+                        r.created_at DESC,
+
+                        r.id DESC
+                `);
+
+
+            res.json({
+
+                success: true,
+
+                reports:
+                    result.rows
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Admin Original comment reports GET error:",
+                err
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to load comment reports."
+
+            });
+
+        }
+
+    }
+);
 
 module.exports = router;
