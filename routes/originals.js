@@ -1515,6 +1515,365 @@ router.post("/:id/view", async (req, res) => {
 });
 
 /* =========================================================
+   LIKE / UNLIKE ORIGINAL
+   POST /api/originals/:id/like
+========================================================= */
+
+router.post(
+    "/:id/like",
+    auth,
+    async (req, res) => {
+
+        const client =
+            await db.connect();
+
+        try {
+
+            const originalId =
+                Number(req.params.id);
+
+            const userId =
+                Number(req.user.id);
+
+
+            if (
+                !Number.isInteger(originalId) ||
+                originalId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Original ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            await client.query(
+                "BEGIN"
+            );
+
+
+            /* ---------------------------------------------
+               CHECK ORIGINAL
+            --------------------------------------------- */
+
+            const originalResult =
+                await client.query(
+                    `
+                    SELECT
+                        id,
+                        likes
+
+                    FROM originals
+
+                    WHERE
+                        id = $1
+                        AND publish_status = 'published'
+                        AND visibility = 'public'
+
+                    FOR UPDATE
+                    `,
+                    [originalId]
+                );
+
+
+            if (
+                originalResult.rows.length === 0
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Original not found."
+                });
+
+            }
+
+
+            /* ---------------------------------------------
+               CHECK EXISTING LIKE
+            --------------------------------------------- */
+
+            const existingLike =
+                await client.query(
+                    `
+                    SELECT
+                        id
+
+                    FROM original_likes
+
+                    WHERE
+                        user_id = $1
+                        AND original_id = $2
+
+                    LIMIT 1
+                    `,
+                    [
+                        userId,
+                        originalId
+                    ]
+                );
+
+
+            /* ---------------------------------------------
+               UNLIKE
+            --------------------------------------------- */
+
+            if (
+                existingLike.rows.length > 0
+            ) {
+
+                await client.query(
+                    `
+                    DELETE FROM original_likes
+
+                    WHERE
+                        user_id = $1
+                        AND original_id = $2
+                    `,
+                    [
+                        userId,
+                        originalId
+                    ]
+                );
+
+
+                const updated =
+                    await client.query(
+                        `
+                        UPDATE originals
+
+                        SET likes =
+                            GREATEST(
+                                COALESCE(likes, 0) - 1,
+                                0
+                            )
+
+                        WHERE id = $1
+
+                        RETURNING likes
+                        `,
+                        [originalId]
+                    );
+
+
+                await client.query(
+                    "COMMIT"
+                );
+
+
+                return res.json({
+                    success: true,
+                    liked: false,
+                    likes:
+                        Number(
+                            updated.rows[0].likes || 0
+                        )
+                });
+
+            }
+
+
+            /* ---------------------------------------------
+               LIKE
+            --------------------------------------------- */
+
+            await client.query(
+                `
+                INSERT INTO original_likes
+                (
+                    user_id,
+                    original_id
+                )
+
+                VALUES
+                (
+                    $1,
+                    $2
+                )
+                `,
+                [
+                    userId,
+                    originalId
+                ]
+            );
+
+
+            const updated =
+                await client.query(
+                    `
+                    UPDATE originals
+
+                    SET likes =
+                        COALESCE(likes, 0) + 1
+
+                    WHERE id = $1
+
+                    RETURNING likes
+                    `,
+                    [originalId]
+                );
+
+
+            await client.query(
+                "COMMIT"
+            );
+
+
+            res.json({
+                success: true,
+                liked: true,
+                likes:
+                    Number(
+                        updated.rows[0].likes || 0
+                    )
+            });
+
+
+        } catch (err) {
+
+            await client.query(
+                "ROLLBACK"
+            );
+
+
+            console.error(
+                "Original like error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to update Original like."
+            });
+
+
+        } finally {
+
+            client.release();
+
+        }
+
+    }
+);
+
+/* =========================================================
+   GET ORIGINAL LIKE STATUS
+   GET /api/originals/:id/like
+========================================================= */
+
+router.get(
+    "/:id/like",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const originalId =
+                Number(req.params.id);
+
+            const userId =
+                Number(req.user.id);
+
+
+            if (
+                !Number.isInteger(originalId) ||
+                originalId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Original ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    SELECT
+                        id
+
+                    FROM original_likes
+
+                    WHERE
+                        user_id = $1
+                        AND original_id = $2
+
+                    LIMIT 1
+                    `,
+                    [
+                        userId,
+                        originalId
+                    ]
+                );
+
+
+            res.json({
+                success: true,
+                liked:
+                    result.rows.length > 0
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original like status error:",
+                err
+            );
+
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to check Original like status."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
    GET SINGLE ORIGINAL
    GET /api/originals/:id
 ========================================================= */
