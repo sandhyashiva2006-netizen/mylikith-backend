@@ -2183,48 +2183,47 @@ router.get(
             }
 
 
-            const result =
-                await db.query(
-                    `
-SELECT
-    c.id,
-    c.original_id,
-    c.user_id,
-    c.comment,
-    c.created_at,
-    u.name AS user_name,
-    u.profile_image,
+const result =
+    await db.query(
+        `
+        SELECT
+            c.id,
+            c.original_id,
+            c.user_id,
+            c.comment,
+            c.created_at,
 
-    (
-        c.user_id = $2
-    ) AS is_owner
+            u.name AS user_name,
+            u.profile_image,
 
-(
-    EXISTS (
-        SELECT 1
-        FROM original_comment_reports r
-        WHERE
-            r.comment_id = c.id
-            AND r.user_id = $2
-    )
-) AS is_reported
+            (
+                c.user_id = $2
+            ) AS is_owner,
 
-FROM original_comments c
+            EXISTS (
+                SELECT 1
+                FROM original_comment_reports r
+                WHERE
+                    r.comment_id = c.id
+                    AND r.user_id = $2
+            ) AS is_reported
 
-JOIN users u
-    ON c.user_id = u.id
+        FROM original_comments c
 
-WHERE c.original_id = $1
+        JOIN users u
+            ON c.user_id = u.id
 
-ORDER BY
-    c.created_at DESC,
-    c.id DESC
-                    `,
-                    [
-    originalId,
-    getOptionalUserId(req)
-]
-                );
+        WHERE c.original_id = $1
+
+        ORDER BY
+            c.created_at DESC,
+            c.id DESC
+        `,
+        [
+            originalId,
+            getOptionalUserId(req)
+        ]
+    );
 
 
             res.json({
