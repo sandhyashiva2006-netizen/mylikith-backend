@@ -1297,6 +1297,113 @@ router.delete(
 );
 
 /* =========================================================
+   DISMISS ORIGINAL COMMENT REPORT
+
+   DELETE
+   /api/admin/originals/comment-reports/:reportId
+========================================================= */
+
+router.delete(
+    "/comment-reports/:reportId",
+    async (req, res) => {
+
+        try {
+
+            const reportId =
+                Number(
+                    req.params.reportId
+                );
+
+
+            if (
+                !Number.isInteger(
+                    reportId
+                ) ||
+                reportId <= 0
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Invalid report ID."
+
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    DELETE FROM
+                        original_comment_reports
+                    WHERE id = $1
+
+                    RETURNING
+                        id,
+                        comment_id
+                    `,
+                    [reportId]
+                );
+
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "Report not found."
+
+                });
+
+            }
+
+
+            res.json({
+
+                success: true,
+
+                message:
+                    "Report dismissed successfully.",
+
+                report_id:
+                    result.rows[0].id,
+
+                comment_id:
+                    result.rows[0].comment_id
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Admin Original report dismiss error:",
+                error
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to dismiss report."
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
    GET SINGLE ORIGINAL
    GET /api/admin/originals/:id
 ========================================================= */
