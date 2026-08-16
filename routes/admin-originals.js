@@ -1101,6 +1101,202 @@ router.get(
 );
 
 /* =========================================================
+   DELETE ORIGINAL COMMENT — ADMIN MODERATION
+
+   DELETE
+   /api/admin/originals/comment-reports/:reportId/comment
+========================================================= */
+
+router.delete(
+    "/comment-reports/:reportId/comment",
+    async (req, res) => {
+
+        const client =
+            await db.connect();
+
+        try {
+
+            const reportId =
+                Number(
+                    req.params.reportId
+                );
+
+
+            if (
+                !Number.isInteger(
+                    reportId
+                ) ||
+                reportId <= 0
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Invalid report ID."
+
+                });
+
+            }
+
+
+            await client.query(
+                "BEGIN"
+            );
+
+
+            const reportResult =
+                await client.query(
+                    `
+                    SELECT
+                        r.id,
+                        r.comment_id
+                    FROM original_comment_reports r
+                    WHERE r.id = $1
+                    FOR UPDATE
+                    `,
+                    [reportId]
+                );
+
+
+            if (
+                reportResult.rows.length === 0
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "Report not found."
+
+                });
+
+            }
+
+
+            const commentId =
+                reportResult.rows[0]
+                    .comment_id;
+
+
+            /*
+             * Delete reports first.
+             * This keeps the operation safe even if
+             * the report table does not use ON DELETE CASCADE.
+             */
+
+            await client.query(
+                `
+                DELETE FROM
+                    original_comment_reports
+                WHERE comment_id = $1
+                `,
+                [commentId]
+            );
+
+
+            const commentResult =
+                await client.query(
+                    `
+                    DELETE FROM
+                        original_comments
+                    WHERE id = $1
+                    RETURNING id
+                    `,
+                    [commentId]
+                );
+
+
+            if (
+                commentResult.rows.length === 0
+            ) {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "Comment no longer exists."
+
+                });
+
+            }
+
+
+            await client.query(
+                "COMMIT"
+            );
+
+
+            res.json({
+
+                success: true,
+
+                message:
+                    "Comment deleted successfully.",
+
+                comment_id:
+                    commentId
+
+            });
+
+
+        } catch (error) {
+
+            try {
+
+                await client.query(
+                    "ROLLBACK"
+                );
+
+            } catch (
+                rollbackError
+            ) {
+
+                console.error(
+                    "Rollback error:",
+                    rollbackError
+                );
+
+            }
+
+
+            console.error(
+                "Admin Original comment delete error:",
+                error
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to delete comment."
+
+            });
+
+
+        } finally {
+
+            client.release();
+
+        }
+
+    }
+);
+
+/* =========================================================
    GET SINGLE ORIGINAL
    GET /api/admin/originals/:id
 ========================================================= */
