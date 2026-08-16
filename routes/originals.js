@@ -1433,6 +1433,88 @@ if (
 );
 
 /* =========================================================
+   RECORD ORIGINAL VIEW
+   POST /api/originals/:id/view
+========================================================= */
+
+router.post("/:id/view", async (req, res) => {
+
+    try {
+
+        const originalId =
+            Number(req.params.id);
+
+        if (
+            !Number.isInteger(originalId) ||
+            originalId < 1
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid Original ID."
+            });
+
+        }
+
+
+        const result =
+            await db.query(
+                `
+                UPDATE originals
+
+                SET views =
+                    COALESCE(views, 0) + 1
+
+                WHERE
+                    id = $1
+                    AND publish_status = 'published'
+                    AND visibility = 'public'
+
+                RETURNING views
+                `,
+                [originalId]
+            );
+
+
+        if (
+            result.rows.length === 0
+        ) {
+
+            return res.status(404).json({
+                success: false,
+                message: "Original not found."
+            });
+
+        }
+
+
+        res.json({
+            success: true,
+            views:
+                Number(
+                    result.rows[0].views || 0
+                )
+        });
+
+
+    } catch (err) {
+
+        console.error(
+            "Original view error:",
+            err
+        );
+
+        res.status(500).json({
+            success: false,
+            message:
+                "Unable to record Original view."
+        });
+
+    }
+
+});
+
+/* =========================================================
    GET SINGLE ORIGINAL
    GET /api/originals/:id
 ========================================================= */
@@ -1506,6 +1588,7 @@ router.get("/:id", async (req, res) => {
     }
 
 });
+
 
 /* =========================================================
    SAVE ORIGINAL EPISODE READING PROGRESS
