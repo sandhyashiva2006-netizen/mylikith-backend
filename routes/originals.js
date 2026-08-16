@@ -1697,6 +1697,99 @@ router.post(
 );
 
 /* =========================================================
+   GET ORIGINAL USER RATING
+   GET /api/originals/:id/rating
+========================================================= */
+
+router.get(
+    "/:id/rating",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const originalId =
+                Number(req.params.id);
+
+            const userId =
+                Number(req.user.id);
+
+
+            if (
+                !Number.isInteger(originalId) ||
+                originalId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Original ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    SELECT rating
+                    FROM original_ratings
+                    WHERE
+                        user_id = $1
+                        AND original_id = $2
+                    LIMIT 1
+                    `,
+                    [
+                        userId,
+                        originalId
+                    ]
+                );
+
+
+            res.json({
+                success: true,
+                user_rating:
+                    result.rows.length
+                        ? Number(
+                            result.rows[0].rating
+                        )
+                        : 0
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original user rating error:",
+                err
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load your rating."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
    LIKE / UNLIKE ORIGINAL
    POST /api/originals/:id/like
 ========================================================= */
