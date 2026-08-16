@@ -2199,6 +2199,16 @@ SELECT
         c.user_id = $2
     ) AS is_owner
 
+(
+    EXISTS (
+        SELECT 1
+        FROM original_comment_reports r
+        WHERE
+            r.comment_id = c.id
+            AND r.user_id = $2
+    )
+) AS is_reported
+
 FROM original_comments c
 
 JOIN users u
