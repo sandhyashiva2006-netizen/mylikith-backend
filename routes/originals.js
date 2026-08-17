@@ -2742,6 +2742,1097 @@ router.post(
 );
 
 /* =========================================================
+   ORIGINAL CHAPTER COMMENTS & RATINGS
+========================================================= */
+
+
+/* ---------------------------------------------------------
+   GET CHAPTER COMMENTS
+   GET /api/originals/chapter/:chapterId/comments
+--------------------------------------------------------- */
+
+router.get(
+    "/chapter/:chapterId/comments",
+    optionalAuth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    SELECT
+                        c.id,
+                        c.chapter_id,
+                        c.user_id,
+                        c.comment,
+                        c.created_at,
+
+                        u.name AS user_name,
+                        u.profile_image,
+
+                        (
+                            c.user_id = $2
+                        ) AS is_owner,
+
+                        EXISTS (
+                            SELECT 1
+                            FROM original_chapter_comment_reports r
+                            WHERE
+                                r.comment_id = c.id
+                                AND r.user_id = $2
+                        ) AS is_reported
+
+                    FROM original_chapter_comments c
+
+                    JOIN users u
+                        ON c.user_id = u.id
+
+                    JOIN original_chapters ch
+                        ON ch.id = c.chapter_id
+
+                    JOIN originals o
+                        ON o.id = ch.original_id
+
+                    WHERE
+                        c.chapter_id = $1
+
+                        AND ch.is_published = true
+
+                        AND o.publish_status = 'published'
+
+                        AND o.visibility = 'public'
+
+                    ORDER BY
+                        c.created_at DESC,
+                        c.id DESC
+                    `,
+                    [
+                        chapterId,
+                        getOptionalUserId(req)
+                    ]
+                );
+
+
+            return res.json({
+                success: true,
+                comments:
+                    result.rows
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original chapter comments load error:",
+                err
+            );
+
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load chapter comments."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   POST CHAPTER COMMENT
+   POST /api/originals/chapter/:chapterId/comments
+--------------------------------------------------------- */
+
+router.post(
+    "/chapter/:chapterId/comments",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+
+            const userId =
+                Number(req.user.id);
+
+
+            const comment =
+                String(
+                    req.body.comment || ""
+                ).trim();
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            if (!comment) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Comment cannot be empty."
+                });
+
+            }
+
+
+            if (comment.length > 1000) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Comment is too long."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(
+                    `
+                    SELECT
+                        ch.id,
+                        ch.original_id
+
+                    FROM original_chapters ch
+
+                    JOIN originals o
+                        ON o.id = ch.original_id
+
+                    WHERE
+                        ch.id = $1
+
+                        AND ch.is_published = true
+
+                        AND o.publish_status = 'published'
+
+                        AND o.visibility = 'public'
+
+                    LIMIT 1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Chapter not found."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    INSERT INTO original_chapter_comments
+                    (
+                        chapter_id,
+                        user_id,
+                        comment,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        $3,
+                        NOW(),
+                        NOW()
+                    )
+
+                    RETURNING
+                        id,
+                        chapter_id,
+                        user_id,
+                        comment,
+                        created_at
+                    `,
+                    [
+                        chapterId,
+                        userId,
+                        comment
+                    ]
+                );
+
+
+            const user =
+                await db.query(
+                    `
+                    SELECT
+                        name,
+                        profile_image
+
+                    FROM users
+
+                    WHERE id = $1
+
+                    LIMIT 1
+                    `,
+                    [
+                        userId
+                    ]
+                );
+
+
+            return res.status(201).json({
+
+                success: true,
+
+                comment: {
+
+                    ...result.rows[0],
+
+                    user_name:
+                        user.rows[0]?.name ||
+                        "Reader",
+
+                    profile_image:
+                        user.rows[0]?.profile_image ||
+                        null,
+
+                    is_owner:
+                        true,
+
+                    is_reported:
+                        false
+
+                }
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original chapter comment create error:",
+                err
+            );
+
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to post chapter comment."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   DELETE OWN CHAPTER COMMENT
+   DELETE /api/originals/chapter/:chapterId/comments/:commentId
+--------------------------------------------------------- */
+
+router.delete(
+    "/chapter/:chapterId/comments/:commentId",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+
+            const commentId =
+                Number(req.params.commentId);
+
+
+            const userId =
+                Number(req.user.id);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(commentId) ||
+                commentId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid comment ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    DELETE FROM original_chapter_comments
+
+                    WHERE
+                        id = $1
+
+                        AND chapter_id = $2
+
+                        AND user_id = $3
+
+                    RETURNING id
+                    `,
+                    [
+                        commentId,
+                        chapterId,
+                        userId
+                    ]
+                );
+
+
+            if (!result.rows.length) {
+
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You can only delete your own comment."
+                });
+
+            }
+
+
+            return res.json({
+                success: true,
+                message:
+                    "Chapter comment deleted successfully."
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original chapter comment delete error:",
+                err
+            );
+
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to delete chapter comment."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   REPORT CHAPTER COMMENT
+   POST /api/originals/chapter/:chapterId/comments/:commentId/report
+--------------------------------------------------------- */
+
+router.post(
+    "/chapter/:chapterId/comments/:commentId/report",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+
+            const commentId =
+                Number(req.params.commentId);
+
+
+            const userId =
+                Number(req.user.id);
+
+
+            const reason =
+                String(
+                    req.body.reason || ""
+                ).trim();
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(commentId) ||
+                commentId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid comment ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            if (reason.length > 1000) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Report reason is too long."
+                });
+
+            }
+
+
+            const comment =
+                await db.query(
+                    `
+                    SELECT
+                        c.id
+
+                    FROM original_chapter_comments c
+
+                    JOIN original_chapters ch
+                        ON ch.id = c.chapter_id
+
+                    WHERE
+                        c.id = $1
+
+                        AND c.chapter_id = $2
+
+                    LIMIT 1
+                    `,
+                    [
+                        commentId,
+                        chapterId
+                    ]
+                );
+
+
+            if (!comment.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Chapter comment not found."
+                });
+
+            }
+
+
+            const existing =
+                await db.query(
+                    `
+                    SELECT id
+
+                    FROM original_chapter_comment_reports
+
+                    WHERE
+                        comment_id = $1
+
+                        AND user_id = $2
+
+                    LIMIT 1
+                    `,
+                    [
+                        commentId,
+                        userId
+                    ]
+                );
+
+
+            if (existing.rows.length) {
+
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "You have already reported this comment."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    INSERT INTO original_chapter_comment_reports
+                    (
+                        comment_id,
+                        user_id,
+                        reason,
+                        created_at
+                    )
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        $3,
+                        NOW()
+                    )
+
+                    RETURNING
+                        id,
+                        comment_id,
+                        user_id,
+                        reason,
+                        created_at
+                    `,
+                    [
+                        commentId,
+                        userId,
+                        reason || null
+                    ]
+                );
+
+
+            return res.status(201).json({
+
+                success: true,
+
+                report:
+                    result.rows[0],
+
+                message:
+                    "Chapter comment reported successfully."
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original chapter comment report error:",
+                err
+            );
+
+
+            if (
+                err.code === "23505"
+            ) {
+
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "You have already reported this comment."
+                });
+
+            }
+
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to report chapter comment."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   GET CHAPTER RATING
+   GET /api/originals/chapter/:chapterId/rating
+--------------------------------------------------------- */
+
+router.get(
+    "/chapter/:chapterId/rating",
+    optionalAuth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            const userId =
+                getOptionalUserId(req);
+
+
+            const chapter =
+                await db.query(
+                    `
+                    SELECT
+                        ch.id
+
+                    FROM original_chapters ch
+
+                    JOIN originals o
+                        ON o.id = ch.original_id
+
+                    WHERE
+                        ch.id = $1
+
+                        AND ch.is_published = true
+
+                        AND o.publish_status = 'published'
+
+                        AND o.visibility = 'public'
+
+                    LIMIT 1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Chapter not found."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    SELECT
+                        ROUND(
+                            AVG(rating)::numeric,
+                            1
+                        ) AS rating,
+
+                        COUNT(*)::integer
+                            AS rating_count
+
+                    FROM original_chapter_ratings
+
+                    WHERE
+                        chapter_id = $1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            let userRating =
+                null;
+
+
+            if (
+                Number.isInteger(userId) &&
+                userId > 0
+            ) {
+
+                const userResult =
+                    await db.query(
+                        `
+                        SELECT rating
+
+                        FROM original_chapter_ratings
+
+                        WHERE
+                            chapter_id = $1
+
+                            AND user_id = $2
+
+                        LIMIT 1
+                        `,
+                        [
+                            chapterId,
+                            userId
+                        ]
+                    );
+
+
+                if (
+                    userResult.rows.length
+                ) {
+
+                    userRating =
+                        Number(
+                            userResult.rows[0].rating
+                        );
+
+                }
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                rating:
+                    Number(
+                        result.rows[0].rating ||
+                        0
+                    ),
+
+                rating_count:
+                    Number(
+                        result.rows[0].rating_count ||
+                        0
+                    ),
+
+                user_rating:
+                    userRating
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original chapter rating load error:",
+                err
+            );
+
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load chapter rating."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   RATE CHAPTER
+   POST /api/originals/chapter/:chapterId/rating
+--------------------------------------------------------- */
+
+router.post(
+    "/chapter/:chapterId/rating",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+
+            const userId =
+                Number(req.user.id);
+
+
+            const rating =
+                Number(req.body.rating);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(rating) ||
+                rating < 1 ||
+                rating > 5
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Rating must be between 1 and 5."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(
+                    `
+                    SELECT
+                        ch.id
+
+                    FROM original_chapters ch
+
+                    JOIN originals o
+                        ON o.id = ch.original_id
+
+                    WHERE
+                        ch.id = $1
+
+                        AND ch.is_published = true
+
+                        AND o.publish_status = 'published'
+
+                        AND o.visibility = 'public'
+
+                    LIMIT 1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Chapter not found."
+                });
+
+            }
+
+
+            await db.query(
+                `
+                INSERT INTO original_chapter_ratings
+                (
+                    chapter_id,
+                    user_id,
+                    rating,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3,
+                    NOW(),
+                    NOW()
+                )
+
+                ON CONFLICT
+                (
+                    chapter_id,
+                    user_id
+                )
+
+                DO UPDATE SET
+                    rating =
+                        EXCLUDED.rating,
+
+                    updated_at =
+                        NOW()
+                `,
+                [
+                    chapterId,
+                    userId,
+                    rating
+                ]
+            );
+
+
+            const averageResult =
+                await db.query(
+                    `
+                    SELECT
+                        ROUND(
+                            AVG(rating)::numeric,
+                            1
+                        ) AS rating,
+
+                        COUNT(*)::integer
+                            AS rating_count
+
+                    FROM original_chapter_ratings
+
+                    WHERE
+                        chapter_id = $1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            const averageRating =
+                Number(
+                    averageResult.rows[0].rating ||
+                    0
+                );
+
+
+            const ratingCount =
+                Number(
+                    averageResult.rows[0].rating_count ||
+                    0
+                );
+
+
+            return res.json({
+
+                success: true,
+
+                rating:
+                    averageRating,
+
+                rating_count:
+                    ratingCount,
+
+                user_rating:
+                    rating
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original chapter rating error:",
+                err
+            );
+
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to save chapter rating."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
    GET SINGLE ORIGINAL
    GET /api/originals/:id
 ========================================================= */
