@@ -40,6 +40,21 @@ function cleanImportedText(value) {
         }
 
         if (insideIllustration) {
+            // Some Gutenberg illustration blocks are malformed in plain text:
+            // the closing ] is missing until a following chapter heading, e.g.
+            // "Chapter I.]". Do not swallow a real chapter heading.
+            if (/^chapter\s+[ivxlcdm]+\s*\.?\]?$/i.test(line)) {
+                insideIllustration = false;
+                cleanedLines.push(rawLine);
+                continue;
+            }
+
+            if (/^chapter\s+[a-z]+\s*\.?\]?$/i.test(line)) {
+                insideIllustration = false;
+                cleanedLines.push(rawLine);
+                continue;
+            }
+
             if (/\]\s*$/.test(line)) {
                 insideIllustration = false;
             }
@@ -119,6 +134,11 @@ function detectGutenbergId(url) {
 
     const match2 = String(url || "").match(/gutenberg\.org\/ebooks\/(\d+)/i);
     return match2 ? match2[1] : null;
+}
+
+function getGutenbergCoverUrl(id) {
+    if (!id) return null;
+    return `https://www.gutenberg.org/cache/epub/${id}/pg${id}.cover.medium.jpg`;
 }
 
 function parseGutenbergText(text) {
@@ -258,6 +278,7 @@ async function fetchImportSource(sourceUrl) {
                     title: titleMatch ? titleMatch[1].trim() : "",
                     author: authorMatch ? authorMatch[1].trim() : "",
                     description: "Imported from Project Gutenberg.",
+                    coverImage: getGutenbergCoverUrl(id),
                     chapters
                 };
             } catch (error) {
@@ -287,6 +308,7 @@ async function fetchImportSource(sourceUrl) {
         detectedFormat: isHtml ? "HTML" : "Plain text",
         title: meta.title || "",
         description: meta.description || `Imported from ${url.hostname}.`,
+        coverImage: null,
         chapters: isHtml ? parseGenericText(text) : parseGenericText(raw)
     };
 }
@@ -351,7 +373,8 @@ router.post("/import/preview", async (req, res) => {
             suggested: {
                 title: imported.title || "",
                 author: imported.author || "",
-                description: imported.description || ""
+                description: imported.description || "",
+                cover_image: imported.coverImage || null
             },
             chapters: imported.chapters.map((chapter, index) => ({
                 chapter_number: index + 1,
