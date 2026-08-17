@@ -5,6 +5,12 @@ const db = require("../db");
 const auth = require("../middleware/auth");
 const axios = require("axios");
 
+const multer =
+    require("multer");
+
+const crypto =
+    require("crypto");
+
 const {
     S3Client,
     CreateMultipartUploadCommand,
@@ -12,9 +18,10 @@ const {
     CompleteMultipartUploadCommand,
     AbortMultipartUploadCommand,
     HeadObjectCommand,
+    PutObjectCommand,
     PutBucketCorsCommand,
     GetBucketCorsCommand
-} = require("@aws-sdk/client-s3");;
+} = require("@aws-sdk/client-s3");
 
 const {
     getSignedUrl
@@ -45,6 +52,59 @@ const b2S3 = new S3Client({
     forcePathStyle: true
 
 });
+
+/* =========================================================
+   ORIGINAL COVER IMAGE UPLOAD
+========================================================= */
+
+const coverUpload =
+    multer({
+
+        storage:
+            multer.memoryStorage(),
+
+        limits: {
+
+            fileSize:
+                5 * 1024 * 1024
+
+        },
+
+        fileFilter:
+            (req, file, cb) => {
+
+                const allowedTypes = [
+
+                    "image/jpeg",
+                    "image/png",
+                    "image/webp"
+
+                ];
+
+
+                if (
+                    !allowedTypes.includes(
+                        file.mimetype
+                    )
+                ) {
+
+                    return cb(
+                        new Error(
+                            "Only JPG, PNG and WebP images are allowed."
+                        )
+                    );
+
+                }
+
+
+                cb(
+                    null,
+                    true
+                );
+
+            }
+
+    });
 
 /* =========================================================
    ADMIN AUTHENTICATION
@@ -1395,6 +1455,172 @@ router.delete(
 
                 message:
                     "Unable to dismiss report."
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   UPLOAD ORIGINAL COVER IMAGE
+
+   POST
+   /api/admin/originals/cover-upload
+========================================================= */
+
+router.post(
+    "/cover-upload",
+    coverUpload.single("cover"),
+    async (req, res) => {
+
+        try {
+
+            if (!req.file) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Please select a cover image."
+
+                });
+
+            }
+
+
+            const extensionMap = {
+
+                "image/jpeg":
+                    "jpg",
+
+                "image/png":
+                    "png",
+
+                "image/webp":
+                    "webp"
+
+            };
+
+
+            const extension =
+                extensionMap[
+                    req.file.mimetype
+                ];
+
+
+            if (!extension) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Unsupported image type."
+
+                });
+
+            }
+
+
+            /*
+             * Generate a unique object name.
+             *
+             * Covers are intentionally stored
+             * separately from your video objects.
+             */
+
+            const objectKey =
+                `covers/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+
+
+            const uploadCommand =
+                new PutObjectCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        objectKey,
+
+                    Body:
+                        req.file.buffer,
+
+                    ContentType:
+                        req.file.mimetype,
+
+                    CacheControl:
+                        "public, max-age=31536000, immutable"
+
+                });
+
+
+            await b2S3.send(
+                uploadCommand
+            );
+
+
+            /*
+             * Public application URL.
+             *
+             * B2 itself remains PRIVATE.
+             * Cloudflare Worker serves the object.
+             */
+
+            const workerBase =
+                (
+                    process.env
+                        .MYLIKITH_ASSETS_WORKER_URL ||
+                    "https://mylikith-assets.sandhyashiva2006.workers.dev"
+                ).replace(
+                    /\/+$/,
+                    ""
+                );
+
+
+            const coverUrl =
+                `${workerBase}/${objectKey}`;
+
+
+            res.status(201).json({
+
+                success: true,
+
+                message:
+                    "Cover image uploaded successfully.",
+
+                object_key:
+                    objectKey,
+
+                cover_url:
+                    coverUrl,
+
+                content_type:
+                    req.file.mimetype,
+
+                size_bytes:
+                    req.file.size
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Original cover upload error:",
+                error
+            );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    error.message ||
+                    "Unable to upload cover image."
 
             });
 
