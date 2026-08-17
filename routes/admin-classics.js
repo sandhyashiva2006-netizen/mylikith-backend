@@ -9,46 +9,8 @@ const axios = require("axios");
 
 
 /* ==========================================
-   CLASSICS IMPORTER — UNIVERSAL SOURCE ENGINE
-   Supported source families:
-   - Project Gutenberg
-   - Any Wikimedia Wikisource language subdomain
-   - Generic public-domain HTML/text as fallback
+   CLASSICS IMPORTER HELPERS
 ========================================== */
-
-const WIKISOURCE_LANGUAGE_NAMES = {
-    te: "Telugu",
-    hi: "Hindi",
-    ta: "Tamil",
-    kn: "Kannada",
-    ml: "Malayalam",
-    bn: "Bengali",
-    mr: "Marathi",
-    gu: "Gujarati",
-    pa: "Punjabi",
-    or: "Odia",
-    sa: "Sanskrit",
-    ur: "Urdu",
-    ne: "Nepali",
-    as: "Assamese",
-    en: "English",
-    fr: "French",
-    de: "German",
-    es: "Spanish",
-    it: "Italian",
-    pt: "Portuguese",
-    ru: "Russian",
-    ar: "Arabic",
-    he: "Hebrew",
-    pl: "Polish",
-    cs: "Czech",
-    hu: "Hungarian",
-    ro: "Romanian",
-    uk: "Ukrainian",
-    vi: "Vietnamese",
-    th: "Thai",
-    id: "Indonesian"
-};
 
 function cleanImportedText(value) {
     let text = String(value || "")
@@ -56,6 +18,10 @@ function cleanImportedText(value) {
         .replace(/\r/g, "\n")
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
 
+    // Project Gutenberg plain-text editions often contain illustration/image
+    // descriptions that are useful for the source file but not for a clean
+    // MyLikith reading experience. Remove complete illustration blocks while
+    // keeping ordinary bracketed literary text untouched.
     const lines = text.split("\n");
     const cleanedLines = [];
     let insideIllustration = false;
@@ -64,12 +30,19 @@ function cleanImportedText(value) {
         const line = rawLine.trim();
 
         if (!insideIllustration && /^\[(?:illustration|image):/i.test(line)) {
-            if (/\]\s*$/.test(line)) continue;
+            // Single-line form: [Illustration: ...]
+            if (/\]\s*$/.test(line)) {
+                continue;
+            }
+
             insideIllustration = true;
             continue;
         }
 
         if (insideIllustration) {
+            // Some Gutenberg illustration blocks are malformed in plain text:
+            // the closing ] is missing until a following chapter heading, e.g.
+            // "Chapter I.]". Do not swallow a real chapter heading.
             if (/^chapter\s+[ivxlcdm]+\s*\.?\]?$/i.test(line)) {
                 insideIllustration = false;
                 cleanedLines.push(rawLine);
@@ -85,14 +58,18 @@ function cleanImportedText(value) {
             if (/\]\s*$/.test(line)) {
                 insideIllustration = false;
             }
-
             continue;
         }
 
+        // Gutenberg sometimes leaves a standalone image/illustration marker
+        // or a lone closing bracket after an illustration block. These are
+        // source-format artifacts, not part of the literary text.
         if (/^\[(?:illustration|image)\]$/i.test(line) || line === "]") {
             continue;
         }
 
+        // Remove common inline Gutenberg image markers without touching
+        // normal prose.
         const withoutInlineImage = rawLine
             .replace(/\[Image:\s*[^\]]*\]/gi, "")
             .replace(/\[Illustration:\s*[^\]]*\]/gi, "");
@@ -110,8 +87,9 @@ function normalizeImportedChapterTitle(value) {
         .replace(/\s+/g, " ")
         .trim();
 
+    // Fix source artifacts such as: "Chapter I.]" or "CHAPTER II."
+    // while preserving the chapter's Roman numeral.
     const chapterMatch = title.match(/^chapter\s*(?:[-.:]\s*)?([ivxlcdm]+)\s*\.?\s*\]?$/i);
-
     if (chapterMatch) {
         return `Chapter ${chapterMatch[1].toUpperCase()}.`;
     }
@@ -126,10 +104,8 @@ function htmlToText(html) {
         String(html || "")
             .replace(/<script[\s\S]*?<\/script>/gi, "")
             .replace(/<style[\s\S]*?<\/style>/gi, "")
-            .replace(/<noscript[\s\S]*?<\/noscript>/gi, "")
             .replace(/<br\s*\/?\s*>/gi, "\n")
             .replace(/<\/p>/gi, "\n\n")
-            .replace(/<\/li>/gi, "\n")
             .replace(/<\/div>/gi, "\n")
             .replace(/<\/h[1-6]>/gi, "\n\n")
             .replace(/<[^>]+>/g, " ")
@@ -144,21 +120,11 @@ function htmlToText(html) {
 
 function extractMetaFromHtml(html) {
     const titleMatch = String(html || "").match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    const descriptionMatch = String(html || "").match(
-        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i
-    );
-    const ogImageMatch = String(html || "").match(
-        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']*)["']/i
-    );
+    const descriptionMatch = String(html || "").match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i);
 
     return {
-        title: titleMatch
-            ? htmlToText(titleMatch[1]).replace(/\s+/g, " ").trim()
-            : "",
-        description: descriptionMatch
-            ? htmlToText(descriptionMatch[1]).replace(/\s+/g, " ").trim()
-            : "",
-        coverImage: ogImageMatch?.[1] || null
+        title: titleMatch ? htmlToText(titleMatch[1]).replace(/\s+/g, " ").trim() : "",
+        description: descriptionMatch ? htmlToText(descriptionMatch[1]).replace(/\s+/g, " ").trim() : ""
     };
 }
 
@@ -185,7 +151,6 @@ function extractGutenbergMetadata(html, text, fallbackLanguage = "") {
         .trim();
 
     let publicationYear = null;
-
     const publicationPatterns = [
         /(?:published|publication date|publication year)[^\d]{0,60}(17\d{2}|18\d{2}|19\d{2}|20\d{2})/i,
         /(?:first published|originally published|published in)[^\d]{0,60}(17\d{2}|18\d{2}|19\d{2}|20\d{2})/i
@@ -199,11 +164,10 @@ function extractGutenbergMetadata(html, text, fallbackLanguage = "") {
         }
     }
 
+    // Project Gutenberg's current book page commonly includes an
+    // automatically generated description containing "published in YYYY".
     if (!publicationYear) {
-        const generatedDescriptionMatch = pageText.match(
-            /published in\s+(17\d{2}|18\d{2}|19\d{2}|20\d{2})/i
-        );
-
+        const generatedDescriptionMatch = pageText.match(/published in\s+(17\d{2}|18\d{2}|19\d{2}|20\d{2})/i);
         if (generatedDescriptionMatch) {
             publicationYear = Number(generatedDescriptionMatch[1]);
         }
@@ -211,37 +175,24 @@ function extractGutenbergMetadata(html, text, fallbackLanguage = "") {
 
     const subjectStart = pageText.search(/(?:^|\n)Subject\s*\|?/i);
     const categoryStart = pageText.search(/(?:^|\n)Category\s*\|?/i);
-
     const subjectText = subjectStart >= 0
-        ? pageText.slice(
-            subjectStart,
-            categoryStart > subjectStart
-                ? categoryStart
-                : subjectStart + 1800
-        )
+        ? pageText.slice(subjectStart, categoryStart > subjectStart ? categoryStart : subjectStart + 1800)
         : "";
 
     const categoryParts = [];
-
     if (/fiction/i.test(subjectText)) categoryParts.push("Novel");
     if (/love stories|romance|courtship/i.test(subjectText)) categoryParts.push("Romance");
     if (/poetry|poems/i.test(subjectText)) categoryParts.push("Poetry");
     if (/drama|plays|theatre|theater/i.test(subjectText)) categoryParts.push("Drama");
     if (/short stor/i.test(subjectText)) categoryParts.push("Short Stories");
     if (/children|juvenile/i.test(subjectText)) categoryParts.push("Children");
-
     if (!categoryParts.length) categoryParts.push("Classic");
     if (!categoryParts.includes("Classic")) categoryParts.push("Classic");
 
-    const ogDescription = String(html || "").match(
-        /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["']/i
-    );
-
-    const metaDescription = String(html || "").match(
-        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i
-    );
-
-    const description = (ogDescription?.[1] || metaDescription?.[1] || "")
+    let description = "";
+    const ogDescription = String(html || "").match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["']/i);
+    const metaDescription = String(html || "").match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i);
+    description = (ogDescription?.[1] || metaDescription?.[1] || "")
         .replace(/\s+/g, " ")
         .trim();
 
@@ -264,19 +215,13 @@ function parseGutenbergText(text) {
 
     for (const marker of startMarkers) {
         const match = content.match(marker);
-
         if (match) {
-            content = content.slice(
-                match.index + match[0].length
-            ).trim();
+            content = content.slice(match.index + match[0].length).trim();
             break;
         }
     }
 
-    const endMatch = content.match(
-        /\*\*\* END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^\n]*\*\*\*/i
-    );
-
+    const endMatch = content.match(/\*\*\* END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^\n]*\*\*\*/i);
     if (endMatch) {
         content = content.slice(0, endMatch.index).trim();
     }
@@ -288,9 +233,7 @@ function parseGutenbergText(text) {
 
     const isChapterHeading = line => {
         const value = line.trim();
-
         if (!value || value.length > 100) return false;
-
         return /^(chapter|book|part|volume|section)\s+[0-9ivxlcdm]+\b/i.test(value)
             || /^chapter\s+[a-z]+\b/i.test(value)
             || /^chapter\s*[-.:]/i.test(value)
@@ -300,14 +243,12 @@ function parseGutenbergText(text) {
     for (const line of lines) {
         if (isChapterHeading(line)) {
             const textBlock = cleanImportedText(current.join("\n"));
-
             if (textBlock) {
                 chapters.push({
                     title: currentTitle,
                     content: textBlock
                 });
             }
-
             currentTitle = normalizeImportedChapterTitle(line);
             current = [];
         } else {
@@ -316,7 +257,6 @@ function parseGutenbergText(text) {
     }
 
     const finalBlock = cleanImportedText(current.join("\n"));
-
     if (finalBlock) {
         chapters.push({
             title: currentTitle,
@@ -329,9 +269,7 @@ function parseGutenbergText(text) {
     }
 
     return chapters.map((chapter, index) => ({
-        title: normalizeImportedChapterTitle(
-            chapter.title || `Chapter ${index + 1}`
-        ),
+        title: normalizeImportedChapterTitle(chapter.title || `Chapter ${index + 1}`),
         content: cleanImportedText(chapter.content)
     }));
 }
@@ -340,30 +278,18 @@ function parseGenericText(text) {
     const content = cleanImportedText(text);
     const lines = content.split("\n");
     const chapters = [];
-
     let currentTitle = "Chapter 1";
     let current = [];
 
-    const headingRegex =
-        /^(chapter|part|book|section|అధ్యాయం|భాగం|కాండం)\s*[\dIVXivxఅ-హA-Za-z0-9.:\-]*/i;
+    const headingRegex = /^(chapter|part|book|section|అధ్యాయం|భాగం|కాండం)\s*[\dIVXivxఅ-హA-Za-z0-9.:\-]*/i;
 
     for (const line of lines) {
         const trimmed = line.trim();
-
-        if (
-            trimmed &&
-            trimmed.length <= 120 &&
-            headingRegex.test(trimmed)
-        ) {
+        if (trimmed && trimmed.length <= 120 && headingRegex.test(trimmed)) {
             const block = cleanImportedText(current.join("\n"));
-
             if (block) {
-                chapters.push({
-                    title: currentTitle,
-                    content: block
-                });
+                chapters.push({ title: currentTitle, content: block });
             }
-
             currentTitle = trimmed;
             current = [];
         } else {
@@ -372,12 +298,8 @@ function parseGenericText(text) {
     }
 
     const finalBlock = cleanImportedText(current.join("\n"));
-
     if (finalBlock) {
-        chapters.push({
-            title: currentTitle,
-            content: finalBlock
-        });
+        chapters.push({ title: currentTitle, content: finalBlock });
     }
 
     return chapters.length
@@ -385,422 +307,279 @@ function parseGenericText(text) {
         : [{ title: "Chapter 1", content }];
 }
 
-function detectWikisourceInfo(url) {
-    const hostname = String(url.hostname || "").toLowerCase();
+function detectWikisourceInfo(sourceUrl) {
+    const url = new URL(sourceUrl);
+    const host = url.hostname.toLowerCase();
 
-    const match = hostname.match(
-        /^([a-z0-9-]+)\.wikisource\.org$/i
-    );
+    if (!host.endsWith(".wikisource.org")) return null;
 
-    if (!match) return null;
+    const languageCode = host.split(".")[0];
+    let title = "";
 
-    const code = match[1];
+    if (url.pathname.startsWith("/wiki/")) {
+        title = decodeURIComponent(url.pathname.slice("/wiki/".length));
+    } else if (url.pathname === "/w/index.php") {
+        title = String(url.searchParams.get("title") || "");
+    }
+
+    title = title.replace(/_/g, " ").trim();
+
+    if (!title) {
+        throw new Error("The Wikisource URL must point to a specific work page.");
+    }
+
+    const languageNames = {
+        en: "English",
+        te: "Telugu",
+        hi: "Hindi",
+        ta: "Tamil",
+        kn: "Kannada",
+        ml: "Malayalam",
+        bn: "Bengali",
+        mr: "Marathi",
+        gu: "Gujarati",
+        pa: "Punjabi",
+        or: "Odia",
+        sa: "Sanskrit",
+        ur: "Urdu",
+        as: "Assamese",
+        ne: "Nepali",
+        mai: "Maithili",
+        bho: "Bhojpuri",
+        ar: "Arabic",
+        fr: "French",
+        de: "German",
+        es: "Spanish",
+        it: "Italian",
+        pt: "Portuguese",
+        ru: "Russian",
+        zh: "Chinese"
+    };
 
     return {
-        languageCode: code,
-        language: WIKISOURCE_LANGUAGE_NAMES[code] || code,
-        apiUrl: `${url.protocol}//${url.hostname}/w/api.php`
+        languageCode,
+        language: languageNames[languageCode] || languageCode.toUpperCase(),
+        title,
+        apiUrl: `https://${host}/w/api.php`,
+        sourceName: `Wikisource — ${languageNames[languageCode] || languageCode.toUpperCase()}`
     };
 }
 
-function getWikisourcePageTitle(url) {
-    const marker = "/wiki/";
-
-    if (!url.pathname.includes(marker)) {
-        return "";
-    }
-
-    return decodeURIComponent(
-        url.pathname.slice(
-            url.pathname.indexOf(marker) + marker.length
-        )
-    ).replace(/_/g, " ").trim();
-}
-
-function decodeHtmlEntities(value) {
-    return String(value || "")
-        .replace(/&nbsp;/gi, " ")
-        .replace(/&amp;/gi, "&")
-        .replace(/&quot;/gi, '"')
-        .replace(/&#39;|&apos;/gi, "'")
-        .replace(/&lt;/gi, "<")
-        .replace(/&gt;/gi, ">");
-}
-
-function extractWikisourceAuthor(wikitext, pageText) {
-    const source = `${String(wikitext || "")}\n${String(pageText || "")}`;
-
-    const templatePatterns = [
-        /\|\s*(?:author|author_name|writer|creator|రచయిత|రచయిత పేరు)\s*=\s*([^\n|}]+)/i,
-        /\|\s*(?:लेखक|लेखक नाम)\s*=\s*([^\n|}]+)/i,
-        /\|\s*(?:ஆசிரியர்|எழுத்தாளர்)\s*=\s*([^\n|}]+)/i,
-        /\|\s*(?:ಲೇಖಕ|ರಚಯಿತೃ)\s*=\s*([^\n|}]+)/i,
-        /\|\s*(?:लेखक|लेखक का नाम)\s*=\s*([^\n|}]+)/i
-    ];
-
-    for (const pattern of templatePatterns) {
-        const match = source.match(pattern);
-
-        if (match?.[1]) {
-            return cleanImportedText(
-                match[1]
-                    .replace(/\[\[|\]\]/g, "")
-                    .replace(/<[^>]+>/g, " ")
-            );
-        }
-    }
-
-    // Common prose form used on Wikisource landing pages:
-    // "ఇది పింగళి సూరన ... రచించిన రచన"
-    const teluguMatch = pageText.match(
-        /ఇది\s+(.{1,120}?)\s+(?:\d+వ\s+శతాబ్దంలో\s+)?రచించిన/i
-    );
-
-    if (teluguMatch?.[1]) {
-        return cleanImportedText(teluguMatch[1])
-            .replace(/[.,،;:]+$/, "")
-            .trim();
-    }
-
-    const englishMatch = pageText.match(
-        /(?:written|created|composed)\s+by\s+([A-Z][^.\n]{1,100})/i
-    );
-
-    if (englishMatch?.[1]) {
-        return cleanImportedText(englishMatch[1])
-            .replace(/[.,;:]+$/, "")
-            .trim();
-    }
-
-    return "";
-}
-
-function extractWikisourceYear(pageTitle, wikitext, pageText) {
-    const combined = `${pageTitle}\n${wikitext}\n${pageText}`;
-
-    const patterns = [
-        /(?:published|publication|edition|year)[^\d]{0,40}(1[5-9]\d{2}|20\d{2})/i,
-        /\((1[5-9]\d{2}|20\d{2})\)/,
-        /(?:క్రీ\.?\s*శ\.?|సంవత్సరం)[^\d]{0,30}(1[5-9]\d{2}|20\d{2})/i
-    ];
-
-    for (const pattern of patterns) {
-        const match = combined.match(pattern);
-
-        if (match) {
-            return Number(match[1]);
-        }
-    }
-
-    return null;
-}
-
-function inferWikisourceCategory(pageText) {
-    const value = String(pageText || "").toLowerCase();
-
-    if (/poem|poetry|కావ్యం|పద్య|కవిత/.test(value)) {
-        return "Poetry, Classic";
-    }
-
-    if (/novel|నవల/.test(value)) {
-        return "Novel, Classic";
-    }
-
-    if (/drama|play|నాటకం/.test(value)) {
-        return "Drama, Classic";
-    }
-
-    return "Classic";
-}
-
-function extractWikisourceSubpages(wikitext, mainTitle) {
-    const results = [];
-    const seen = new Set();
-
-    const normalizedMain = mainTitle.replace(/_/g, " ").trim();
-    const regex = /\[\[\s*([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
-
-    let match;
-
-    while ((match = regex.exec(String(wikitext || "")))) {
-        const target = decodeHtmlEntities(match[1])
-            .replace(/_/g, " ")
-            .trim();
-
-        if (!target) continue;
-
-        if (!target.startsWith(`${normalizedMain}/`)) continue;
-
-        if (target.includes(":")) continue;
-
-        if (!seen.has(target)) {
-            seen.add(target);
-            results.push(target);
-        }
-    }
-
-    return results;
-}
-
-async function fetchWikisourceApi(apiUrl, params) {
+async function wikisourceApi(apiUrl, params) {
     const response = await axios.get(apiUrl, {
-        timeout: 20000,
-        responseType: "json",
-        maxContentLength: 12 * 1024 * 1024,
         params: {
             ...params,
             format: "json",
             formatversion: 2
         },
+        timeout: 20000,
+        responseType: "json",
+        maxContentLength: 12 * 1024 * 1024,
         headers: {
             "User-Agent": "MyLikith-Classics-Importer/1.0"
         }
     });
 
     if (!response.data || response.data.error) {
-        throw new Error(
-            response.data?.error?.info ||
-            "Wikisource API returned an error."
-        );
+        throw new Error(response.data?.error?.info || "Wikisource API request failed.");
     }
 
     return response.data;
 }
 
-async function getWikisourceImageUrl(apiUrl, filename) {
-    if (!filename) return null;
+function extractFirstImageFromHtml(html) {
+    const source = String(html || "");
+    const match = source.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i);
+    if (!match) return null;
 
-    try {
-        const data = await fetchWikisourceApi(apiUrl, {
-            action: "query",
-            prop: "imageinfo",
-            titles: `File:${filename}`,
-            iiprop: "url",
-            iiurlwidth: 600
-        });
+    let src = match[1].trim();
+    if (src.startsWith("//")) src = `https:${src}`;
+    if (src.startsWith("/")) src = `https://upload.wikimedia.org${src}`;
 
-        const pages = data.query?.pages || [];
+    return /^https?:\/\//i.test(src) ? src : null;
+}
 
-        for (const page of pages) {
-            const info = page.imageinfo?.[0];
+function extractWikisourceAuthor(text) {
+    const lines = String(text || "")
+        .split("\n")
+        .map(line => line.replace(/\s+/g, " ").trim())
+        .filter(Boolean);
 
-            if (info?.thumburl || info?.url) {
-                return info.thumburl || info.url;
+    const patterns = [
+        /^(?:author|written by|poet|writer)\s*[:\-]\s*(.+)$/i,
+        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s*[:\-]?\s*(.+)$/i,
+        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s+(.+)$/i
+    ];
+
+    for (const line of lines.slice(0, 80)) {
+        for (const pattern of patterns) {
+            const match = line.match(pattern);
+            if (match && match[1].trim().length <= 160) {
+                return match[1].trim();
             }
         }
-    } catch (error) {
-        console.warn(
-            "Wikisource image lookup failed:",
-            error.message
-        );
+    }
+
+    return "";
+}
+
+function extractWikisourcePublicationYear(text) {
+    const source = String(text || "");
+    const patterns = [
+        /(?:published|publication|first published|printed|edition)[^\d]{0,80}(1[5-9]\d{2}|20\d{2})/i,
+        /(?:ప్రచురణ|ముద్రణ|ప్రచురించబడిన|సంవత్సరం)[^\d]{0,80}(1[5-9]\d{2}|20\d{2})/i,
+        /\b(1[5-9]\d{2}|20\d{2})\b/
+    ];
+
+    for (const pattern of patterns) {
+        const match = source.match(pattern);
+        if (match) return Number(match[1]);
     }
 
     return null;
 }
 
-function chooseWikisourceImage(images) {
-    const usable = (images || [])
-        .map(value => String(value || "").trim())
-        .filter(Boolean)
-        .filter(value => !/logo|icon|button|wikimedia|commons/i.test(value));
+function cleanWikisourceHtml(html) {
+    let source = String(html || "");
 
-    if (!usable.length) return null;
+    source = source
+        .replace(/<script[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[\s\S]*?<\/style>/gi, "")
+        .replace(/<table[\s\S]*?<\/table>/gi, "")
+        .replace(/<div[^>]*class=["'][^"']*(?:mw-editsection|navbox|metadata|catlinks)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, "")
+        .replace(/<sup[^>]*class=["'][^"']*reference[^"']*["'][^>]*>[\s\S]*?<\/sup>/gi, "")
+        .replace(/<ol[^>]*class=["'][^"']*references[^"']*["'][^>]*>[\s\S]*?<\/ol>/gi, "")
+        .replace(/<span[^>]*class=["'][^"']*mw-editsection[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, "");
 
-    const preferred = usable.find(value =>
-        /cover|front|title|book/i.test(value)
-    );
-
-    return preferred || usable[0];
+    return htmlToText(source)
+        .replace(/\n[ \t]*Image[ \t]*\n/gi, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
 }
 
-function cleanWikisourceChapterText(text, mainTitle) {
-    let cleaned = cleanImportedText(text);
+function normalizeWikisourceChapterTitle(mainTitle, linkedTitle) {
+    let title = String(linkedTitle || "").trim();
+    const prefix = `${mainTitle}/`;
 
-    const parentLine = new RegExp(
-        `^\\s*<\\s*${String(mainTitle).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`,
-        "iu"
-    );
-
-    cleaned = cleaned
-        .split("\n")
-        .filter(line => {
-            const trimmed = line.trim();
-
-            if (!trimmed) return true;
-            if (parentLine.test(trimmed)) return false;
-
-            // Common Wikisource navigation/redirect lines.
-            if (/^\(\s*.+?\s+నుండి\s+మళ్ళించబడింది\s*\)$/i.test(trimmed)) {
-                return false;
-            }
-
-            if (/^<\s*.+>\s*$/.test(trimmed)) {
-                return false;
-            }
-
-            return true;
-        })
-        .join("\n");
-
-    return cleanImportedText(cleaned);
-}
-
-async function fetchWikisourceSource(sourceUrl, url, info) {
-    const pageTitle = getWikisourcePageTitle(url);
-
-    if (!pageTitle) {
-        throw new Error(
-            "For Wikisource, use a page URL such as https://te.wikisource.org/wiki/Book_Title."
-        );
+    if (title.startsWith(prefix)) {
+        title = title.slice(prefix.length);
     }
 
-    const mainData = await fetchWikisourceApi(info.apiUrl, {
+    return title.replace(/_/g, " ").replace(/\s+/g, " ").trim() || "Chapter";
+}
+
+async function fetchWikisourcePage(apiUrl, title) {
+    const data = await wikisourceApi(apiUrl, {
         action: "parse",
-        page: pageTitle,
-        prop: "wikitext|text|images"
+        page: title,
+        prop: "text",
+        redirects: 1
     });
 
-    const parse = mainData.parse;
+    const html = data.parse?.text || "";
+    return {
+        title: data.parse?.title || title,
+        html,
+        text: cleanWikisourceHtml(html),
+        coverImage: extractFirstImageFromHtml(html)
+    };
+}
 
-    if (!parse) {
-        throw new Error("Unable to read the Wikisource page.");
-    }
+async function fetchWikisourceChapters(info) {
+    const mainPage = await fetchWikisourcePage(info.apiUrl, info.title);
 
-    const wikitext = parse.wikitext || "";
-    const mainHtml = parse.text || "";
-    const mainText = htmlToText(mainHtml);
+    // Parse API links preserves the order in which the work links appear on
+    // the source page. We only accept direct subpages of the requested work,
+    // which avoids importing unrelated navigation/category links.
+    const linksData = await wikisourceApi(info.apiUrl, {
+        action: "parse",
+        page: info.title,
+        prop: "links",
+        redirects: 1
+    });
 
-    const pageMeta = await axios.get(sourceUrl, {
-        timeout: 20000,
-        responseType: "text",
-        maxContentLength: 10 * 1024 * 1024,
-        headers: {
-            "User-Agent": "MyLikith-Classics-Importer/1.0"
-        }
-    }).then(response => extractMetaFromHtml(String(response.data || "")))
-      .catch(() => ({}));
+    const links = Array.isArray(linksData.parse?.links)
+        ? linksData.parse.links
+        : [];
 
-    const subpages = extractWikisourceSubpages(
-        wikitext,
-        pageTitle
-    );
+    const prefix = `${info.title}/`;
+    const chapterTitles = [];
+    const seen = new Set();
 
-    // Wikisource has two common structures:
-    // 1. A work landing page with chapter/subpage links.
-    // 2. A single page containing the actual text.
-    // Page: scan sources are intentionally not treated as chapters because
-    // importing hundreds of OCR pages as individual reader chapters would
-    // produce a poor MyLikith experience.
-    const pageLinks = (wikitext.match(/\[\[\s*Page:/gi) || []).length;
+    for (const link of links) {
+        const title = String(link.title || "").trim();
+        if (!title || !title.startsWith(prefix)) continue;
 
-    if (!subpages.length && pageLinks > 0) {
-        throw new Error(
-            "This Wikisource source is a scanned Page: edition. Please use a Wikisource work page with readable subpages rather than a Page: scan URL."
-        );
+        const suffix = title.slice(prefix.length);
+        if (!suffix || suffix.includes("/")) continue;
+
+        const key = title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        chapterTitles.push(title);
     }
 
     const chapters = [];
 
-    if (subpages.length) {
-        const batchSize = 6;
+    for (const title of chapterTitles) {
+        try {
+            const page = await fetchWikisourcePage(info.apiUrl, title);
+            if (!page.text || page.text.length < 20) continue;
 
-        for (let i = 0; i < subpages.length; i += batchSize) {
-            const batch = subpages.slice(i, i + batchSize);
-
-            const results = await Promise.all(
-                batch.map(async subpageTitle => {
-                    const data = await fetchWikisourceApi(
-                        info.apiUrl,
-                        {
-                            action: "parse",
-                            page: subpageTitle,
-                            prop: "text"
-                        }
-                    );
-
-                    const html = data.parse?.text || "";
-                    const content = cleanWikisourceChapterText(
-                        htmlToText(html),
-                        pageTitle
-                    );
-
-                    return {
-                        title: subpageTitle.slice(
-                            pageTitle.length + 1
-                        ).trim(),
-                        content
-                    };
-                })
-            );
-
-            chapters.push(...results);
-        }
-    } else {
-        const content = cleanWikisourceChapterText(
-            mainText,
-            pageTitle
-        );
-
-        const parsed = parseGenericText(content);
-
-        chapters.push(...parsed);
-    }
-
-    const firstDescription = pageMeta.description ||
-        cleanImportedText(mainText).split("\n").find(line => line.length > 30) ||
-        `Imported from ${new URL(sourceUrl).hostname}.`;
-
-    const author = extractWikisourceAuthor(
-        wikitext,
-        mainText
-    );
-
-    const publicationYear = extractWikisourceYear(
-        pageTitle,
-        wikitext,
-        mainText
-    );
-
-    let coverImage = pageMeta.coverImage || null;
-
-    if (!coverImage) {
-        const filename = chooseWikisourceImage(
-            parse.images || []
-        );
-
-        if (filename) {
-            coverImage = await getWikisourceImageUrl(
-                info.apiUrl,
-                filename
-            );
+            chapters.push({
+                title: normalizeWikisourceChapterTitle(info.title, page.title),
+                content: page.text
+            });
+        } catch (error) {
+            console.warn(`Wikisource chapter fetch failed for ${title}:`, error.message);
         }
     }
 
-    const title = pageTitle
-        .replace(/\s*\(\d{4}\)\s*$/, "")
-        .trim();
+    // Some Wikisource works are a single page with real headings instead of
+    // subpages. Use the existing generic parser as a safe fallback.
+    if (!chapters.length) {
+        return {
+            mainPage,
+            chapters: parseGenericText(mainPage.text)
+        };
+    }
+
+    return { mainPage, chapters };
+}
+
+async function fetchWikisourceSource(sourceUrl, info) {
+    const { mainPage, chapters } = await fetchWikisourceChapters(info);
+
+    const metadataText = mainPage.text;
+    const title = mainPage.title || info.title;
+    const author = extractWikisourceAuthor(metadataText);
+    const publicationYear = extractWikisourcePublicationYear(metadataText);
+    const description = metadataText
+        .split("\n")
+        .map(line => line.trim())
+        .filter(Boolean)
+        .slice(0, 8)
+        .join(" ")
+        .slice(0, 700);
 
     return {
-        sourceName: `Wikisource — ${info.language}`,
+        sourceName: info.sourceName,
         sourceUrl,
-        detectedFormat: subpages.length
-            ? `Wikisource work with ${subpages.length} subpages`
-            : "Wikisource page",
+        detectedFormat: "Wikisource",
         title,
         author,
-        description: firstDescription,
-        coverImage,
+        description: description || `Imported from ${info.sourceName}.`,
+        coverImage: mainPage.coverImage,
         language: info.language,
         originalLanguage: info.language,
         publicationYear,
-        category: inferWikisourceCategory(mainText),
+        category: "Classic",
         chapters
     };
 }
 
 async function fetchImportSource(sourceUrl) {
     let url;
-
     try {
         url = new URL(sourceUrl);
     } catch {
@@ -808,37 +587,29 @@ async function fetchImportSource(sourceUrl) {
     }
 
     if (!["http:", "https:"].includes(url.protocol)) {
-        throw new Error(
-            "Only HTTP and HTTPS source URLs are supported."
-        );
+        throw new Error("Only HTTP and HTTPS source URLs are supported.");
     }
 
-    const isGutenberg =
-        /(?:^|\.)gutenberg\.org$/i.test(url.hostname) ||
-        /\.gutenberg\.org$/i.test(url.hostname);
+    const wikisourceInfo = detectWikisourceInfo(sourceUrl);
+    if (wikisourceInfo) {
+        return fetchWikisourceSource(sourceUrl, wikisourceInfo);
+    }
+
+    const isGutenberg = /(?:^|\.)gutenberg\.org$/i.test(url.hostname) || /\.gutenberg\.org$/i.test(url.hostname);
 
     if (isGutenberg) {
         const id = detectGutenbergId(url.toString());
-
         if (id) {
-            const textUrl =
-                `https://www.gutenberg.org/cache/epub/${id}/pg${id}.txt`;
-
+            const textUrl = `https://www.gutenberg.org/cache/epub/${id}/pg${id}.txt`;
             try {
                 const response = await axios.get(textUrl, {
                     timeout: 20000,
                     responseType: "text",
                     maxContentLength: 15 * 1024 * 1024
                 });
-
                 const gutenbergText = String(response.data || "");
-
-                const titleMatch =
-                    gutenbergText.match(/^Title:\s*(.+)$/mi);
-
-                const authorMatch =
-                    gutenbergText.match(/^Author:\s*(.+)$/mi);
-
+                const titleMatch = gutenbergText.match(/^Title:\s*(.+)$/mi);
+                const authorMatch = gutenbergText.match(/^Author:\s*(.+)$/mi);
                 let metadata = {
                     language: "English",
                     originalLanguage: "English",
@@ -848,129 +619,66 @@ async function fetchImportSource(sourceUrl) {
                 };
 
                 try {
-                    const pageResponse = await axios.get(
-                        `https://www.gutenberg.org/ebooks/${id}`,
-                        {
-                            timeout: 20000,
-                            responseType: "text",
-                            maxContentLength: 8 * 1024 * 1024,
-                            headers: {
-                                "User-Agent":
-                                    "MyLikith-Classics-Importer/1.0"
-                            }
+                    const pageResponse = await axios.get(`https://www.gutenberg.org/ebooks/${id}`, {
+                        timeout: 20000,
+                        responseType: "text",
+                        maxContentLength: 8 * 1024 * 1024,
+                        headers: {
+                            "User-Agent": "MyLikith-Classics-Importer/1.0"
                         }
-                    );
-
-                    metadata = extractGutenbergMetadata(
-                        String(pageResponse.data || ""),
-                        gutenbergText
-                    );
+                    });
+                    metadata = extractGutenbergMetadata(String(pageResponse.data || ""), gutenbergText);
                 } catch (metadataError) {
-                    console.warn(
-                        "Gutenberg metadata fetch failed:",
-                        metadataError.message
-                    );
+                    console.warn("Gutenberg metadata fetch failed:", metadataError.message);
                 }
 
-                const chapters =
-                    parseGutenbergText(gutenbergText);
-
+                const chapters = parseGutenbergText(gutenbergText);
                 return {
                     sourceName: "Project Gutenberg",
                     sourceUrl,
                     detectedFormat: "Project Gutenberg text",
-                    title: titleMatch
-                        ? titleMatch[1].trim()
-                        : "",
-                    author: authorMatch
-                        ? authorMatch[1].trim()
-                        : "",
-                    description:
-                        metadata.description ||
-                        "Imported from Project Gutenberg.",
-                    coverImage:
-                        getGutenbergCoverUrl(id),
+                    title: titleMatch ? titleMatch[1].trim() : "",
+                    author: authorMatch ? authorMatch[1].trim() : "",
+                    description: metadata.description || "Imported from Project Gutenberg.",
+                    coverImage: getGutenbergCoverUrl(id),
                     language: metadata.language,
-                    originalLanguage:
-                        metadata.originalLanguage,
-                    publicationYear:
-                        metadata.publicationYear,
-                    category:
-                        metadata.category,
+                    originalLanguage: metadata.originalLanguage,
+                    publicationYear: metadata.publicationYear,
+                    category: metadata.category,
                     chapters
                 };
             } catch (error) {
-                console.error(
-                    "Gutenberg text fetch error:",
-                    error.message
-                );
+                console.error("Gutenberg text fetch error:", error.message);
             }
         }
     }
 
-    const wikisourceInfo =
-        detectWikisourceInfo(url);
-
-    if (wikisourceInfo) {
-        return fetchWikisourceSource(
-            sourceUrl,
-            url,
-            wikisourceInfo
-        );
-    }
-
-    const response = await axios.get(
-        url.toString(),
-        {
-            timeout: 20000,
-            responseType: "text",
-            maxContentLength: 15 * 1024 * 1024,
-            headers: {
-                "User-Agent":
-                    "MyLikith-Classics-Importer/1.0"
-            }
+    const response = await axios.get(url.toString(), {
+        timeout: 20000,
+        responseType: "text",
+        maxContentLength: 15 * 1024 * 1024,
+        headers: {
+            "User-Agent": "MyLikith-Classics-Importer/1.0"
         }
-    );
+    });
 
-    const contentType =
-        String(response.headers["content-type"] || "")
-            .toLowerCase();
-
+    const contentType = String(response.headers["content-type"] || "").toLowerCase();
     const raw = String(response.data || "");
-
-    const isHtml =
-        contentType.includes("text/html") ||
-        /<html[\s>]/i.test(raw);
-
-    const meta =
-        isHtml
-            ? extractMetaFromHtml(raw)
-            : {};
-
-    const text =
-        isHtml
-            ? htmlToText(raw)
-            : raw;
+    const isHtml = contentType.includes("text/html") || /<html[\s>]/i.test(raw);
+    const meta = isHtml ? extractMetaFromHtml(raw) : {};
+    const text = isHtml ? htmlToText(raw) : raw;
 
     return {
-        sourceName:
-            url.hostname.replace(/^www\./i, ""),
+        sourceName: url.hostname.replace(/^www\./i, ""),
         sourceUrl,
-        detectedFormat:
-            isHtml ? "HTML" : "Plain text",
-        title:
-            meta.title || "",
-        description:
-            meta.description ||
-            `Imported from ${url.hostname}.`,
-        coverImage:
-            meta.coverImage || null,
-        chapters:
-            isHtml
-                ? parseGenericText(text)
-                : parseGenericText(raw)
+        detectedFormat: isHtml ? "HTML" : "Plain text",
+        title: meta.title || "",
+        description: meta.description || `Imported from ${url.hostname}.`,
+        coverImage: null,
+        chapters: isHtml ? parseGenericText(text) : parseGenericText(raw)
     };
 }
+
 
 
 /* ==========================================
