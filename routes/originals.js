@@ -3833,6 +3833,389 @@ router.post(
 );
 
 /* =========================================================
+   ORIGINAL CHAPTER LIKES
+========================================================= */
+
+
+/* ---------------------------------------------------------
+   GET CHAPTER LIKE STATUS
+   GET /api/originals/chapter/:chapterId/like
+--------------------------------------------------------- */
+
+router.get(
+    "/chapter/:chapterId/like",
+    optionalAuth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(
+                    `
+                    SELECT
+                        ch.id
+
+                    FROM original_chapters ch
+
+                    JOIN originals o
+                        ON o.id = ch.original_id
+
+                    WHERE
+                        ch.id = $1
+
+                        AND ch.is_published = true
+
+                        AND o.publish_status = 'published'
+
+                        AND o.visibility = 'public'
+
+                    LIMIT 1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Chapter not found."
+                });
+
+            }
+
+
+            const countResult =
+                await db.query(
+                    `
+                    SELECT
+                        COUNT(*)::integer AS like_count
+
+                    FROM original_chapter_likes
+
+                    WHERE
+                        chapter_id = $1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            const userId =
+                getOptionalUserId(req);
+
+
+            let liked = false;
+
+
+            if (
+                Number.isInteger(userId) &&
+                userId > 0
+            ) {
+
+                const userLike =
+                    await db.query(
+                        `
+                        SELECT id
+
+                        FROM original_chapter_likes
+
+                        WHERE
+                            chapter_id = $1
+
+                            AND user_id = $2
+
+                        LIMIT 1
+                        `,
+                        [
+                            chapterId,
+                            userId
+                        ]
+                    );
+
+
+                liked =
+                    userLike.rows.length > 0;
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                liked,
+
+                like_count:
+                    Number(
+                        countResult.rows[0]
+                            ?.like_count || 0
+                    )
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original chapter like status error:",
+                err
+            );
+
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load chapter likes."
+            });
+
+        }
+
+    }
+);
+
+
+/* ---------------------------------------------------------
+   TOGGLE CHAPTER LIKE
+   POST /api/originals/chapter/:chapterId/like
+--------------------------------------------------------- */
+
+router.post(
+    "/chapter/:chapterId/like",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+
+            const userId =
+                Number(req.user.id);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(
+                    `
+                    SELECT
+                        ch.id
+
+                    FROM original_chapters ch
+
+                    JOIN originals o
+                        ON o.id = ch.original_id
+
+                    WHERE
+                        ch.id = $1
+
+                        AND ch.is_published = true
+
+                        AND o.publish_status = 'published'
+
+                        AND o.visibility = 'public'
+
+                    LIMIT 1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            if (!chapter.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Chapter not found."
+                });
+
+            }
+
+
+            const existing =
+                await db.query(
+                    `
+                    SELECT id
+
+                    FROM original_chapter_likes
+
+                    WHERE
+                        chapter_id = $1
+
+                        AND user_id = $2
+
+                    LIMIT 1
+                    `,
+                    [
+                        chapterId,
+                        userId
+                    ]
+                );
+
+
+            let liked;
+
+
+            if (existing.rows.length) {
+
+                await db.query(
+                    `
+                    DELETE FROM original_chapter_likes
+
+                    WHERE
+                        chapter_id = $1
+
+                        AND user_id = $2
+                    `,
+                    [
+                        chapterId,
+                        userId
+                    ]
+                );
+
+
+                liked = false;
+
+            } else {
+
+                await db.query(
+                    `
+                    INSERT INTO original_chapter_likes
+                    (
+                        chapter_id,
+                        user_id,
+                        created_at
+                    )
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        NOW()
+                    )
+
+                    ON CONFLICT
+                    (
+                        chapter_id,
+                        user_id
+                    )
+
+                    DO NOTHING
+                    `,
+                    [
+                        chapterId,
+                        userId
+                    ]
+                );
+
+
+                liked = true;
+
+            }
+
+
+            const countResult =
+                await db.query(
+                    `
+                    SELECT
+                        COUNT(*)::integer AS like_count
+
+                    FROM original_chapter_likes
+
+                    WHERE
+                        chapter_id = $1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            return res.json({
+
+                success: true,
+
+                liked,
+
+                like_count:
+                    Number(
+                        countResult.rows[0]
+                            ?.like_count || 0
+                    )
+
+            });
+
+
+        } catch (err) {
+
+            console.error(
+                "Original chapter like toggle error:",
+                err
+            );
+
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to update chapter like."
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
    GET SINGLE ORIGINAL
    GET /api/originals/:id
 ========================================================= */
