@@ -13,11 +13,74 @@ const axios = require("axios");
 ========================================== */
 
 function cleanImportedText(value) {
-    return String(value || "")
+    let text = String(value || "")
         .replace(/\r\n/g, "\n")
         .replace(/\r/g, "\n")
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+
+    // Project Gutenberg plain-text editions often contain illustration/image
+    // descriptions that are useful for the source file but not for a clean
+    // MyLikith reading experience. Remove complete illustration blocks while
+    // keeping ordinary bracketed literary text untouched.
+    const lines = text.split("\n");
+    const cleanedLines = [];
+    let insideIllustration = false;
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+
+        if (!insideIllustration && /^\[(?:illustration|image):/i.test(line)) {
+            // Single-line form: [Illustration: ...]
+            if (/\]\s*$/.test(line)) {
+                continue;
+            }
+
+            insideIllustration = true;
+            continue;
+        }
+
+        if (insideIllustration) {
+            if (/\]\s*$/.test(line)) {
+                insideIllustration = false;
+            }
+            continue;
+        }
+
+        // Gutenberg sometimes leaves a standalone image/illustration marker
+        // or a lone closing bracket after an illustration block. These are
+        // source-format artifacts, not part of the literary text.
+        if (/^\[(?:illustration|image)\]$/i.test(line) || line === "]") {
+            continue;
+        }
+
+        // Remove common inline Gutenberg image markers without touching
+        // normal prose.
+        const withoutInlineImage = rawLine
+            .replace(/\[Image:\s*[^\]]*\]/gi, "")
+            .replace(/\[Illustration:\s*[^\]]*\]/gi, "");
+
+        cleanedLines.push(withoutInlineImage);
+    }
+
+    return cleanedLines.join("\n")
         .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+function normalizeImportedChapterTitle(value) {
+    let title = String(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    // Fix source artifacts such as: "Chapter I.]" or "CHAPTER II."
+    // while preserving the chapter's Roman numeral.
+    const chapterMatch = title.match(/^chapter\s*(?:[-.:]\s*)?([ivxlcdm]+)\s*\.?\s*\]?$/i);
+    if (chapterMatch) {
+        return `Chapter ${chapterMatch[1].toUpperCase()}.`;
+    }
+
+    return title
+        .replace(/\]\s*$/, "")
         .trim();
 }
 
@@ -102,7 +165,7 @@ function parseGutenbergText(text) {
                     content: textBlock
                 });
             }
-            currentTitle = line.trim();
+            currentTitle = normalizeImportedChapterTitle(line);
             current = [];
         } else {
             current.push(line);
@@ -122,8 +185,8 @@ function parseGutenbergText(text) {
     }
 
     return chapters.map((chapter, index) => ({
-        title: chapter.title || `Chapter ${index + 1}`,
-        content: chapter.content
+        title: normalizeImportedChapterTitle(chapter.title || `Chapter ${index + 1}`),
+        content: cleanImportedText(chapter.content)
     }));
 }
 
@@ -292,8 +355,8 @@ router.post("/import/preview", async (req, res) => {
             },
             chapters: imported.chapters.map((chapter, index) => ({
                 chapter_number: index + 1,
-                title: chapter.title || `Chapter ${index + 1}`,
-                content: chapter.content
+                title: normalizeImportedChapterTitle(chapter.title || `Chapter ${index + 1}`),
+                content: cleanImportedText(chapter.content)
             }))
         });
 
@@ -431,7 +494,7 @@ router.post("/import", async (req, res) => {
             `, [
                 classic.id,
                 Number(chapter.chapter_number) || index + 1,
-                String(chapter.title || `Chapter ${index + 1}`).trim(),
+                normalizeImportedChapterTitle(chapter.title || `Chapter ${index + 1}`),
                 content
             ]);
         }
