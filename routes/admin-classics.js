@@ -658,9 +658,34 @@ async function fetchWikisourceChapters(info) {
         } while (plcontinue);
     }
 
-    // Tertiary: enumerate the subpage namespace by prefix. This is a robust
-    // fallback for Wikisource templates whose links are not exposed normally.
-    if (!chapterTitles.length) {
+    // Tertiary: use MediaWiki search with an explicit title-prefix query.
+    // Some Wikisource pages expose only part of their TOC through the rendered
+    // HTML and the links API. Search is much more reliable for such works.
+    {
+        let sroffset = 0;
+        do {
+            const params = {
+                action: "query",
+                list: "search",
+                srsearch: `prefix:\"${prefix}\"`,
+                srnamespace: 0,
+                srlimit: "max"
+            };
+            if (sroffset) params.sroffset = sroffset;
+
+            const searchData = await wikisourceApi(info.apiUrl, params);
+            for (const result of (searchData.query?.search || [])) {
+                addChapterTitle(result.title);
+            }
+
+            const next = searchData.continue?.sroffset;
+            sroffset = Number.isFinite(Number(next)) ? Number(next) : 0;
+        } while (sroffset);
+    }
+
+    // Fourth: enumerate the subpage namespace by prefix. This catches pages
+    // that are not indexed by search.
+    {
         let gapcontinue = null;
         do {
             const params = {
@@ -678,6 +703,57 @@ async function fetchWikisourceChapters(info) {
             for (const page of pageList) addChapterTitle(page.title);
             gapcontinue = pagesData.continue?.gapcontinue || null;
         } while (gapcontinue);
+    }
+
+    // Remove obvious navigation/front-matter subpages. Keep actual literary
+    // chapter/part/section pages even when their titles are in another script.
+    const chapterWordPattern = /(?:chapter|part|section|book|volume|act|अध्याय|भाग|प्रकरण|காண்டம்|அத்தியாயம்|ಅಧ್ಯಾಯ|ಭಾಗ|അദ്ധ്യായം|ഭാഗം|অধ্যায়|পর্ব|खंड|अध्याय|खंड|باب|فصل|अध्याय|प्रकरण|కాండం|భాగము|ప్రకరణము)/i;
+    const filteredChapterTitles = chapterTitles.filter(title => {
+        const suffix = title.slice(prefix.length).trim();
+        return chapterWordPattern.test(suffix) || /^(?:[ivxlcdm]+|\d+)[.)\-]?$/i.test(suffix);
+    });
+
+    const teluguOrdinals = new Map([
+        ["మొదటి", 1], ["రెండవ", 2], ["మూడవ", 3], ["నాలుగవ", 4],
+        ["ఐదవ", 5], ["ఆరవ", 6], ["ఏడవ", 7], ["ఎనిమిదవ", 8],
+        ["తొమ్మిదవ", 9], ["పదవ", 10], ["పదకొండవ", 11], ["పండ్రెండవ", 12],
+        ["పన్నెండవ", 12], ["పదుమూడవ", 13], ["పదునాలుగవ", 14],
+        ["పదునైదవ", 15], ["పదునాఱవ", 16]
+    ]);
+
+    const getChapterOrder = title => {
+        const suffix = title.slice(prefix.length).trim();
+        const telugu = [...teluguOrdinals.entries()].find(([word]) => suffix.includes(word));
+        if (telugu) return telugu[1];
+
+        const arabic = suffix.match(/(?:chapter|part|section|book|volume|act|అధ్యాయం|భాగం|ప్రకరణము|ప్రకరణం)\s*(\d+)/i);
+        if (arabic) return Number(arabic[1]);
+
+        const roman = suffix.match(/(?:chapter|part|section|book|volume|act)\s*([ivxlcdm]+)/i);
+        if (roman) {
+            const values = {i:1,v:5,x:10,l:50,c:100,d:500,m:1000};
+            let total = 0, prev = 0;
+            for (const ch of roman[1].toLowerCase().split('').reverse()) {
+                const value = values[ch] || 0;
+                total += value < prev ? -value : value;
+                prev = value;
+            }
+            return total;
+        }
+        return Number.MAX_SAFE_INTEGER;
+    };
+
+    if (filteredChapterTitles.length >= 2) {
+        filteredChapterTitles.sort((a, b) => {
+            const ao = getChapterOrder(a);
+            const bo = getChapterOrder(b);
+            if (ao !== Number.MAX_SAFE_INTEGER || bo !== Number.MAX_SAFE_INTEGER) {
+                if (ao !== bo) return ao - bo;
+            }
+            return 0;
+        });
+        chapterTitles.length = 0;
+        chapterTitles.push(...filteredChapterTitles);
     }
 
     const chapters = [];
@@ -706,6 +782,28 @@ async function fetchWikisourceChapters(info) {
 }
 
 async function fetchWikisourceSource(sourceUrl, info) {
+    // Reject category and index pages early. They are discovery/scan pages,
+    // not individual literary works and should never be imported as a book.
+    try {
+        const infoData = await wikisourceApi(info.apiUrl, {
+            action: "query",
+            prop: "info",
+            titles: info.title
+        });
+        const pages = infoData.query?.pages || {};
+        const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+        const namespace = Number(page?.ns);
+        if (namespace === 14) {
+            throw new Error("This is a Wikisource category page, not a book. Open an individual book/work and paste that URL.");
+        }
+        if (namespace === 106) {
+            throw new Error("This is a Wikisource scan/index page. Please use the individual work page when a clean text version is available.");
+        }
+    } catch (error) {
+        if (/category page|scan\/index page/i.test(error.message || "")) throw error;
+        console.warn("Wikisource namespace detection failed:", error.message);
+    }
+
     const { mainPage, chapters } = await fetchWikisourceChapters(info);
 
     const metadataText = mainPage.text;
