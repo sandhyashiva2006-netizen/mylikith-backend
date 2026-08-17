@@ -358,6 +358,7 @@ function detectWikisourceInfo(sourceUrl) {
 
     return {
         languageCode,
+        host,
         language: languageNames[languageCode] || languageCode.toUpperCase(),
         title,
         apiUrl: `https://${host}/w/api.php`,
@@ -468,6 +469,52 @@ function normalizeWikisourceChapterTitle(mainTitle, linkedTitle) {
     return title.replace(/_/g, " ").replace(/\s+/g, " ").trim() || "Chapter";
 }
 
+function extractWikisourceCoverFromHtml(html) {
+    const source = String(html || "");
+    const candidates = [];
+    const hrefRegex = /href=["']([^"']+)["']/gi;
+    let match;
+
+    while ((match = hrefRegex.exec(source)) !== null) {
+        let href = String(match[1] || "").trim();
+        if (!href) continue;
+        if (href.startsWith("//")) href = `https:${href}`;
+        if (!/^https?:\/\/upload\.wikimedia\.org\//i.test(href)) continue;
+
+        const lower = href.toLowerCase();
+        if (
+            lower.includes("pd-icon") ||
+            lower.includes("public_domain") ||
+            lower.includes("wikimedia-button") ||
+            lower.includes("commons-logo") ||
+            lower.includes("edit-clear")
+        ) continue;
+
+        candidates.push(href);
+    }
+
+    // Also inspect image src values, but never blindly use the first image.
+    const srcRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+    while ((match = srcRegex.exec(source)) !== null) {
+        let src = String(match[1] || "").trim();
+        if (src.startsWith("//")) src = `https:${src}`;
+        if (!/^https?:\/\/upload\.wikimedia\.org\//i.test(src)) continue;
+
+        const lower = src.toLowerCase();
+        if (
+            lower.includes("pd-icon") ||
+            lower.includes("public_domain") ||
+            lower.includes("wikimedia-button") ||
+            lower.includes("commons-logo") ||
+            lower.includes("edit-clear")
+        ) continue;
+
+        candidates.push(src);
+    }
+
+    return candidates[0] || null;
+}
+
 async function fetchWikisourcePage(apiUrl, title) {
     const data = await wikisourceApi(apiUrl, {
         action: "parse",
@@ -485,19 +532,20 @@ async function fetchWikisourcePage(apiUrl, title) {
             action: "query",
             prop: "pageimages",
             piprop: "thumbnail|original",
-            pithumbsize: 800,
+            pithumbsize: 1000,
             titles: pageTitle
         });
-        const pages = imageData.query?.pages || [];
+        const pages = imageData.query?.pages || {};
         const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
         coverImage = page?.original?.source || page?.thumbnail?.source || null;
     } catch (imageError) {
-        console.warn(`Wikisource cover detection failed for ${pageTitle}:`, imageError.message);
+        console.warn(`Wikisource PageImages detection failed for ${pageTitle}:`, imageError.message);
     }
 
-    // PageImages can legitimately return no image. Do not use the first HTML
-    // <img>, because Wikisource pages often render a public-domain badge/icon
-    // before the actual work image.
+    if (!coverImage) {
+        coverImage = extractWikisourceCoverFromHtml(html);
+    }
+
     return {
         title: pageTitle,
         html,
@@ -506,15 +554,70 @@ async function fetchWikisourcePage(apiUrl, title) {
     };
 }
 
+function extractWikisourceSubpageTitlesFromHtml(html, info) {
+    const source = String(html || "");
+    const prefix = `${info.title}/`;
+    const chapterTitles = [];
+    const seen = new Set();
+    const baseUrl = `https://${info.host}/wiki/${encodeURIComponent(info.title)}`;
+
+    const add = value => {
+        let title = String(value || "").trim().replace(/_/g, " ");
+        if (!title) return;
+
+        try {
+            title = decodeURIComponent(title);
+        } catch (_) {}
+
+        title = title.replace(/_/g, " ").trim();
+        if (!title.startsWith(prefix)) return;
+
+        const suffix = title.slice(prefix.length).trim();
+        if (!suffix || suffix.includes("/")) return;
+
+        const key = title.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        chapterTitles.push(title);
+    };
+
+    const hrefRegex = /href=["']([^"']+)["']/gi;
+    let match;
+
+    while ((match = hrefRegex.exec(source)) !== null) {
+        const href = String(match[1] || "").trim();
+        if (!href || href.startsWith("#") || /^javascript:/i.test(href)) continue;
+
+        try {
+            const resolved = new URL(href, baseUrl);
+            if (resolved.hostname !== info.host) continue;
+
+            let title = "";
+            if (resolved.pathname.startsWith("/wiki/")) {
+                title = resolved.pathname.slice("/wiki/".length);
+            } else if (resolved.pathname === "/w/index.php") {
+                title = resolved.searchParams.get("title") || "";
+            }
+
+            if (title) add(title);
+        } catch (_) {
+            // Ignore malformed links.
+        }
+    }
+
+    return chapterTitles;
+}
+
 async function fetchWikisourceChapters(info) {
     const mainPage = await fetchWikisourcePage(info.apiUrl, info.title);
-
     const prefix = `${info.title}/`;
     const chapterTitles = [];
     const seen = new Set();
 
     const addChapterTitle = value => {
-        const title = String(value || "").replace(/_/g, " ").trim();
+        let title = String(value || "").replace(/_/g, " ").trim();
+        try { title = decodeURIComponent(title); } catch (_) {}
+        title = title.replace(/_/g, " ").trim();
         if (!title || !title.startsWith(prefix)) return;
 
         const suffix = title.slice(prefix.length).trim();
@@ -526,28 +629,13 @@ async function fetchWikisourceChapters(info) {
         chapterTitles.push(title);
     };
 
-    // Primary method: inspect the rendered Wikisource HTML. This catches
-    // chapter links that may be generated by templates and therefore may not
-    // appear in the API's parse.links result.
-    const html = String(mainPage.html || "");
-    const hrefRegex = /href=["']([^"']+)["']/gi;
-    let hrefMatch;
-    while ((hrefMatch = hrefRegex.exec(html)) !== null) {
-        let href = hrefMatch[1];
-        if (!href || href.startsWith("#") || /^https?:/i.test(href)) continue;
-        href = href.split("#")[0];
-        if (!href.startsWith("/wiki/")) continue;
-
-        try {
-            const pathTitle = decodeURIComponent(href.slice("/wiki/".length));
-            addChapterTitle(pathTitle);
-        } catch (_) {
-            // Ignore malformed links.
-        }
+    // Primary: actual links in the rendered page, preserving the author's
+    // intended chapter order. Resolve relative links as well as /wiki/ links.
+    for (const title of extractWikisourceSubpageTitlesFromHtml(mainPage.html, info)) {
+        addChapterTitle(title);
     }
 
-    // Secondary method: MediaWiki query API. Keep pagination so works with
-    // many links are handled without silently truncating the list.
+    // Secondary: MediaWiki links API, with pagination.
     if (!chapterTitles.length) {
         let plcontinue = null;
         do {
@@ -562,18 +650,37 @@ async function fetchWikisourceChapters(info) {
 
             const linksData = await wikisourceApi(info.apiUrl, params);
             const pages = linksData.query?.pages || {};
-            for (const page of Object.values(pages)) {
-                for (const link of (page.links || [])) {
-                    addChapterTitle(link.title);
-                }
+            const pageList = Array.isArray(pages) ? pages : Object.values(pages);
+            for (const page of pageList) {
+                for (const link of (page.links || [])) addChapterTitle(link.title);
             }
-
             plcontinue = linksData.continue?.plcontinue || null;
         } while (plcontinue);
     }
 
-    const chapters = [];
+    // Tertiary: enumerate the subpage namespace by prefix. This is a robust
+    // fallback for Wikisource templates whose links are not exposed normally.
+    if (!chapterTitles.length) {
+        let gapcontinue = null;
+        do {
+            const params = {
+                action: "query",
+                generator: "allpages",
+                gapnamespace: 0,
+                gapprefix: prefix,
+                gaplimit: "max"
+            };
+            if (gapcontinue) params.gapcontinue = gapcontinue;
 
+            const pagesData = await wikisourceApi(info.apiUrl, params);
+            const pages = pagesData.query?.pages || {};
+            const pageList = Array.isArray(pages) ? pages : Object.values(pages);
+            for (const page of pageList) addChapterTitle(page.title);
+            gapcontinue = pagesData.continue?.gapcontinue || null;
+        } while (gapcontinue);
+    }
+
+    const chapters = [];
     for (const title of chapterTitles) {
         try {
             const page = await fetchWikisourcePage(info.apiUrl, title);
@@ -588,8 +695,6 @@ async function fetchWikisourceChapters(info) {
         }
     }
 
-    // Some Wikisource works are a single page with real headings instead of
-    // subpages. Use the existing generic parser as a safe fallback.
     if (!chapters.length) {
         return {
             mainPage,
