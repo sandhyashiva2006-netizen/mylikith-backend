@@ -141,6 +141,70 @@ function getGutenbergCoverUrl(id) {
     return `https://www.gutenberg.org/cache/epub/${id}/pg${id}.cover.medium.jpg`;
 }
 
+function extractGutenbergMetadata(html, text, fallbackLanguage = "") {
+    const pageText = htmlToText(html);
+    const combined = `${pageText}\n${String(text || "")}`;
+
+    const languageMatch = combined.match(/(?:^|\n)Language\s*\|?\s*([^\n]+)/i);
+    const language = (languageMatch?.[1] || fallbackLanguage || "English")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    let publicationYear = null;
+    const publicationPatterns = [
+        /(?:published|publication date|publication year)[^\d]{0,60}(17\d{2}|18\d{2}|19\d{2}|20\d{2})/i,
+        /(?:first published|originally published|published in)[^\d]{0,60}(17\d{2}|18\d{2}|19\d{2}|20\d{2})/i
+    ];
+
+    for (const pattern of publicationPatterns) {
+        const match = combined.match(pattern);
+        if (match) {
+            publicationYear = Number(match[1]);
+            break;
+        }
+    }
+
+    // Project Gutenberg's current book page commonly includes an
+    // automatically generated description containing "published in YYYY".
+    if (!publicationYear) {
+        const generatedDescriptionMatch = pageText.match(/published in\s+(17\d{2}|18\d{2}|19\d{2}|20\d{2})/i);
+        if (generatedDescriptionMatch) {
+            publicationYear = Number(generatedDescriptionMatch[1]);
+        }
+    }
+
+    const subjectStart = pageText.search(/(?:^|\n)Subject\s*\|?/i);
+    const categoryStart = pageText.search(/(?:^|\n)Category\s*\|?/i);
+    const subjectText = subjectStart >= 0
+        ? pageText.slice(subjectStart, categoryStart > subjectStart ? categoryStart : subjectStart + 1800)
+        : "";
+
+    const categoryParts = [];
+    if (/fiction/i.test(subjectText)) categoryParts.push("Novel");
+    if (/love stories|romance|courtship/i.test(subjectText)) categoryParts.push("Romance");
+    if (/poetry|poems/i.test(subjectText)) categoryParts.push("Poetry");
+    if (/drama|plays|theatre|theater/i.test(subjectText)) categoryParts.push("Drama");
+    if (/short stor/i.test(subjectText)) categoryParts.push("Short Stories");
+    if (/children|juvenile/i.test(subjectText)) categoryParts.push("Children");
+    if (!categoryParts.length) categoryParts.push("Classic");
+    if (!categoryParts.includes("Classic")) categoryParts.push("Classic");
+
+    let description = "";
+    const ogDescription = String(html || "").match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["']/i);
+    const metaDescription = String(html || "").match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i);
+    description = (ogDescription?.[1] || metaDescription?.[1] || "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    return {
+        language,
+        originalLanguage: language,
+        publicationYear,
+        category: categoryParts.join(", "),
+        description
+    };
+}
+
 function parseGutenbergText(text) {
     let content = cleanImportedText(text);
 
@@ -270,6 +334,31 @@ async function fetchImportSource(sourceUrl) {
                 const gutenbergText = String(response.data || "");
                 const titleMatch = gutenbergText.match(/^Title:\s*(.+)$/mi);
                 const authorMatch = gutenbergText.match(/^Author:\s*(.+)$/mi);
+                let metadata = {
+                    language: "English",
+                    originalLanguage: "English",
+                    publicationYear: null,
+                    category: "Classic",
+                    description: ""
+                };
+
+                // Fetch the Gutenberg book page as a metadata source. The plain
+                // text file does not reliably contain publication year, subject
+                // or the generated description.
+                try {
+                    const pageResponse = await axios.get(`https://www.gutenberg.org/ebooks/${id}`, {
+                        timeout: 20000,
+                        responseType: "text",
+                        maxContentLength: 8 * 1024 * 1024,
+                        headers: {
+                            "User-Agent": "MyLikith-Classics-Importer/1.0"
+                        }
+                    });
+                    metadata = extractGutenbergMetadata(String(pageResponse.data || ""), gutenbergText);
+                } catch (metadataError) {
+                    console.warn("Gutenberg metadata fetch failed:", metadataError.message);
+                }
+
                 const chapters = parseGutenbergText(gutenbergText);
                 return {
                     sourceName: "Project Gutenberg",
@@ -277,8 +366,12 @@ async function fetchImportSource(sourceUrl) {
                     detectedFormat: "Project Gutenberg text",
                     title: titleMatch ? titleMatch[1].trim() : "",
                     author: authorMatch ? authorMatch[1].trim() : "",
-                    description: "Imported from Project Gutenberg.",
+                    description: metadata.description || "Imported from Project Gutenberg.",
                     coverImage: getGutenbergCoverUrl(id),
+                    language: metadata.language,
+                    originalLanguage: metadata.originalLanguage,
+                    publicationYear: metadata.publicationYear,
+                    category: metadata.category,
                     chapters
                 };
             } catch (error) {
@@ -374,7 +467,11 @@ router.post("/import/preview", async (req, res) => {
                 title: imported.title || "",
                 author: imported.author || "",
                 description: imported.description || "",
-                cover_image: imported.coverImage || null
+                cover_image: imported.coverImage || null,
+                language: imported.language || "",
+                original_language: imported.originalLanguage || imported.language || "",
+                publication_year: imported.publicationYear || null,
+                category: imported.category || "Classic"
             },
             chapters: imported.chapters.map((chapter, index) => ({
                 chapter_number: index + 1,
