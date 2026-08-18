@@ -1780,17 +1780,23 @@ async function fetchWikisourceSource(sourceUrl, info) {
         .join(" ")
         .slice(0, 700);
 
-    if (!mainPage.coverImage || isBadWikisourceCoverUrl(mainPage.coverImage)) {
-        mainPage.coverImage = null;
-    }
+    // IMPORTANT: For Wikisource, never trust the generic pageimages cover that
+    // was collected while fetching the work page. Wikisource frequently returns
+    // the Public Domain icon or another unrelated image there. The dedicated
+    // file resolver below must be the ONLY authority for the book cover.
+    // Otherwise an already-set pageimages URL prevents the real edition-file
+    // cover (for example "गोदान.pdf") from ever being selected.
+    mainPage.coverImage = null;
 
-    // Use the work page's actual file list. This avoids selecting the generic
-    // Public Domain icon that Wikisource exposes through pageimages. It also
-    // lets us read the author from the edition file metadata (e.g. Artist).
+    // Use the work page's actual edition file. This avoids selecting the generic
+    // Public Domain icon or Wikimedia contributor images and lets us read the
+    // author from the edition file metadata (e.g. Artist).
     const fileMetadata = await resolveWikisourceCoverAndAuthorFromPageImages(info.apiUrl, title);
     if (!author && fileMetadata.author) author = fileMetadata.author;
-    if (!mainPage.coverImage && fileMetadata.coverImage) mainPage.coverImage = fileMetadata.coverImage;
+    if (fileMetadata.coverImage) mainPage.coverImage = fileMetadata.coverImage;
 
+    // These are secondary fallbacks only. They are used after the exact edition
+    // file resolver has had a chance to find the real cover.
     if (!mainPage.coverImage) {
         mainPage.coverImage = await resolveWikisourceImageFromWikitext(info.apiUrl, mainPage.wikitext);
     }
