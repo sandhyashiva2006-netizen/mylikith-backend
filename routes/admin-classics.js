@@ -721,6 +721,7 @@ function extractWikisourceSubpageTitlesFromHtml(html, info) {
         const suffix = title.slice(prefix.length).trim();
         if (!suffix || suffix.includes("/")) return;
         if (isWikisourceNonChapterSubpage(suffix)) return;
+        if (!isLikelyWikisourceChapterSuffix(suffix)) return;
 
         const key = title.toLowerCase();
         if (seen.has(key)) return;
@@ -843,6 +844,7 @@ async function fetchWikisourceChapters(info) {
         const suffix = title.slice(prefix.length).trim();
         if (!suffix || suffix.includes("/")) return;
         if (isWikisourceNonChapterSubpage(suffix)) return;
+        if (!isLikelyWikisourceChapterSuffix(suffix)) return;
 
         const key = title.toLowerCase();
         if (seen.has(key)) return;
@@ -862,11 +864,11 @@ async function fetchWikisourceChapters(info) {
         add(title);
     }
 
-    // If the page exposes no direct subpages, use query=links as a fallback.
-    // Do not run broad search/prefix discovery when direct links already exist:
-    // broad search is what was causing unrelated/partial pages to contaminate
-    // chapter order in some Wikisource editions.
-    if (!chapterTitles.length) {
+    // SECONDARY/REQUIRED: query=links is used even when parse.links returned
+    // some results. MediaWiki can paginate/limit parsed link output, which was
+    // the reason some books were previously stopping at 3 or 7 chapters.
+    // query=links with continuation gives us the complete direct-link set.
+    {
         let plcontinue = null;
         do {
             const params = {
