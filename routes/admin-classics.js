@@ -614,6 +614,10 @@ function extractAuthorFromWikisourceImageInfo(imageInfo) {
 
 
 async function resolveWikisourceNamedCoverPage(apiUrl, fileTitle) {
+    // Wikisource proofread books may expose a dedicated cover page in the
+    // Index/TOC, while the PDF's own thumbnail is only a library scan sheet.
+    // Prefer that explicit cover page. This is intentionally independent of
+    // pageimages on the work page, which may return unrelated images.
     try {
         const cleanFile = String(fileTitle || "")
             .replace(/^(?:File|Image|चित्र|फाइल)\s*:/iu, "")
@@ -621,62 +625,110 @@ async function resolveWikisourceNamedCoverPage(apiUrl, fileTitle) {
         if (!cleanFile) return null;
 
         const baseName = cleanFile.replace(/\.(?:pdf|djvu)$/iu, "");
-        const namespaces = [104]; // Proofread Page namespace on Wikisource
-        const candidates = [];
+        const coverSuffixes = [
+            "आवरण-पृष्ठ", "आवरण पृष्ठ", "मुखपृष्ठ", "मुख पृष्ठ",
+            "cover", "cover page", "front cover", "frontispiece",
+            "title page", "title-page"
+        ];
+        const namespacePrefixes = ["Page", "पृष्ठ"];
+        const directCandidates = [];
 
-        for (const ns of namespaces) {
-            let apcontinue = null;
-            do {
-                const params = {
-                    action: "query",
-                    list: "allpages",
-                    apnamespace: ns,
-                    apprefix: `${baseName}/`,
-                    aplimit: "max"
-                };
-                if (apcontinue) params.apcontinue = apcontinue;
-
-                const data = await wikisourceApi(apiUrl, params);
-                for (const page of (data.query?.allpages || [])) {
-                    const title = decodeWikisourceTitle(page.title);
-                    const lower = title.toLowerCase();
-                    if (!lower.includes("आवरण") && !lower.includes("मुखपृष्ठ") &&
-                        !lower.includes("cover") && !lower.includes("front")) continue;
-                    candidates.push(title);
-                }
-                apcontinue = data.continue?.apcontinue || null;
-            } while (apcontinue);
+        for (const ns of namespacePrefixes) {
+            for (const suffix of coverSuffixes) {
+                directCandidates.push(`${ns}:${cleanFile}/${suffix}`);
+                directCandidates.push(`${ns}:${baseName}/${suffix}`);
+            }
         }
 
-        const ordered = [...new Set(candidates)].sort((a, b) => {
-            const score = title => {
-                const v = title.toLowerCase();
-                let n = 0;
-                if (v.includes("आवरण-पृष्ठ")) n += 100;
-                if (v.includes("आवरण पृष्ठ")) n += 95;
-                if (v.includes("मुखपृष्ठ")) n += 90;
-                if (v.includes("cover")) n += 80;
-                if (v.includes("front")) n += 70;
-                return n;
-            };
-            return score(b) - score(a);
-        });
+        // Also inspect the book's Index/TOC. The Hindi Go-daan index, for
+        // example, explicitly contains an "आवरण-पृष्ठ" entry.
+        const tocCandidates = [
+            `Index:${cleanFile}`,
+            `अनुक्रमणिका:${cleanFile}`,
+            `विषयसूची:${cleanFile}`,
+            `विषयसूची:${baseName}.pdf`
+        ];
 
-        for (const coverPageTitle of ordered) {
+        async function getPageImage(title) {
+            const variants = [title, title.replace(/^पृष्ठ:/u, "Page:")];
+            for (const candidateTitle of [...new Set(variants)]) {
+                try {
+                    const data = await wikisourceApi(apiUrl, {
+                        action: "query",
+                        prop: "pageimages",
+                        piprop: "thumbnail|original",
+                        pithumbsize: 1400,
+                        redirects: 1,
+                        titles: candidateTitle
+                    });
+                    const pages = data.query?.pages || {};
+                    const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+                    const image = page?.original?.source || page?.thumbnail?.source || null;
+                    if (image && !isBadWikisourceCoverUrl(image)) return image;
+                } catch (error) {
+                    console.warn(`Wikisource cover pageimages failed for ${candidateTitle}:`, error.message);
+                }
+
+                // Some Proofread Page pages do not expose pageimages. Parse the
+                // rendered page and take the actual scan image instead.
+                try {
+                    const data = await wikisourceApi(apiUrl, {
+                        action: "parse",
+                        page: candidateTitle,
+                        prop: "text",
+                        redirects: 1
+                    });
+                    const html = String(data.parse?.text || "");
+                    const image = extractWikisourceCoverFromHtml(html);
+                    if (image) return image;
+                } catch (error) {
+                    // Candidate page may simply not exist; continue.
+                }
+            }
+            return null;
+        }
+
+        // 1. Directly try the canonical cover-page names.
+        for (const title of directCandidates) {
+            const image = await getPageImage(title);
+            if (image) return image;
+        }
+
+        // 2. Read the Index/TOC and discover the exact page title linked as
+        // "Cover", "आवरण-पृष्ठ", etc. This handles books whose cover page name
+        // is not predictable from the filename.
+        for (const tocTitle of [...new Set(tocCandidates)]) {
             try {
                 const data = await wikisourceApi(apiUrl, {
-                    action: "query",
-                    prop: "pageimages",
-                    piprop: "thumbnail|original",
-                    pithumbsize: 1200,
-                    titles: coverPageTitle
+                    action: "parse",
+                    page: tocTitle,
+                    prop: "wikitext|links",
+                    redirects: 1
                 });
-                const pages = data.query?.pages || {};
-                const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
-                const image = page?.original?.source || page?.thumbnail?.source || null;
-                if (image && !isBadWikisourceCoverUrl(image)) return image;
+                const wikitext = String(data.parse?.wikitext || "");
+                const linked = [];
+                const seen = new Set();
+                const linkRegex = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/gu;
+                let match;
+                while ((match = linkRegex.exec(wikitext)) !== null) {
+                    const target = decodeWikisourceTitle(match[1] || "").trim();
+                    const label = decodeWikisourceTitle(match[2] || "").trim();
+                    if (!target) continue;
+                    const combined = `${target} ${label}`.toLowerCase();
+                    if (!/(आवरण|मुखपृष्ठ|cover|front cover|frontispiece|title page|title-page)/iu.test(combined)) continue;
+                    if (!/(?:^|:)(?:page|पृष्ठ):/iu.test(target) && !target.includes(`${baseName}/`)) continue;
+                    const key = target.toLowerCase();
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    linked.push(target);
+                }
+
+                for (const target of linked) {
+                    const image = await getPageImage(target);
+                    if (image) return image;
+                }
             } catch (error) {
-                console.warn(`Wikisource named cover page image detection failed for ${coverPageTitle}:`, error.message);
+                console.warn(`Wikisource TOC cover discovery failed for ${tocTitle}:`, error.message);
             }
         }
     } catch (error) {
