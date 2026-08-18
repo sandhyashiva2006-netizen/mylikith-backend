@@ -532,6 +532,25 @@ function extractFirstImageFromHtml(html) {
     return /^https?:\/\//i.test(src) ? src : null;
 }
 
+function isBadWikisourceAuthorValue(value) {
+    const v = String(value || "").replace(/\s+/g, " ").trim();
+    if (!v) return true;
+    if (v.length > 160) return true;
+    return /^(?:public\s+domain|public domain public domain|false(?:\s+false)?|true(?:\s+true)?|image|license|लाइसेंस|सार्वजनिक\s+डोमेन|सार्वजनिक डोमेन सार्वजनिक डोमेन|पब्लिक\s+डोमेन)$/iu.test(v)
+        || /^(?:public\s+domain\s+public\s+domain)\b/iu.test(v);
+}
+
+function isBadWikisourceCoverUrl(url) {
+    const v = String(url || "").toLowerCase();
+    if (!v) return true;
+    return /pd[-_]?icon|public[_-]?domain|commons-logo|wikimedia-button|edit-clear|no[_-]?image|placeholder|wikimedia-logo/.test(v);
+}
+
+function sanitizeWikisourceAuthor(value) {
+    const v = decodeWikisourceTitle(String(value || "")).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    return isBadWikisourceAuthorValue(v) ? "" : v;
+}
+
 function extractWikisourceAuthorFromWikitext(wikitext) {
     const source = String(wikitext || "");
     const fieldPatterns = [
@@ -541,8 +560,8 @@ function extractWikisourceAuthorFromWikitext(wikitext) {
     for (const re of fieldPatterns) {
         const m = source.match(re);
         if (m && m[1]) {
-            const value = decodeWikisourceTitle(m[1]).replace(/<[^>]+>/g, "").trim();
-            if (value && value.length <= 160) return value;
+            const value = sanitizeWikisourceAuthor(m[1]);
+            if (value) return value;
         }
     }
     return "";
@@ -579,7 +598,8 @@ function extractWikisourceAuthorHeuristic(text, title) {
         if (normalize(value) === titleKey) continue;
         // Avoid obvious metadata sentences/URLs.
         if (/https?:\/\//i.test(value) || /(?:प्रथम संस्करण|वर्तमान संस्करण|रचना-काल|publication|copyright)/iu.test(value)) continue;
-        return value;
+        const candidate = sanitizeWikisourceAuthor(value);
+        if (candidate) return candidate;
     }
     return "";
 }
@@ -602,13 +622,15 @@ function extractWikisourceAuthor(text) {
         const line = lines[i];
         if (/^(?:author|written by|poet|writer|रचनाकार|लेखक|रचयिता|कवि|రచయిత|రచించినవారు|రచించిన వారు|కవి)$/iu.test(line)) {
             const next = lines[i + 1] || "";
-            if (next && next.length <= 160 && !/^(?:प्रथम संस्करण|वर्तमान संस्करण|publication|published|copyright|©)$/iu.test(next)) {
-                return next.trim();
+            const candidate = sanitizeWikisourceAuthor(next);
+            if (candidate && !/^(?:प्रथम संस्करण|वर्तमान संस्करण|publication|published|copyright|©)$/iu.test(candidate)) {
+                return candidate;
             }
         }
         for (const pattern of patterns) {
             const match = line.match(pattern);
-            if (match && match[1].trim().length <= 160) return match[1].trim();
+            const candidate = sanitizeWikisourceAuthor(match[1]);
+            if (candidate) return candidate;
         }
     }
     return "";
@@ -737,7 +759,7 @@ function extractWikisourceCoverFromHtml(html) {
             lower.includes("edit-clear")
         ) continue;
 
-        candidates.push(href);
+        if (!isBadWikisourceCoverUrl(href)) candidates.push(href);
     }
 
     // Also inspect image src values, but never blindly use the first image.
@@ -756,7 +778,7 @@ function extractWikisourceCoverFromHtml(html) {
             lower.includes("edit-clear")
         ) continue;
 
-        candidates.push(src);
+        if (!isBadWikisourceCoverUrl(src)) candidates.push(src);
     }
 
     return candidates[0] || null;
@@ -829,6 +851,42 @@ async function fetchWikisourceDirectHtml(info, title, options = {}) {
     };
 }
 
+async function resolveWikisourceCoverByTitle(info, pageTitle) {
+    const raw = decodeWikisourceTitle(pageTitle).trim();
+    if (!raw) return null;
+    const variants = new Set();
+    const compact = raw.replace(/[\s\-_–—]+/gu, "");
+    const spaced = raw.replace(/[\s\-_–—]+/gu, " ").trim();
+    const candidates = [
+        `${raw}.pdf`, `${spaced}.pdf`, `${compact}.pdf`,
+        `${raw}.jpg`, `${raw}.jpeg`, `${raw}.png`,
+        `${spaced}.jpg`, `${spaced}.jpeg`, `${spaced}.png`,
+        `${compact}.jpg`, `${compact}.jpeg`, `${compact}.png`
+    ];
+    for (const name of candidates) variants.add(`File:${name}`);
+    for (const fileTitle of variants) {
+        try {
+            const data = await wikisourceApi(info.apiUrl, {
+                action: "query",
+                prop: "imageinfo",
+                titles: fileTitle,
+                iiprop: "url|mime|size",
+                iiurlwidth: 1400
+            });
+            const pages = data.query?.pages || {};
+            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+            const ii = page?.imageinfo?.[0];
+            const candidate = ii?.thumburl || ii?.url || null;
+            if (!candidate || isBadWikisourceCoverUrl(candidate)) continue;
+            const mime = String(ii?.mime || "").toLowerCase();
+            if (mime.startsWith("image/") || mime === "application/pdf") return candidate;
+        } catch (error) {
+            // Candidate filenames are optional; keep trying the other variants.
+        }
+    }
+    return null;
+}
+
 async function fetchWikisourcePage(apiUrl, title, options = {}) {
     const includeCover = options.includeCover !== false;
 
@@ -855,7 +913,8 @@ async function fetchWikisourcePage(apiUrl, title, options = {}) {
                 });
                 const pages = imageData.query?.pages || {};
                 const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
-                coverImage = page?.original?.source || page?.thumbnail?.source || null;
+                const candidate = page?.original?.source || page?.thumbnail?.source || null;
+                coverImage = isBadWikisourceCoverUrl(candidate) ? null : candidate;
             } catch (imageError) {
                 console.warn(`Wikisource PageImages detection failed for ${pageTitle}:`, imageError.message);
             }
@@ -1483,9 +1542,9 @@ async function fetchWikisourceSource(sourceUrl, info) {
 
     const metadataText = mainPage.text;
     const title = mainPage.title || info.title;
-    const author = extractWikisourceAuthorFromWikitext(mainPage.wikitext)
-        || extractWikisourceAuthor(metadataText)
-        || extractWikisourceAuthorHeuristic(metadataText, title);
+    const author = sanitizeWikisourceAuthor(extractWikisourceAuthorFromWikitext(mainPage.wikitext))
+        || sanitizeWikisourceAuthor(extractWikisourceAuthor(metadataText))
+        || sanitizeWikisourceAuthor(extractWikisourceAuthorHeuristic(metadataText, title));
     const publicationYear = extractWikisourcePublicationYear(metadataText);
     const description = metadataText
         .split("\n")
@@ -1495,8 +1554,14 @@ async function fetchWikisourceSource(sourceUrl, info) {
         .join(" ")
         .slice(0, 700);
 
+    if (!mainPage.coverImage || isBadWikisourceCoverUrl(mainPage.coverImage)) {
+        mainPage.coverImage = null;
+    }
     if (!mainPage.coverImage) {
         mainPage.coverImage = await resolveWikisourceImageFromWikitext(info.apiUrl, mainPage.wikitext);
+    }
+    if (!mainPage.coverImage) {
+        mainPage.coverImage = await resolveWikisourceCoverByTitle(info, title);
     }
 
     return {
