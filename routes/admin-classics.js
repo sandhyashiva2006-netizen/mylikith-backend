@@ -612,6 +612,79 @@ function extractAuthorFromWikisourceImageInfo(imageInfo) {
     return "";
 }
 
+
+async function resolveWikisourceNamedCoverPage(apiUrl, fileTitle) {
+    try {
+        const cleanFile = String(fileTitle || "")
+            .replace(/^(?:File|Image|चित्र|फाइल)\s*:/iu, "")
+            .trim();
+        if (!cleanFile) return null;
+
+        const baseName = cleanFile.replace(/\.(?:pdf|djvu)$/iu, "");
+        const namespaces = [104]; // Proofread Page namespace on Wikisource
+        const candidates = [];
+
+        for (const ns of namespaces) {
+            let apcontinue = null;
+            do {
+                const params = {
+                    action: "query",
+                    list: "allpages",
+                    apnamespace: ns,
+                    apprefix: `${baseName}/`,
+                    aplimit: "max"
+                };
+                if (apcontinue) params.apcontinue = apcontinue;
+
+                const data = await wikisourceApi(apiUrl, params);
+                for (const page of (data.query?.allpages || [])) {
+                    const title = decodeWikisourceTitle(page.title);
+                    const lower = title.toLowerCase();
+                    if (!lower.includes("आवरण") && !lower.includes("मुखपृष्ठ") &&
+                        !lower.includes("cover") && !lower.includes("front")) continue;
+                    candidates.push(title);
+                }
+                apcontinue = data.continue?.apcontinue || null;
+            } while (apcontinue);
+        }
+
+        const ordered = [...new Set(candidates)].sort((a, b) => {
+            const score = title => {
+                const v = title.toLowerCase();
+                let n = 0;
+                if (v.includes("आवरण-पृष्ठ")) n += 100;
+                if (v.includes("आवरण पृष्ठ")) n += 95;
+                if (v.includes("मुखपृष्ठ")) n += 90;
+                if (v.includes("cover")) n += 80;
+                if (v.includes("front")) n += 70;
+                return n;
+            };
+            return score(b) - score(a);
+        });
+
+        for (const coverPageTitle of ordered) {
+            try {
+                const data = await wikisourceApi(apiUrl, {
+                    action: "query",
+                    prop: "pageimages",
+                    piprop: "thumbnail|original",
+                    pithumbsize: 1200,
+                    titles: coverPageTitle
+                });
+                const pages = data.query?.pages || {};
+                const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+                const image = page?.original?.source || page?.thumbnail?.source || null;
+                if (image && !isBadWikisourceCoverUrl(image)) return image;
+            } catch (error) {
+                console.warn(`Wikisource named cover page image detection failed for ${coverPageTitle}:`, error.message);
+            }
+        }
+    } catch (error) {
+        console.warn(`Wikisource named cover-page discovery failed for ${fileTitle}:`, error.message);
+    }
+    return null;
+}
+
 async function fetchWikisourceFilePagePreview(apiUrl, fileTitle) {
     try {
         const host = new URL(apiUrl).hostname;
@@ -726,8 +799,17 @@ async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) 
             // Resolve the file description page to obtain its first-page
             // thumbnail, which is a real image URL suitable for MyLikith.
             if (!coverImage && mime === "application/pdf") {
-                const preview = await fetchWikisourceFilePagePreview(apiUrl, fileTitle);
-                if (preview) coverImage = preview;
+                // A PDF's first page is often a library/scan identification sheet,
+                // not the book cover. Proofread Wikisource editions may expose a
+                // dedicated "आवरण-पृष्ठ" or "मुखपृष्ठ" page. Prefer that named
+                // cover page, then fall back to the PDF preview only if no named
+                // cover page exists.
+                const namedCover = await resolveWikisourceNamedCoverPage(apiUrl, fileTitle);
+                if (namedCover) coverImage = namedCover;
+                if (!coverImage) {
+                    const preview = await fetchWikisourceFilePagePreview(apiUrl, fileTitle);
+                    if (preview) coverImage = preview;
+                }
             }
             return Boolean(coverImage || author);
         } catch (error) {
