@@ -532,6 +532,58 @@ function extractFirstImageFromHtml(html) {
     return /^https?:\/\//i.test(src) ? src : null;
 }
 
+function extractWikisourceAuthorFromWikitext(wikitext) {
+    const source = String(wikitext || "");
+    const fieldPatterns = [
+        /(?:^|\n)\s*\|\s*(?:author|writer|poet|रचनाकार|लेखक|रचयिता|कवि|लेखक का नाम)\s*=\s*([^\n|]+)/iu,
+        /(?:^|\n)\s*(?:author|writer|poet|रचनाकार|लेखक|रचयिता|कवि)\s*[:：]\s*([^\n|]+)/iu
+    ];
+    for (const re of fieldPatterns) {
+        const m = source.match(re);
+        if (m && m[1]) {
+            const value = decodeWikisourceTitle(m[1]).replace(/<[^>]+>/g, "").trim();
+            if (value && value.length <= 160) return value;
+        }
+    }
+    return "";
+}
+
+function extractWikisourceAuthorHeuristic(text, title) {
+    const lines = String(text || "")
+        .split("\n")
+        .map(line => line.replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+    const normalize = value => decodeWikisourceTitle(value)
+        .replace(/[\s\-–—_:：.,'"“”‘’()\[\]{}]/g, "")
+        .toLowerCase();
+    const titleKey = normalize(title);
+    if (!titleKey) return "";
+
+    const titleIndexes = [];
+    for (let i = 0; i < Math.min(lines.length, 120); i++) {
+        if (normalize(lines[i]) === titleKey) titleIndexes.push(i);
+    }
+
+    // Many Wikisource work pages render a simple bibliographic block as:
+    // title -> author -> publisher/edition. Use the second title occurrence
+    // because the first occurrence is often the page heading.
+    const start = titleIndexes.length >= 2 ? titleIndexes[1] + 1 : -1;
+    if (start < 0) return "";
+
+    const blocked = /^(?:लेखक|रचनाकार|कवि|प्रकाशक|मुद्रक|प्रथम संस्करण|वर्तमान संस्करण|प्रकाशन|प्रकाशित|मूल्य|दिनांक|स्रोत|Image|Public domain|सार्वजनिक डोमेन|©|वर्ष|author|writer|publisher|publication|copyright)$/iu;
+    for (let i = start; i < Math.min(start + 6, lines.length); i++) {
+        const value = lines[i];
+        if (!value || blocked.test(value)) continue;
+        if (/^(?:19|20)\d{2}$/u.test(value)) continue;
+        if (value.length < 2 || value.length > 120) continue;
+        if (normalize(value) === titleKey) continue;
+        // Avoid obvious metadata sentences/URLs.
+        if (/https?:\/\//i.test(value) || /(?:प्रथम संस्करण|वर्तमान संस्करण|रचना-काल|publication|copyright)/iu.test(value)) continue;
+        return value;
+    }
+    return "";
+}
+
 function extractWikisourceAuthor(text) {
     const lines = String(text || "")
         .split("\n")
@@ -605,6 +657,63 @@ function normalizeWikisourceChapterTitle(mainTitle, linkedTitle) {
     }
 
     return title.replace(/_/g, " ").replace(/\s+/g, " ").trim() || "Chapter";
+}
+
+function extractWikisourceImageTitlesFromWikitext(wikitext) {
+    const source = String(wikitext || "");
+    const titles = [];
+    const seen = new Set();
+    const re = /\[\[(?:File|Image|चित्र|फाइल)\s*:\s*([^|\]\n]+)(?:\|[^\]]*)?\]\]/giu;
+    let match;
+    while ((match = re.exec(source)) !== null) {
+        const name = decodeWikisourceTitle(match[1]).trim();
+        if (!name) continue;
+        const lower = name.toLowerCase();
+        if (
+            lower.includes("pd-icon") ||
+            lower.includes("public_domain") ||
+            lower.includes("commons-logo") ||
+            lower.includes("wikimedia-button") ||
+            lower.includes("edit-clear") ||
+            lower.includes("no_image")
+        ) continue;
+        const key = lower;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        titles.push(name);
+    }
+    return titles;
+}
+
+async function resolveWikisourceImageFromWikitext(apiUrl, wikitext) {
+    const imageTitles = extractWikisourceImageTitlesFromWikitext(wikitext);
+    for (const imageName of imageTitles) {
+        try {
+            const title = /^(?:file|image|चित्र|फाइल)\s*:/iu.test(imageName)
+                ? imageName
+                : `File:${imageName}`;
+            const data = await wikisourceApi(apiUrl, {
+                action: "query",
+                prop: "imageinfo",
+                titles: title,
+                iiprop: "url|mime|size",
+                iiurlwidth: 1200
+            });
+            const pages = data.query?.pages || {};
+            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+            const info = page?.imageinfo?.[0];
+            if (!info?.url) continue;
+            const mime = String(info.mime || "").toLowerCase();
+            // Prefer a real image/cover file, but allow PDF files because
+            // Wikisource commonly stores the edition cover as a PDF scan.
+            if (mime.startsWith("image/") || mime === "application/pdf") {
+                return info.thumburl || info.url;
+            }
+        } catch (error) {
+            console.warn(`Wikisource imageinfo detection failed for ${imageName}:`, error.message);
+        }
+    }
+    return null;
 }
 
 function extractWikisourceCoverFromHtml(html) {
@@ -751,6 +860,9 @@ async function fetchWikisourcePage(apiUrl, title, options = {}) {
                 console.warn(`Wikisource PageImages detection failed for ${pageTitle}:`, imageError.message);
             }
             if (!coverImage) coverImage = extractWikisourceCoverFromHtml(html);
+            if (!coverImage) {
+                coverImage = await resolveWikisourceImageFromWikitext(apiUrl, data.parse?.wikitext || "");
+            }
         }
 
         return {
@@ -1000,6 +1112,11 @@ function normalizeWikisourceOrdinalNumber(value) {
         "ఇరవయ్యవ": 20, "వింశ": 20
     };
     return map[v] || null;
+}
+
+function isPureWikisourceNumberSuffix(suffix) {
+    const value = normalizeWikisourceNumeral(suffix).trim();
+    return /^\d{1,3}[.)]?$/u.test(value);
 }
 
 function isLikelyWikisourceChapterSuffix(suffix) {
@@ -1268,7 +1385,15 @@ async function fetchWikisourceChapters(info) {
     // direct-subpage filter excludes scan pages such as "पृष्ठ:...".
     if (!tocTitles.length && chapterTitles.length <= 1) {
         const prefixTitles = await extractWikisourcePrefixSubpageTitles(info);
-        for (const title of prefixTitles) add(title);
+        const numericTitles = prefixTitles.filter(title => isPureWikisourceNumberSuffix(title.slice(`${info.title}/`.length)));
+        // When the source uses a pure numbered-subpage family (for example
+        // गो-दान/१ ... गो-दान/३६), only those numbered pages are chapters.
+        // The category may also expose scan/helper pages, so never import the
+        // entire prefix result blindly.
+        const candidates = numericTitles.length >= 2 && numericTitles.length >= Math.ceil(prefixTitles.length * 0.75)
+            ? numericTitles
+            : prefixTitles;
+        for (const title of candidates) add(title);
     }
 
     // The same Wikisource chapter can be discovered through the TOC, parsed
@@ -1358,7 +1483,9 @@ async function fetchWikisourceSource(sourceUrl, info) {
 
     const metadataText = mainPage.text;
     const title = mainPage.title || info.title;
-    const author = extractWikisourceAuthor(metadataText);
+    const author = extractWikisourceAuthorFromWikitext(mainPage.wikitext)
+        || extractWikisourceAuthor(metadataText)
+        || extractWikisourceAuthorHeuristic(metadataText, title);
     const publicationYear = extractWikisourcePublicationYear(metadataText);
     const description = metadataText
         .split("\n")
@@ -1367,6 +1494,10 @@ async function fetchWikisourceSource(sourceUrl, info) {
         .slice(0, 8)
         .join(" ")
         .slice(0, 700);
+
+    if (!mainPage.coverImage) {
+        mainPage.coverImage = await resolveWikisourceImageFromWikitext(info.apiUrl, mainPage.wikitext);
+    }
 
     return {
         sourceName: info.sourceName,
