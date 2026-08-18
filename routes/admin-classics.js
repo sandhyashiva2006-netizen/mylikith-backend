@@ -873,6 +873,71 @@ function isWikisourceNonChapterSubpage(value) {
     return excluded.some(item => v === item || v.startsWith(`${item} `));
 }
 
+
+function extractWikisourceTocSubpageTitlesFromWikitext(wikitext, info) {
+    const source = String(wikitext || "");
+    const lines = source.split(/\r?\n/);
+    const headingRe = /^(={2,6})\s*(.*?)\s*\1\s*$/u;
+    let tocStart = -1;
+    let tocLevel = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(headingRe);
+        if (!m) continue;
+        const heading = decodeWikisourceTitle(m[2]).toLowerCase();
+        if (
+            heading === "విషయసూచిక" ||
+            heading.includes("విషయసూచిక") ||
+            heading === "table of contents" ||
+            heading === "contents" ||
+            heading === "toc" ||
+            heading.includes("table of contents") ||
+            heading === "विषय सूची" ||
+            heading === "अनुक्रमणिका" ||
+            heading === "সূচিপত্র" ||
+            heading === "தலைப்புகளின் பட்டியல்" ||
+            heading === "பொருளடக்கம்" ||
+            heading === "ಪರಿವಿಡಿ" ||
+            heading === "ವಿಷಯ ಸೂಚಿ"
+        ) {
+            tocStart = i + 1;
+            tocLevel = m[1].length;
+            break;
+        }
+    }
+
+    if (tocStart < 0) return [];
+
+    const tocLines = [];
+    for (let i = tocStart; i < lines.length; i++) {
+        const m = lines[i].match(headingRe);
+        if (m && m[1].length <= tocLevel) break;
+        tocLines.push(lines[i]);
+    }
+
+    const prefix = `${info.title}/`;
+    const titles = [];
+    const seen = new Set();
+    const linkRegex = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+
+    for (const line of tocLines) {
+        let match;
+        while ((match = linkRegex.exec(line)) !== null) {
+            const title = decodeWikisourceTitle(match[1]);
+            if (!title.startsWith(prefix)) continue;
+            const suffix = title.slice(prefix.length).trim();
+            if (!suffix || suffix.includes("/")) continue;
+            if (isWikisourceNonChapterSubpage(suffix)) continue;
+            const key = canonicalWikisourceChapterKey(title);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            titles.push(title);
+        }
+    }
+
+    return titles;
+}
+
 function extractWikisourceSubpageTitlesFromWikitext(wikitext, info) {
     const source = String(wikitext || "");
     const prefix = `${info.title}/`;
@@ -1096,21 +1161,24 @@ async function fetchWikisourceChapters(info) {
         chapterTitles.push(title);
     };
 
-    // 1. Raw wikitext is the strongest source because it preserves the exact
-    // order of explicit TOC wikilinks on the work page.
-    for (const title of extractWikisourceSubpageTitlesFromWikitext(mainPage.wikitext, info)) add(title);
+    // 1. If the work has an explicit Table of Contents section, it is the
+    // authoritative chapter list. Do NOT merge broad subpage discovery into
+    // a TOC-backed work: Wikisource often contains alternate editions, scans,
+    // front matter, and helper subpages that share the same parent title.
+    const tocTitles = extractWikisourceTocSubpageTitlesFromWikitext(mainPage.wikitext, info);
+    if (tocTitles.length) {
+        for (const title of tocTitles) add(title);
+    } else {
+        // 2. No explicit TOC was found, so fall back to parsed links and
+        // rendered HTML as broader discovery sources.
+        for (const title of extractWikisourceSubpageTitlesFromWikitext(mainPage.wikitext, info)) add(title);
+        for (const title of extractWikisourceSubpageTitlesFromParsedLinks(mainPage.parsedLinks, info)) add(title);
+        for (const title of extractWikisourceSubpageTitlesFromHtml(mainPage.html, info)) add(title);
+    }
 
-    // 2. Parsed links and rendered HTML are additional evidence. They can
-    // contain links omitted from a simple TOC, so merge them without changing
-    // the order already established by the wikitext.
-    for (const title of extractWikisourceSubpageTitlesFromParsedLinks(mainPage.parsedLinks, info)) add(title);
-    for (const title of extractWikisourceSubpageTitlesFromHtml(mainPage.html, info)) add(title);
-
-    // 3. Complete query=links with continuation is an additional discovery
-    // source. If Wikisource throttles this request, do not abort the import;
-    // the raw wikitext/HTML sources above are already sufficient for many
-    // works.
-    try {
+    // 3. Complete query=links is only a fallback when no explicit TOC was
+    // found. With a TOC, broad link discovery must never add extra subpages.
+    if (!tocTitles.length) try {
         let plcontinue = null;
         do {
             const params = {
