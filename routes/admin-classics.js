@@ -528,80 +528,10 @@ function parseGutenbergText(text) {
     const chapterNumber = title => {
     const value = String(title || "").trim();
 
-    const arabic = value.match(
-        /^(?:chapter|book|part|volume|section)\s+(\d+)/i
-    );
+    const importedNumber = getImportedChapterNumber(value);
 
-    if (arabic) return Number(arabic[1]);
-
-    const roman = value.match(
-        /^(?:chapter|book|part|volume|section)\s+([ivxlcdm]+)/i
-    );
-
-    if (roman) {
-        const values = {
-            i: 1,
-            v: 5,
-            x: 10,
-            l: 50,
-            c: 100,
-            d: 500,
-            m: 1000
-        };
-
-        let total = 0;
-        let previous = 0;
-
-        for (const ch of roman[1].toLowerCase().split("").reverse()) {
-            const n = values[ch] || 0;
-            total += n < previous ? -n : n;
-            previous = n;
-        }
-
-        return total;
-    }
-
-    const word = value.match(
-        /^(?:chapter|book|part|volume|section)\s+([a-z]+)/i
-    );
-
-    if (word) {
-        const words = {
-            zero: 0,
-            one: 1,
-            two: 2,
-            three: 3,
-            four: 4,
-            five: 5,
-            six: 6,
-            seven: 7,
-            eight: 8,
-            nine: 9,
-            ten: 10,
-            eleven: 11,
-            twelve: 12,
-            thirteen: 13,
-            fourteen: 14,
-            fifteen: 15,
-            sixteen: 16,
-            seventeen: 17,
-            eighteen: 18,
-            nineteen: 19,
-            twenty: 20,
-            thirty: 30,
-            forty: 40,
-            fifty: 50,
-            sixty: 60,
-            seventy: 70,
-            eighty: 80,
-            ninety: 90
-        };
-
-        const number = words[word[1].toLowerCase()];
-
-        if (number !== undefined) {
-            return number;
-        }
+    if (Number.isFinite(importedNumber)) {
+        return importedNumber;
     }
 
     return null;
