@@ -613,33 +613,39 @@ function extractAuthorFromWikisourceImageInfo(imageInfo) {
 }
 
 async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) {
-    const imageTitles = await getWikisourcePageImageTitles(apiUrl, pageTitle);
-    if (!imageTitles.length) return { coverImage: null, author: "" };
-
     const pageStem = normalizeWikisourceFileStem(pageTitle);
-    const scored = imageTitles
-        .filter(title => !isBadWikisourceImageTitle(title))
-        .map((title, index) => {
-            const stem = normalizeWikisourceFileStem(title);
-            let score = 0;
-            if (stem === pageStem) score += 100;
-            if (stem.includes(pageStem) || pageStem.includes(stem)) score += 60;
-            if (/\\.(?:pdf|jpg|jpeg|png|webp|tif|tiff)$/i.test(title)) score += 15;
-            if (/cover|मुखपृष्ठ|आवरण|front/i.test(title)) score += 25;
-            if (/page|पृष्ठ|djvu/i.test(title)) score -= 50;
-            return { title, score, index };
-        })
-        .sort((a, b) => b.score - a.score || a.index - b.index);
-
     let coverImage = null;
     let author = "";
 
-    for (const candidate of scored) {
+    // IMPORTANT: Do not take author metadata from arbitrary images on a Wikisource
+    // page. Illustrations are often uploaded by Wikimedia contributors, whose
+    // names can otherwise be mistaken for the book author. First inspect the
+    // likely edition file itself (e.g. गो-दान -> File:गोदान.pdf).
+    const titleVariants = [...new Set([
+        decodeWikisourceTitle(pageTitle),
+        decodeWikisourceTitle(pageTitle).replace(/[\s\-_–—]+/gu, ""),
+        decodeWikisourceTitle(pageTitle).replace(/[\s\-_–—]+/gu, " ").trim()
+    ].filter(Boolean))];
+
+    const exactFileCandidates = [];
+    for (const variant of titleVariants) {
+        for (const ext of ["pdf", "djvu", "jpg", "jpeg", "png", "webp"]) {
+            exactFileCandidates.push(`File:${variant}.${ext}`);
+        }
+    }
+
+    const checked = new Set();
+
+    async function inspectFile(fileTitle, score = 0) {
+        const key = String(fileTitle || "").toLowerCase();
+        if (!fileTitle || checked.has(key)) return false;
+        checked.add(key);
+
         try {
             const data = await wikisourceApi(apiUrl, {
                 action: "query",
                 prop: "imageinfo",
-                titles: candidate.title,
+                titles: fileTitle,
                 iiprop: "url|mime|size|extmetadata",
                 iiextmetadatafilter: "Artist|Author|Creator|ImageDescription|DateTimeOriginal",
                 iiurlwidth: 1400
@@ -647,25 +653,55 @@ async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) 
             const pages = data.query?.pages || {};
             const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
             const info = page?.imageinfo?.[0];
-            if (!info) continue;
+            if (!info) return false;
 
+            // Only accept author metadata from the edition/cover file we
+            // intentionally selected, never from unrelated page images.
             if (!author) author = extractAuthorFromWikisourceImageInfo(info);
 
             const mime = String(info.mime || "").toLowerCase();
             const candidateUrl = info.thumburl || info.url || null;
             if (!coverImage && candidateUrl && !isBadWikisourceCoverUrl(candidateUrl)
                 && (mime.startsWith("image/") || mime === "application/pdf")) {
-                // Prefer the best-matching edition file. Do not allow a random
-                // internal illustration to win over a title-matching PDF/image.
-                if (candidate.score >= 60 || scored.length === 1) {
-                    coverImage = candidateUrl;
-                }
+                coverImage = candidateUrl;
             }
-
-            if (coverImage && author) break;
+            return Boolean(coverImage || author);
         } catch (error) {
-            console.warn(`Wikisource file metadata detection failed for ${candidate.title}:`, error.message);
+            console.warn(`Wikisource exact file metadata detection failed for ${fileTitle}:`, error.message);
+            return false;
         }
+    }
+
+    // First pass: exact edition-file candidates. This is what fixes sources
+    // whose cover/author live on a File:<book>.pdf page rather than directly on
+    // the work page.
+    for (const fileTitle of exactFileCandidates) {
+        await inspectFile(fileTitle, 200);
+        if (coverImage && author) break;
+    }
+
+    // Second pass: inspect images actually embedded on the work page, but only
+    // use them for the cover when their filename strongly matches the book.
+    // Never use these arbitrary image metadata values as the author.
+    const imageTitles = await getWikisourcePageImageTitles(apiUrl, pageTitle);
+    const scored = imageTitles
+        .filter(title => !isBadWikisourceImageTitle(title))
+        .map((title, index) => {
+            const stem = normalizeWikisourceFileStem(title);
+            let score = 0;
+            if (stem === pageStem) score += 100;
+            if (stem.includes(pageStem) || pageStem.includes(stem)) score += 60;
+            if (/\.(?:pdf|jpg|jpeg|png|webp|tif|tiff)$/i.test(title)) score += 15;
+            if (/cover|मुखपृष्ठ|आवरण|front/i.test(title)) score += 25;
+            if (/page|पृष्ठ|djvu/i.test(title)) score -= 50;
+            return { title, score, index };
+        })
+        .filter(item => item.score >= 60)
+        .sort((a, b) => b.score - a.score || a.index - b.index);
+
+    for (const candidate of scored) {
+        if (coverImage) break;
+        await inspectFile(candidate.title, candidate.score);
     }
 
     return { coverImage, author };
