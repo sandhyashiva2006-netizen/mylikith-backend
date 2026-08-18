@@ -972,6 +972,39 @@ function refineWikisourceChapterTitles(titles, info) {
     return titles;
 }
 
+
+function canonicalWikisourceChapterKey(value) {
+    let text = decodeWikisourceTitle(value);
+    try { text = text.normalize("NFKC"); } catch {}
+    return text
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/[\u2010-\u2015]/g, "-")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function canonicalWikisourceChapterContentKey(value) {
+    return String(value || "")
+        .normalize("NFKC")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function dedupeWikisourceChapterTitles(titles, info) {
+    const seen = new Set();
+    const result = [];
+    for (const title of titles) {
+        const suffix = normalizeWikisourceChapterTitle(info.title, title);
+        const key = canonicalWikisourceChapterKey(suffix);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        result.push(title);
+    }
+    return result;
+}
+
 function sortWikisourceChapterTitles(titles, info) {
     const ordinal = value => {
         const v = decodeWikisourceTitle(value).trim();
@@ -1101,7 +1134,11 @@ async function fetchWikisourceChapters(info) {
         console.warn("Wikisource query=links discovery failed; continuing with page TOC links:", linkDiscoveryError.message);
     }
 
-    const refinedTitles = refineWikisourceChapterTitles(chapterTitles, info);
+    // The same Wikisource chapter can be discovered through the TOC, parsed
+    // links, rendered HTML, and the links API. Normalize Unicode/whitespace
+    // before deciding whether two candidates are the same page.
+    const uniqueTitles = dedupeWikisourceChapterTitles(chapterTitles, info);
+    const refinedTitles = refineWikisourceChapterTitles(uniqueTitles, info);
     const orderedTitles = sortWikisourceChapterTitles(refinedTitles, info);
 
     // Fetch sequentially with a small delay. Wikisource can throttle bursts of
@@ -1110,12 +1147,31 @@ async function fetchWikisourceChapters(info) {
     // production importer and avoids the exact "6 fetched, 11 failed" pattern.
     const chapters = [];
     const failed = [];
+    const fetchedPageKeys = new Set();
+    const fetchedContentKeys = new Set();
     for (let i = 0; i < orderedTitles.length; i++) {
         const title = orderedTitles[i];
         try {
             const page = await fetchWikisourceChapterWithRetry(info, title, 3);
+            const canonicalTitle = normalizeWikisourceChapterTitle(info.title, page.title || title);
+            const pageKey = canonicalWikisourceChapterKey(canonicalTitle);
+            const contentKey = canonicalWikisourceChapterContentKey(page.text);
+
+            // A redirect/alias can cause two different discovered URLs to
+            // resolve to the same Wikisource page. Never create that chapter
+            // twice. A long identical body is also treated as a duplicate
+            // safety net for mirrored/aliased subpages.
+            if (pageKey && fetchedPageKeys.has(pageKey)) {
+                continue;
+            }
+            if (contentKey.length >= 500 && fetchedContentKeys.has(contentKey)) {
+                continue;
+            }
+
+            if (pageKey) fetchedPageKeys.add(pageKey);
+            if (contentKey.length >= 500) fetchedContentKeys.add(contentKey);
             chapters.push({
-                title: normalizeWikisourceChapterTitle(info.title, page.title),
+                title: canonicalTitle,
                 content: page.text
             });
         } catch (error) {
