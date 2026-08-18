@@ -688,6 +688,115 @@ async function fetchWikisourcePage(apiUrl, title, options = {}) {
     };
 }
 
+
+function decodeWikisourceTitle(value) {
+    let text = String(value || "").trim();
+
+    // Decode URL encoding repeatedly when Wikisource returns encoded titles.
+    for (let i = 0; i < 3; i++) {
+        try {
+            const decoded = decodeURIComponent(text);
+            if (decoded === text) break;
+            text = decoded;
+        } catch {
+            break;
+        }
+    }
+
+    // Decode the small set of HTML entities that commonly occur in page
+    // titles/links. Numeric entities are handled generically.
+    text = text
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&#(\d+);/g, (_, n) => {
+            try { return String.fromCodePoint(Number(n)); } catch { return _; }
+        })
+        .replace(/&#x([0-9a-f]+);/gi, (_, n) => {
+            try { return String.fromCodePoint(parseInt(n, 16)); } catch { return _; }
+        });
+
+    return text.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function extractWikisourceSubpageTitlesFromParsedLinks(parsedLinks, info) {
+    const titles = [];
+    const seen = new Set();
+    for (const link of Array.isArray(parsedLinks) ? parsedLinks : []) {
+        const title = decodeWikisourceTitle(typeof link === "string" ? link : link?.title);
+        if (!title) continue;
+        const prefix = `${info.title}/`;
+        if (!title.startsWith(prefix)) continue;
+        const suffix = title.slice(prefix.length).trim();
+        if (!suffix || suffix.includes("/")) continue;
+        if (isWikisourceNonChapterSubpage(suffix)) continue;
+        const key = title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        titles.push(title);
+    }
+    return titles;
+}
+
+function extractWikisourceSubpageTitlesFromHtml(html, info) {
+    const source = String(html || "");
+    const titles = [];
+    const seen = new Set();
+    const hrefRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi;
+    let match;
+
+    while ((match = hrefRegex.exec(source)) !== null) {
+        let href = String(match[1] || "").trim();
+        if (!href || href.startsWith("#") || /^javascript:/i.test(href)) continue;
+
+        let title = "";
+        try {
+            const base = `https://${info.host}`;
+            const absolute = new URL(href, base);
+            if (absolute.pathname.startsWith("/wiki/")) {
+                title = decodeWikisourceTitle(absolute.pathname.slice("/wiki/".length));
+            } else if (absolute.pathname === "/w/index.php") {
+                title = decodeWikisourceTitle(absolute.searchParams.get("title") || "");
+            }
+        } catch {
+            continue;
+        }
+
+        if (!title) continue;
+        const prefix = `${info.title}/`;
+        if (!title.startsWith(prefix)) continue;
+        const suffix = title.slice(prefix.length).trim();
+        if (!suffix || suffix.includes("/")) continue;
+        if (isWikisourceNonChapterSubpage(suffix)) continue;
+
+        const key = title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        titles.push(title);
+    }
+
+    return titles;
+}
+
+function isWikisourceNonChapterSubpage(value) {
+    const v = decodeWikisourceTitle(value).toLowerCase().trim();
+    if (!v) return true;
+
+    const excluded = [
+        "toc", "table of contents", "contents", "preface", "foreword", "introduction",
+        "front matter", "copyright", "license", "notes", "references", "bibliography",
+        "author", "author portrait", "illustrations", "images", "index", "appendix",
+        "విషయసూచిక", "పూర్తివిషయసూచిక", "ప్రవేశిక", "అవతారిక", "ముందుమాట", "కృతజ్ఞతలు",
+        "రచయిత చిత్రపటం", "ఆంధ్రమహాజనులకు విజ్ఞప్తి", "ప్రకటనలు", "ఇతర మూల ప్రతులు",
+        "వికీసోర్స్ కూర్పు ముందుమాట", "ఇవీచూడండి"
+    ];
+
+    return excluded.some(item => v === item || v.startsWith(`${item} `));
+}
+
 function extractWikisourceSubpageTitlesFromWikitext(wikitext, info) {
     const source = String(wikitext || "");
     const prefix = `${info.title}/`;
@@ -751,19 +860,51 @@ function isLikelyWikisourceChapterSuffix(suffix) {
     if (!value) return false;
     if (isWikisourceNonChapterSubpage(value)) return false;
 
-    if (/(?:chapter|part|section|book|volume|act|canto|song|story|अध्याय|भाग|प्रकरण|காண்டம்|அத்தியாயம்|ಅಧ್ಯಾಯ|ಭಾಗ|അദ്ധ്യായം|ഭാഗം|অধ্যায়|পর্ব|खंड|باب|فصل|కాండం|భాగము|భాగం|ప్రకరణము|ప్రకరణం)/i.test(value)) return true;
-    if (/^(?:[IVXLCDM]+|\d{1,3})[.)\-:]?$/i.test(value)) return true;
-
-    const ordinalMatch = value.match(/^([^\s]+)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)$/i);
-    if (ordinalMatch && normalizeWikisourceOrdinalNumber(ordinalMatch[1]) != null) return true;
-
-    return false;
+    // Direct first-level subpages on a Wikisource work page are candidates.
+    // Named sections such as Telugu literary chapter titles often do not
+    // contain words like "chapter" or "part", so do not reject them merely
+    // because their title is descriptive.
+    return true;
 }
 
 function sortWikisourceChapterTitles(titles, info) {
-    // Preserve the source/TOC order. The order in which Wikisource presents
-    // its TOC is meaningful and is safer than alphabetic/API ordering.
-    return [...titles];
+    const ordinal = value => {
+        const v = decodeWikisourceTitle(value).trim();
+        const numeric = v.match(/(?:chapter|part|section|book|volume|act|canto|ప్రకరణము|ప్రకరణం|భాగము|భాగం)\s*[-.:#]?\s*(\d{1,3})/i);
+        if (numeric) return Number(numeric[1]);
+
+        const roman = v.match(/(?:chapter|part|section|book|volume|act|canto)\s*[-.:#]?\s*([IVXLCDM]{1,10})\b/i);
+        if (roman) {
+            const map = {I:1,V:5,X:10,L:50,C:100,D:500,M:1000};
+            let total=0, prev=0;
+            for (const ch of roman[1].toUpperCase().split("").reverse()) {
+                const n=map[ch] || 0;
+                if (n < prev) total -= n; else { total += n; prev=n; }
+            }
+            return total || null;
+        }
+
+        const telugu = v.match(/^([^\s]+)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)$/i);
+        if (telugu) return normalizeWikisourceOrdinalNumber(telugu[1]);
+        return null;
+    };
+
+    const withIndex = titles.map((title, index) => ({ title, index, n: ordinal(title.slice(info.title.length + 1)) }));
+    const recognized = withIndex.filter(item => Number.isFinite(item.n));
+
+    if (recognized.length >= Math.max(2, Math.ceil(withIndex.length * 0.5))) {
+        return withIndex
+            .sort((a, b) => {
+                if (a.n == null && b.n == null) return a.index - b.index;
+                if (a.n == null) return 1;
+                if (b.n == null) return -1;
+                return a.n - b.n || a.index - b.index;
+            })
+            .map(item => item.title);
+    }
+
+    // Otherwise preserve the source TOC order exactly.
+    return titles;
 }
 
 async function fetchWikisourceChapterWithRetry(info, title, attempts = 3) {
