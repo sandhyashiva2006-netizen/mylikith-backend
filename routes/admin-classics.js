@@ -101,6 +101,264 @@ function normalizeImportedChapterTitle(value) {
         .trim();
 }
 
+function getImportedChapterNumber(title) {
+    const value = String(title || "")
+        .replace(/[०-९]/g, d => String("०१२३४५६७८९".indexOf(d)))
+        .replace(/[০-৯]/g, d => String("০১২৩৪৫৬৭৮৯".indexOf(d)))
+        .replace(/[౦-౯]/g, d => String("౦౧౨౩౪౫౬౭౮౯".indexOf(d)))
+        .trim()
+        .toLowerCase();
+
+    // Arabic / Indic digits
+    const digitMatch = value.match(
+        /(?:chapter|part|book|section|volume|అధ్యాయం|భాగం|కాండం|পরিচ্ছেদ|অধ্যায়|अध्याय|भाग|खंड|खंड)\s*[-.:]?\s*(\d+)/
+    );
+
+    if (digitMatch) {
+        return Number(digitMatch[1]);
+    }
+
+    // Roman numerals
+    const romanMatch = value.match(
+        /(?:chapter|part|book|section|volume)\s*[-.:]?\s*([ivxlcdm]+)\b/i
+    );
+
+    if (romanMatch) {
+        const roman = romanMatch[1].toUpperCase();
+
+        const romanValues = {
+            I: 1,
+            V: 5,
+            X: 10,
+            L: 50,
+            C: 100,
+            D: 500,
+            M: 1000
+        };
+
+        let total = 0;
+        let previous = 0;
+
+        for (let i = roman.length - 1; i >= 0; i--) {
+            const current = romanValues[roman[i]] || 0;
+
+            if (current < previous) {
+                total -= current;
+            } else {
+                total += current;
+            }
+
+            previous = current;
+        }
+
+        if (total > 0) {
+            return total;
+        }
+    }
+
+    /*
+     * Bengali
+     */
+    const bengaliNumbers = {
+        "প্রথম": 1,
+        "দ্বিতীয়": 2,
+        "দ্বিতীয়": 2,
+        "তৃতীয়": 3,
+        "তৃতীয়": 3,
+        "চতুর্থ": 4,
+        "পঞ্চম": 5,
+        "ষষ্ঠ": 6,
+        "সপ্তম": 7,
+        "অষ্টম": 8,
+        "নবম": 9,
+        "দশম": 10,
+        "একাদশ": 11,
+        "দ্বাদশ": 12,
+        "ত্রয়োদশ": 13,
+        "ত্রয়োদশ": 13,
+        "চতুর্দশ": 14,
+        "পঞ্চদশ": 15,
+        "ষোড়শ": 16,
+        "ষোড়শ": 16,
+        "সপ্তদশ": 17,
+        "অষ্টাদশ": 18,
+        "ঊনবিংশ": 19,
+        "উনবিংশ": 19,
+        "বিংশ": 20
+    };
+
+    /*
+     * Hindi
+     */
+    const hindiNumbers = {
+        "प्रथम": 1,
+        "पहला": 1,
+        "पहली": 1,
+        "द्वितीय": 2,
+        "दूसरा": 2,
+        "दूसरी": 2,
+        "तृतीय": 3,
+        "तीसरा": 3,
+        "तीसरी": 3,
+        "चतुर्थ": 4,
+        "चौथा": 4,
+        "चौथी": 4,
+        "पंचम": 5,
+        "पाँचवाँ": 5,
+        "पांचवां": 5,
+        "षष्ठ": 6,
+        "छठा": 6,
+        "छठी": 6,
+        "सप्तम": 7,
+        "सातवाँ": 7,
+        "सातवां": 7,
+        "अष्टम": 8,
+        "आठवाँ": 8,
+        "आठवां": 8,
+        "नवम": 9,
+        "नौवाँ": 9,
+        "नौवां": 9,
+        "दशम": 10,
+        "दसवाँ": 10,
+        "दसवां": 10,
+        "एकादश": 11,
+        "ग्यारहवाँ": 11,
+        "द्वादश": 12,
+        "बारहवाँ": 12,
+        "त्रयोदश": 13,
+        "तेरहवाँ": 13,
+        "चतुर्दश": 14,
+        "चौदहवाँ": 14,
+        "पञ्चदश": 15,
+        "पंचदश": 15,
+        "पंद्रहवाँ": 15,
+        "षोडश": 16,
+        "सोलहवाँ": 16,
+        "सप्तदश": 17,
+        "सत्रहवाँ": 17,
+        "अष्टादश": 18,
+        "अठारहवाँ": 18,
+        "एकोनविंश": 19,
+        "उन्नीसवाँ": 19,
+        "विंश": 20,
+        "बीसवाँ": 20
+    };
+
+    /*
+     * Telugu
+     */
+    const teluguNumbers = {
+        "మొదటి": 1,
+        "ప్రథమ": 1,
+        "రెండవ": 2,
+        "రెండవది": 2,
+        "ద్వితీయ": 2,
+        "మూడవ": 3,
+        "తృతీయ": 3,
+        "నాల్గవ": 4,
+        "నాలుగవ": 4,
+        "చతుర్థ": 4,
+        "ఐదవ": 5,
+        "పంచమ": 5,
+        "ఆరవ": 6,
+        "షష్ఠ": 6,
+        "ఏడవ": 7,
+        "సప్తమ": 7,
+        "ఎనిమిదవ": 8,
+        "అష్టమ": 8,
+        "తొమ్మిదవ": 9,
+        "నవమ": 9,
+        "పదవ": 10,
+        "దశమ": 10,
+        "పదకొండవ": 11,
+        "ఏకాదశ": 11,
+        "పన్నెండవ": 12,
+        "ద్వాదశ": 12,
+        "పదమూడవ": 13,
+        "త్రయోదశ": 13,
+        "పద్నాలుగవ": 14,
+        "చతుర్దశ": 14,
+        "పదిహేనవ": 15,
+        "పంచదశ": 15,
+        "పదహారవ": 16,
+        "షోడశ": 16,
+        "పదిహేడవ": 17,
+        "సప్తదశ": 17,
+        "పద్దెనిమిదవ": 18,
+        "అష్టాదశ": 18,
+        "పంతొమ్మిదవ": 19,
+        "ఏకోనవింశతి": 19,
+        "ఇరవయ్యవ": 20,
+        "వింశతి": 20
+    };
+
+    const numberWords = {
+        ...bengaliNumbers,
+        ...hindiNumbers,
+        ...teluguNumbers
+    };
+
+    const matchingWords = Object.keys(numberWords)
+        .sort((a, b) => b.length - a.length);
+
+    for (const word of matchingWords) {
+        if (value.includes(word.toLowerCase())) {
+            return numberWords[word];
+        }
+    }
+
+    return null;
+}
+
+
+function sortImportedChapters(chapters) {
+    return (Array.isArray(chapters) ? chapters : [])
+        .map((chapter, index) => ({
+            ...chapter,
+            __originalIndex: index,
+            __chapterNumber: getImportedChapterNumber(chapter.title)
+        }))
+        .sort((a, b) => {
+
+            const aNumber = a.__chapterNumber;
+            const bNumber = b.__chapterNumber;
+
+            /*
+             * Keep introductions/prefaces before numbered chapters.
+             */
+            if (aNumber === null && bNumber !== null) {
+                const aTitle = String(a.title || "").toLowerCase();
+
+                if (
+                    /^(introduction|preface|foreword|prologue|ప్రస్తావన|ముఖవాక్యం|परिचय|भूमिका)/i.test(aTitle)
+                ) {
+                    return -1;
+                }
+
+                return 1;
+            }
+
+            if (aNumber !== null && bNumber === null) {
+                const bTitle = String(b.title || "").toLowerCase();
+
+                if (
+                    /^(introduction|preface|foreword|prologue|ప్రస్తావన|ముఖవాక్యం|परिचय|भूमिका)/i.test(bTitle)
+                ) {
+                    return 1;
+                }
+
+                return -1;
+            }
+
+            if (aNumber !== null && bNumber !== null) {
+                return aNumber - bNumber;
+            }
+
+            return a.__originalIndex - b.__originalIndex;
+        })
+        .map(({ __originalIndex, __chapterNumber, ...chapter }) => chapter);
+}
+
 function htmlToText(html) {
     return cleanImportedText(
         String(html || "")
@@ -268,23 +526,86 @@ function parseGutenbergText(text) {
     const introductionBlocks = [];
 
     const chapterNumber = title => {
-        const value = String(title || "").trim();
-        const arabic = value.match(/^(?:chapter|book|part|volume|section)\s+(\d+)/i);
-        if (arabic) return Number(arabic[1]);
+    const value = String(title || "").trim();
 
-        const roman = value.match(/^(?:chapter|book|part|volume|section)\s+([ivxlcdm]+)/i);
-        if (roman) {
-            const values = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
-            let total = 0, previous = 0;
-            for (const ch of roman[1].toLowerCase().split("").reverse()) {
-                const n = values[ch] || 0;
-                total += n < previous ? -n : n;
-                previous = n;
-            }
-            return total;
+    const arabic = value.match(
+        /^(?:chapter|book|part|volume|section)\s+(\d+)/i
+    );
+
+    if (arabic) return Number(arabic[1]);
+
+    const roman = value.match(
+        /^(?:chapter|book|part|volume|section)\s+([ivxlcdm]+)/i
+    );
+
+    if (roman) {
+        const values = {
+            i: 1,
+            v: 5,
+            x: 10,
+            l: 50,
+            c: 100,
+            d: 500,
+            m: 1000
+        };
+
+        let total = 0;
+        let previous = 0;
+
+        for (const ch of roman[1].toLowerCase().split("").reverse()) {
+            const n = values[ch] || 0;
+            total += n < previous ? -n : n;
+            previous = n;
         }
-        return null;
-    };
+
+        return total;
+    }
+
+    const word = value.match(
+        /^(?:chapter|book|part|volume|section)\s+([a-z]+)/i
+    );
+
+    if (word) {
+        const words = {
+            zero: 0,
+            one: 1,
+            two: 2,
+            three: 3,
+            four: 4,
+            five: 5,
+            six: 6,
+            seven: 7,
+            eight: 8,
+            nine: 9,
+            ten: 10,
+            eleven: 11,
+            twelve: 12,
+            thirteen: 13,
+            fourteen: 14,
+            fifteen: 15,
+            sixteen: 16,
+            seventeen: 17,
+            eighteen: 18,
+            nineteen: 19,
+            twenty: 20,
+            thirty: 30,
+            forty: 40,
+            fifty: 50,
+            sixty: 60,
+            seventy: 70,
+            eighty: 80,
+            ninety: 90
+        };
+
+        const number = words[word[1].toLowerCase()];
+
+        if (number !== undefined) {
+            return number;
+        }
+    }
+
+    return null;
+};
 
     for (const chapter of rawChapters) {
         const title = normalizeImportedChapterTitle(chapter.title || "Introduction");
