@@ -540,19 +540,25 @@ function extractWikisourceAuthor(text) {
 
     const patterns = [
         /^(?:author|written by|poet|writer)\s*[:\-]\s*(.+)$/i,
-        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s*[:\-]?\s*(.+)$/i,
-        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s+(.+)$/i
+        /^(?:रचनाकार|लेखक|रचयिता|कवि)\s*[:\-]\s*(.+)$/u,
+        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s*[:\-]?\s*(.+)$/iu,
+        /^(?:रचनाकार|लेखक|रचयिता|कवि)\s+(.+)$/u,
+        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s+(.+)$/iu
     ];
 
-    for (const line of lines.slice(0, 80)) {
-        for (const pattern of patterns) {
-            const match = line.match(pattern);
-            if (match && match[1].trim().length <= 160) {
-                return match[1].trim();
+    for (let i = 0; i < Math.min(lines.length, 100); i++) {
+        const line = lines[i];
+        if (/^(?:author|written by|poet|writer|रचनाकार|लेखक|रचयिता|कवि|రచయిత|రచించినవారు|రచించిన వారు|కవి)$/iu.test(line)) {
+            const next = lines[i + 1] || "";
+            if (next && next.length <= 160 && !/^(?:प्रथम संस्करण|वर्तमान संस्करण|publication|published|copyright|©)$/iu.test(next)) {
+                return next.trim();
             }
         }
+        for (const pattern of patterns) {
+            const match = line.match(pattern);
+            if (match && match[1].trim().length <= 160) return match[1].trim();
+        }
     }
-
     return "";
 }
 
@@ -1070,11 +1076,29 @@ function dedupeWikisourceChapterTitles(titles, info) {
     return result;
 }
 
+function normalizeWikisourceNumeral(value) {
+    const raw = decodeWikisourceTitle(value).trim();
+    const devanagari = "०१२३४५६७८९";
+    const telugu = "౦౧౨౩౪౫౬౭౮౯";
+    let out = "";
+    for (const ch of raw) {
+        const d = devanagari.indexOf(ch);
+        if (d >= 0) { out += String(d); continue; }
+        const t = telugu.indexOf(ch);
+        if (t >= 0) { out += String(t); continue; }
+        out += ch;
+    }
+    return out;
+}
+
 function sortWikisourceChapterTitles(titles, info) {
     const ordinal = value => {
-        const v = decodeWikisourceTitle(value).trim();
-        const numeric = v.match(/(?:chapter|part|section|book|volume|act|canto|ప్రకరణము|ప్రకరణం|భాగము|భాగం)\s*[-.:#]?\s*(\d{1,3})/i);
+        const v = normalizeWikisourceNumeral(value).trim();
+        const numeric = v.match(/(?:chapter|part|section|book|volume|act|canto|प्रकरण|अध्याय|भाग|खंड|खण्ड|अंक|प्रकरणము|ప్రకరణం|భాగము|భాగం)\s*[-.:#]?\s*(\d{1,3})/iu);
         if (numeric) return Number(numeric[1]);
+
+        const bare = v.match(/^(\d{1,3})[.)]?$/u);
+        if (bare) return Number(bare[1]);
 
         const roman = v.match(/(?:chapter|part|section|book|volume|act|canto)\s*[-.:#]?\s*([IVXLCDM]{1,10})\b/i);
         if (roman) {
@@ -1087,7 +1111,10 @@ function sortWikisourceChapterTitles(titles, info) {
             return total || null;
         }
 
-        const telugu = v.match(/^([^\s]+)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)$/i);
+        const hindi = v.match(/^([^\s]+)\s+(?:अध्याय|भाग|खंड|खण्ड|अंक)$/iu);
+        if (hindi) return normalizeWikisourceOrdinalNumber(hindi[1]);
+
+        const telugu = v.match(/^([^\s]+)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)$/iu);
         if (telugu) return normalizeWikisourceOrdinalNumber(telugu[1]);
         return null;
     };
@@ -1105,8 +1132,6 @@ function sortWikisourceChapterTitles(titles, info) {
             })
             .map(item => item.title);
     }
-
-    // Otherwise preserve the source TOC order exactly.
     return titles;
 }
 
@@ -1141,6 +1166,40 @@ async function fetchWikisourceChapterWithRetry(info, title, attempts = 3) {
     throw lastError || new Error("Chapter fetch failed.");
 }
 
+
+async function extractWikisourcePrefixSubpageTitles(info) {
+    const titles = [];
+    const prefix = `${info.title}/`;
+    let apcontinue = null;
+
+    try {
+        do {
+            const params = {
+                action: "query",
+                list: "allpages",
+                apprefix: prefix,
+                apnamespace: 0,
+                aplimit: "max"
+            };
+            if (apcontinue) params.apcontinue = apcontinue;
+
+            const data = await wikisourceApi(info.apiUrl, params);
+            for (const page of (data.query?.allpages || [])) {
+                const title = decodeWikisourceTitle(page.title);
+                if (!title.startsWith(prefix)) continue;
+                const suffix = title.slice(prefix.length).trim();
+                if (!suffix || suffix.includes("/")) continue;
+                if (isWikisourceNonChapterSubpage(suffix)) continue;
+                if (!isLikelyWikisourceChapterSuffix(suffix)) continue;
+                titles.push(title);
+            }
+            apcontinue = data.continue?.apcontinue || null;
+        } while (apcontinue);
+    } catch (error) {
+        console.warn("Wikisource allpages prefix discovery failed:", error.message);
+    }
+    return dedupeWikisourceChapterTitles(titles, info);
+}
 
 async function fetchWikisourceChapters(info) {
     const mainPage = await fetchWikisourcePage(info.apiUrl, info.title, { includeCover: true });
@@ -1202,9 +1261,19 @@ async function fetchWikisourceChapters(info) {
         console.warn("Wikisource query=links discovery failed; continuing with page TOC links:", linkDiscoveryError.message);
     }
 
+    // 3b. Some Wikisource books, especially Hindi/Devanagari editions, have
+    // real numbered chapter subpages but no usable TOC links on the main page.
+    // MediaWiki allpages with the work-title prefix is the reliable fallback.
+    // It can discover children such as "गो-दान/१" ... "गो-दान/३६" while the
+    // direct-subpage filter excludes scan pages such as "पृष्ठ:...".
+    if (!tocTitles.length && chapterTitles.length <= 1) {
+        const prefixTitles = await extractWikisourcePrefixSubpageTitles(info);
+        for (const title of prefixTitles) add(title);
+    }
+
     // The same Wikisource chapter can be discovered through the TOC, parsed
-    // links, rendered HTML, and the links API. Normalize Unicode/whitespace
-    // before deciding whether two candidates are the same page.
+    // links, rendered HTML, the links API, and prefix discovery. Normalize
+    // Unicode/whitespace before deciding whether two candidates are the same page.
     const uniqueTitles = dedupeWikisourceChapterTitles(chapterTitles, info);
     const refinedTitles = refineWikisourceChapterTitles(uniqueTitles, info);
     const orderedTitles = sortWikisourceChapterTitles(refinedTitles, info);
