@@ -551,6 +551,126 @@ function sanitizeWikisourceAuthor(value) {
     return isBadWikisourceAuthorValue(v) ? "" : v;
 }
 
+async function getWikisourcePageImageTitles(apiUrl, pageTitle) {
+    const titles = [];
+    let imcontinue = null;
+
+    try {
+        do {
+            const params = {
+                action: "query",
+                prop: "images",
+                titles: pageTitle,
+                imlimit: "max"
+            };
+            if (imcontinue) params.imcontinue = imcontinue;
+
+            const data = await wikisourceApi(apiUrl, params);
+            const pages = data.query?.pages || {};
+            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+            for (const image of (page?.images || [])) {
+                if (image?.title) titles.push(decodeWikisourceTitle(image.title));
+            }
+            imcontinue = data.continue?.imcontinue || null;
+        } while (imcontinue);
+    } catch (error) {
+        console.warn(`Wikisource image-list detection failed for ${pageTitle}:`, error.message);
+    }
+
+    return [...new Set(titles)];
+}
+
+function normalizeWikisourceFileStem(value) {
+    return decodeWikisourceTitle(value)
+        .replace(/^File\\s*:\\s*/i, "")
+        .replace(/\\.(?:pdf|djvu|jpg|jpeg|png|webp|tif|tiff)$/i, "")
+        .replace(/[\\s_\\-–—]+/gu, "")
+        .replace(/[^\\p{L}\\p{N}]/gu, "")
+        .toLowerCase();
+}
+
+function isBadWikisourceImageTitle(value) {
+    const v = decodeWikisourceTitle(value).toLowerCase();
+    if (!v) return true;
+    return /pd[-_]?icon|public[_-]?domain|commons-logo|wikimedia-button|edit-clear|no[_-]?image|placeholder|wikimedia-logo|cc-by|creative commons/.test(v);
+}
+
+function extractAuthorFromWikisourceImageInfo(imageInfo) {
+    const meta = imageInfo?.extmetadata || {};
+    const candidates = [
+        meta.Artist?.value,
+        meta.Author?.value,
+        meta.Creator?.value
+    ];
+
+    for (const value of candidates) {
+        const candidate = sanitizeWikisourceAuthor(String(value || "")
+            .replace(/<br\s*\/?>(?=\S)/gi, " ")
+            .replace(/<[^>]+>/g, " "));
+        if (candidate) return candidate;
+    }
+    return "";
+}
+
+async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) {
+    const imageTitles = await getWikisourcePageImageTitles(apiUrl, pageTitle);
+    if (!imageTitles.length) return { coverImage: null, author: "" };
+
+    const pageStem = normalizeWikisourceFileStem(pageTitle);
+    const scored = imageTitles
+        .filter(title => !isBadWikisourceImageTitle(title))
+        .map((title, index) => {
+            const stem = normalizeWikisourceFileStem(title);
+            let score = 0;
+            if (stem === pageStem) score += 100;
+            if (stem.includes(pageStem) || pageStem.includes(stem)) score += 60;
+            if (/\\.(?:pdf|jpg|jpeg|png|webp|tif|tiff)$/i.test(title)) score += 15;
+            if (/cover|मुखपृष्ठ|आवरण|front/i.test(title)) score += 25;
+            if (/page|पृष्ठ|djvu/i.test(title)) score -= 50;
+            return { title, score, index };
+        })
+        .sort((a, b) => b.score - a.score || a.index - b.index);
+
+    let coverImage = null;
+    let author = "";
+
+    for (const candidate of scored) {
+        try {
+            const data = await wikisourceApi(apiUrl, {
+                action: "query",
+                prop: "imageinfo",
+                titles: candidate.title,
+                iiprop: "url|mime|size|extmetadata",
+                iiextmetadatafilter: "Artist|Author|Creator|ImageDescription|DateTimeOriginal",
+                iiurlwidth: 1400
+            });
+            const pages = data.query?.pages || {};
+            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+            const info = page?.imageinfo?.[0];
+            if (!info) continue;
+
+            if (!author) author = extractAuthorFromWikisourceImageInfo(info);
+
+            const mime = String(info.mime || "").toLowerCase();
+            const candidateUrl = info.thumburl || info.url || null;
+            if (!coverImage && candidateUrl && !isBadWikisourceCoverUrl(candidateUrl)
+                && (mime.startsWith("image/") || mime === "application/pdf")) {
+                // Prefer the best-matching edition file. Do not allow a random
+                // internal illustration to win over a title-matching PDF/image.
+                if (candidate.score >= 60 || scored.length === 1) {
+                    coverImage = candidateUrl;
+                }
+            }
+
+            if (coverImage && author) break;
+        } catch (error) {
+            console.warn(`Wikisource file metadata detection failed for ${candidate.title}:`, error.message);
+        }
+    }
+
+    return { coverImage, author };
+}
+
 function extractWikisourceAuthorFromWikitext(wikitext) {
     const source = String(wikitext || "");
     const fieldPatterns = [
@@ -629,6 +749,7 @@ function extractWikisourceAuthor(text) {
         }
         for (const pattern of patterns) {
             const match = line.match(pattern);
+            if (!match || !match[1]) continue;
             const candidate = sanitizeWikisourceAuthor(match[1]);
             if (candidate) return candidate;
         }
@@ -1542,9 +1663,14 @@ async function fetchWikisourceSource(sourceUrl, info) {
 
     const metadataText = mainPage.text;
     const title = mainPage.title || info.title;
-    const author = sanitizeWikisourceAuthor(extractWikisourceAuthorFromWikitext(mainPage.wikitext))
+
+    // Wikisource pages frequently render author information through templates
+    // and file metadata rather than a simple visible "Author:" line. Prefer
+    // structured wikitext, then file metadata, then visible-text heuristics.
+    let author = sanitizeWikisourceAuthor(extractWikisourceAuthorFromWikitext(mainPage.wikitext))
         || sanitizeWikisourceAuthor(extractWikisourceAuthor(metadataText))
         || sanitizeWikisourceAuthor(extractWikisourceAuthorHeuristic(metadataText, title));
+
     const publicationYear = extractWikisourcePublicationYear(metadataText);
     const description = metadataText
         .split("\n")
@@ -1557,6 +1683,14 @@ async function fetchWikisourceSource(sourceUrl, info) {
     if (!mainPage.coverImage || isBadWikisourceCoverUrl(mainPage.coverImage)) {
         mainPage.coverImage = null;
     }
+
+    // Use the work page's actual file list. This avoids selecting the generic
+    // Public Domain icon that Wikisource exposes through pageimages. It also
+    // lets us read the author from the edition file metadata (e.g. Artist).
+    const fileMetadata = await resolveWikisourceCoverAndAuthorFromPageImages(info.apiUrl, title);
+    if (!author && fileMetadata.author) author = fileMetadata.author;
+    if (!mainPage.coverImage && fileMetadata.coverImage) mainPage.coverImage = fileMetadata.coverImage;
+
     if (!mainPage.coverImage) {
         mainPage.coverImage = await resolveWikisourceImageFromWikitext(info.apiUrl, mainPage.wikitext);
     }
