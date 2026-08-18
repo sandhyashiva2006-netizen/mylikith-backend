@@ -613,6 +613,101 @@ function extractAuthorFromWikisourceImageInfo(imageInfo) {
 }
 
 
+
+async function resolveWikisourceIndexCoverPage(apiUrl, fileTitle) {
+    try {
+        const cleanFile = String(fileTitle || "")
+            .replace(/^(?:File|Image|चित्र|फाइल)\s*:/iu, "")
+            .trim();
+        if (!cleanFile) return null;
+
+        // ProofreadPage stores the index metadata as JSON. Its Image field is
+        // the page number used by Wikisource itself for the book preview/cover.
+        const indexTitle = `विषयसूची:${cleanFile}`;
+        const data = await wikisourceApi(apiUrl, {
+            action: "parse",
+            page: indexTitle,
+            prop: "wikitext",
+            contentformat: "application/json",
+            redirects: 1
+        });
+        const raw = String(data.parse?.wikitext || "").trim();
+        if (!raw) return null;
+
+        let fields = null;
+        try {
+            const parsed = JSON.parse(raw);
+            fields = parsed?.fields || null;
+        } catch {
+            return null;
+        }
+        if (!fields) return null;
+
+        const imageField = String(fields.Image ?? fields.image ?? "").trim();
+        if (!imageField) return null;
+
+        // Image can be a filename for image-based indexes, or a numeric page
+        // number for PDF/DjVu-backed indexes.
+        if (!/^\d+$/u.test(imageField)) {
+            const fileName = imageField.replace(/^\[\[\s*(?:File|चित्र)\s*:/iu, "").replace(/\]\].*$/u, "").trim();
+            if (fileName) {
+                const imageTitle = /^(?:File|चित्र)\s*:/iu.test(imageField)
+                    ? imageField
+                    : `File:${fileName}`;
+                const info = await wikisourceApi(apiUrl, {
+                    action: "query",
+                    prop: "imageinfo",
+                    titles: imageTitle,
+                    iiprop: "url|mime",
+                    iiurlwidth: 1400
+                });
+                const pages = info.query?.pages || {};
+                const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+                const ii = page?.imageinfo?.[0];
+                const candidate = ii?.thumburl || ii?.url || null;
+                if (candidate && !isBadWikisourceCoverUrl(candidate)) return candidate;
+            }
+            return null;
+        }
+
+        const preferredNumber = Number(imageField);
+        const pageNamespace = "पृष्ठ";
+        const candidates = [preferredNumber];
+
+        // If the configured cover page is a scan-library sheet (a common DLI
+        // artifact), inspect the next few physical pages and choose the first
+        // real book page instead of saving the scan sheet as the cover.
+        for (let n = preferredNumber + 1; n <= preferredNumber + 4; n++) candidates.push(n);
+
+        for (const pageNumber of candidates) {
+            const pageTitle = `${pageNamespace}:${cleanFile}/${pageNumber}`;
+            try {
+                const pageData = await wikisourceApi(apiUrl, {
+                    action: "parse",
+                    page: pageTitle,
+                    prop: "text",
+                    redirects: 1
+                });
+                const html = String(pageData.parse?.text || "");
+                const text = cleanWikisourceHtml(html).replace(/\s+/gu, " ").trim();
+
+                // Reject common Digital Library / scanner identification sheets.
+                if (/UNIVERSAL\s+LIBRARY|DIGITAL\s+LIBRARY\s+OF\s+INDIA|\bOU[_-]?\d+\b|barcode|scanning\s+centre|scanning\s+center/iu.test(text)) {
+                    continue;
+                }
+
+                const image = extractWikisourceCoverFromHtml(html);
+                if (image && !isBadWikisourceCoverUrl(image)) return image;
+            } catch (error) {
+                // Continue to the next physical page.
+            }
+        }
+    } catch (error) {
+        console.warn(`Wikisource Index cover resolution failed for ${fileTitle}:`, error.message);
+    }
+    return null;
+}
+
 async function resolveWikisourceNamedCoverPage(apiUrl, fileTitle) {
     // Wikisource proofread books may expose a dedicated cover page in the
     // Index/TOC, while the PDF's own thumbnail is only a library scan sheet.
@@ -856,8 +951,12 @@ async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) 
                 // dedicated "आवरण-पृष्ठ" or "मुखपृष्ठ" page. Prefer that named
                 // cover page, then fall back to the PDF preview only if no named
                 // cover page exists.
-                const namedCover = await resolveWikisourceNamedCoverPage(apiUrl, fileTitle);
-                if (namedCover) coverImage = namedCover;
+                const indexCover = await resolveWikisourceIndexCoverPage(apiUrl, fileTitle);
+                if (indexCover) coverImage = indexCover;
+                if (!coverImage) {
+                    const namedCover = await resolveWikisourceNamedCoverPage(apiUrl, fileTitle);
+                    if (namedCover) coverImage = namedCover;
+                }
                 if (!coverImage) {
                     const preview = await fetchWikisourceFilePagePreview(apiUrl, fileTitle);
                     if (preview) coverImage = preview;
