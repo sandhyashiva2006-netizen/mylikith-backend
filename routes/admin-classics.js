@@ -647,46 +647,122 @@ function extractWikisourceCoverFromHtml(html) {
     return candidates[0] || null;
 }
 
-async function fetchWikisourcePage(apiUrl, title, options = {}) {
+
+function wikisourcePageUrl(info, title) {
+    return `https://${info.host}/wiki/${encodeURIComponent(title).replace(/%2F/g, "/")}`;
+}
+
+function extractElementHtmlByMarker(html, markerType, markerValue) {
+    const source = String(html || "");
+    const openRegex = markerType === "id"
+        ? new RegExp(`<([a-z0-9]+)\b[^>]*\bid=["']${markerValue}["'][^>]*>`, "i")
+        : new RegExp(`<([a-z0-9]+)\b[^>]*\bclass=["'][^"']*\b${markerValue}\b[^"']*["'][^>]*>`, "i");
+    const match = source.match(openRegex);
+    if (!match || match.index == null) return source;
+
+    const tag = match[1].toLowerCase();
+    const start = match.index;
+    const tagRegex = new RegExp(`<\\/?${tag}\b[^>]*>`, "gi");
+    tagRegex.lastIndex = start;
+    let depth = 0;
+    let first = true;
+    let token;
+    while ((token = tagRegex.exec(source)) !== null) {
+        const raw = token[0];
+        if (/^<\//.test(raw)) {
+            depth--;
+            if (depth === 0) {
+                return source.slice(start, tagRegex.lastIndex);
+            }
+        } else if (!/\/\s*>$/.test(raw)) {
+            depth++;
+            first = false;
+        }
+    }
+    return source.slice(start);
+}
+
+async function fetchWikisourceDirectHtml(info, title, options = {}) {
     const includeCover = options.includeCover !== false;
-    const data = await wikisourceApi(apiUrl, {
-        action: "parse",
-        page: title,
-        prop: "text|links|wikitext",
-        redirects: 1
+    const url = wikisourcePageUrl(info, title);
+    const response = await axios.get(url, {
+        timeout: 30000,
+        responseType: "text",
+        maxContentLength: 20 * 1024 * 1024,
+        headers: {
+            "User-Agent": "MyLikith-Classics-Importer/1.0"
+        }
     });
 
-    const html = data.parse?.text || "";
-    const pageTitle = data.parse?.title || title;
+    const rawHtml = String(response.data || "");
+    const contentHtml = extractElementHtmlByMarker(rawHtml, "id", "mw-content-text") || rawHtml;
+    const parserHtml = extractElementHtmlByMarker(contentHtml, "class", "mw-parser-output") || contentHtml;
+    const text = cleanWikisourceHtml(parserHtml);
 
     let coverImage = null;
     if (includeCover) {
-        try {
-            const imageData = await wikisourceApi(apiUrl, {
-                action: "query",
-                prop: "pageimages",
-                piprop: "thumbnail|original",
-                pithumbsize: 1000,
-                titles: pageTitle
-            });
-            const pages = imageData.query?.pages || {};
-            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
-            coverImage = page?.original?.source || page?.thumbnail?.source || null;
-        } catch (imageError) {
-            console.warn(`Wikisource PageImages detection failed for ${pageTitle}:`, imageError.message);
-        }
-        if (!coverImage) coverImage = extractWikisourceCoverFromHtml(html);
+        coverImage = extractWikisourceCoverFromHtml(parserHtml) || extractFirstImageFromHtml(parserHtml);
     }
 
     return {
-        title: pageTitle,
-        html,
-        wikitext: data.parse?.wikitext || "",
-        text: cleanWikisourceHtml(html),
+        title,
+        html: parserHtml,
+        wikitext: "",
+        text,
         coverImage,
-        parsedLinks: Array.isArray(data.parse?.links) ? data.parse.links : []
+        parsedLinks: []
     };
 }
+
+async function fetchWikisourcePage(apiUrl, title, options = {}) {
+    const includeCover = options.includeCover !== false;
+
+    try {
+        const data = await wikisourceApi(apiUrl, {
+            action: "parse",
+            page: title,
+            prop: "text|links|wikitext",
+            redirects: 1
+        });
+
+        const html = data.parse?.text || "";
+        const pageTitle = data.parse?.title || title;
+
+        let coverImage = null;
+        if (includeCover) {
+            try {
+                const imageData = await wikisourceApi(apiUrl, {
+                    action: "query",
+                    prop: "pageimages",
+                    piprop: "thumbnail|original",
+                    pithumbsize: 1000,
+                    titles: pageTitle
+                });
+                const pages = imageData.query?.pages || {};
+                const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+                coverImage = page?.original?.source || page?.thumbnail?.source || null;
+            } catch (imageError) {
+                console.warn(`Wikisource PageImages detection failed for ${pageTitle}:`, imageError.message);
+            }
+            if (!coverImage) coverImage = extractWikisourceCoverFromHtml(html);
+        }
+
+        return {
+            title: pageTitle,
+            html,
+            wikitext: data.parse?.wikitext || "",
+            text: cleanWikisourceHtml(html),
+            coverImage,
+            parsedLinks: Array.isArray(data.parse?.links) ? data.parse.links : []
+        };
+    } catch (apiError) {
+        console.warn(`Wikisource API fetch failed for ${title}; trying direct page HTML:`, apiError.message);
+        return fetchWikisourceDirectHtml({
+            host: new URL(apiUrl).hostname
+        }, title, { includeCover });
+    }
+}
+
 
 
 function decodeWikisourceTitle(value) {
@@ -867,6 +943,35 @@ function isLikelyWikisourceChapterSuffix(suffix) {
     return true;
 }
 
+
+function isStrongWikisourceChapterTitle(suffix) {
+    const v = decodeWikisourceTitle(suffix).trim();
+    if (!v) return false;
+
+    if (/(?:chapter|part|section|book|volume|act|canto)\s*[-.:#]?\s*(?:\d{1,3}|[IVXLCDM]{1,12})(?:\b|\.)/i.test(v)) return true;
+    if (/^(?:[\p{L}]+)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)$/u.test(v)) return true;
+    if (/^(?:అధ్యాయం|అధ్యాయము|భాగం|భాగము|కాండము|కాండం)\s*(?:[-.:#]?\s*)?(?:\d{1,3}|[IVXLCDM]{1,12})/iu.test(v)) return true;
+    if (/^(?:అధ్యాయ|भाग|अध्याय|प्रकरण|खंड|खण्ड|अंक|பகுதி|அத்தியாயம்|பிரிவு|ಅಧ್ಯಾಯ|ಭಾಗ)\s*[-.:#]?\s*[\dIVXLCDM०-९]+/iu.test(v)) return true;
+    return false;
+}
+
+function refineWikisourceChapterTitles(titles, info) {
+    if (!titles.length) return titles;
+    const suffixes = titles.map(title => title.slice(`${info.title}/`.length));
+    const strong = suffixes.filter(isStrongWikisourceChapterTitle);
+
+    // If the work has a clearly numbered/ordinal chapter family, use that
+    // family as the authoritative set. This prevents front-matter subpages
+    // such as "Wikisource notes" from becoming a chapter while still allowing
+    // genuinely named sections for works that have no numbered chapter family.
+    if (strong.length >= 2 && strong.length >= Math.ceil(suffixes.length * 0.5)) {
+        const strongSet = new Set(strong.map(value => decodeWikisourceTitle(value).toLowerCase()));
+        return titles.filter(title => strongSet.has(decodeWikisourceTitle(title.slice(`${info.title}/`.length)).toLowerCase()));
+    }
+
+    return titles;
+}
+
 function sortWikisourceChapterTitles(titles, info) {
     const ordinal = value => {
         const v = decodeWikisourceTitle(value).trim();
@@ -911,20 +1016,33 @@ async function fetchWikisourceChapterWithRetry(info, title, attempts = 3) {
     let lastError = null;
     for (let attempt = 1; attempt <= attempts; attempt++) {
         try {
-            const page = await fetchWikisourcePage(info.apiUrl, title, { includeCover: false });
+            // Prefer the normal public Wikisource page for chapter content.
+            // This avoids API throttling/partial parse responses on large works.
+            const page = await fetchWikisourceDirectHtml(info, title, { includeCover: false });
             if (!page.text || page.text.trim().length < 20) {
                 throw new Error("Chapter page returned no usable text.");
             }
             return page;
-        } catch (error) {
-            lastError = error;
-            if (attempt < attempts) {
-                await new Promise(resolve => setTimeout(resolve, 400 * attempt));
+        } catch (directError) {
+            lastError = directError;
+            try {
+                const page = await fetchWikisourcePage(info.apiUrl, title, { includeCover: false });
+                if (!page.text || page.text.trim().length < 20) {
+                    throw new Error("Chapter page returned no usable text.");
+                }
+                return page;
+            } catch (apiError) {
+                lastError = apiError;
             }
+        }
+
+        if (attempt < attempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
         }
     }
     throw lastError || new Error("Chapter fetch failed.");
 }
+
 
 async function fetchWikisourceChapters(info) {
     const mainPage = await fetchWikisourcePage(info.apiUrl, info.title, { includeCover: true });
@@ -955,55 +1073,57 @@ async function fetchWikisourceChapters(info) {
     for (const title of extractWikisourceSubpageTitlesFromParsedLinks(mainPage.parsedLinks, info)) add(title);
     for (const title of extractWikisourceSubpageTitlesFromHtml(mainPage.html, info)) add(title);
 
-    // 3. Complete query=links with continuation is a final discovery source.
-    let plcontinue = null;
-    do {
-        const params = {
-            action: "query",
-            prop: "links",
-            titles: info.title,
-            plnamespace: 0,
-            pllimit: "max"
-        };
-        if (plcontinue) params.plcontinue = plcontinue;
+    // 3. Complete query=links with continuation is an additional discovery
+    // source. If Wikisource throttles this request, do not abort the import;
+    // the raw wikitext/HTML sources above are already sufficient for many
+    // works.
+    try {
+        let plcontinue = null;
+        do {
+            const params = {
+                action: "query",
+                prop: "links",
+                titles: info.title,
+                plnamespace: 0,
+                pllimit: "max"
+            };
+            if (plcontinue) params.plcontinue = plcontinue;
 
-        const linksData = await wikisourceApi(info.apiUrl, params);
-        const pages = linksData.query?.pages || {};
-        const pageList = Array.isArray(pages) ? pages : Object.values(pages);
-        for (const page of pageList) {
-            for (const link of (page.links || [])) add(link.title);
-        }
-        plcontinue = linksData.continue?.plcontinue || null;
-    } while (plcontinue);
+            const linksData = await wikisourceApi(info.apiUrl, params);
+            const pages = linksData.query?.pages || {};
+            const pageList = Array.isArray(pages) ? pages : Object.values(pages);
+            for (const page of pageList) {
+                for (const link of (page.links || [])) add(link.title);
+            }
+            plcontinue = linksData.continue?.plcontinue || null;
+        } while (plcontinue);
+    } catch (linkDiscoveryError) {
+        console.warn("Wikisource query=links discovery failed; continuing with page TOC links:", linkDiscoveryError.message);
+    }
 
-    const orderedTitles = sortWikisourceChapterTitles(chapterTitles, info);
+    const refinedTitles = refineWikisourceChapterTitles(chapterTitles, info);
+    const orderedTitles = sortWikisourceChapterTitles(refinedTitles, info);
 
-    // Fetch with bounded concurrency and retries. This prevents silent loss of
-    // later chapters caused by transient API failures while avoiding a burst of
-    // dozens of requests against Wikisource.
+    // Fetch sequentially with a small delay. Wikisource can throttle bursts of
+    // API/page requests, especially when a work contains many long chapters.
+    // Sequential fetching is slower but substantially more reliable for a
+    // production importer and avoids the exact "6 fetched, 11 failed" pattern.
     const chapters = [];
     const failed = [];
-    const concurrency = 3;
-    for (let i = 0; i < orderedTitles.length; i += concurrency) {
-        const batch = orderedTitles.slice(i, i + concurrency);
-        const results = await Promise.all(batch.map(async title => {
-            try {
-                const page = await fetchWikisourceChapterWithRetry(info, title, 3);
-                return { ok: true, title, page };
-            } catch (error) {
-                return { ok: false, title, error };
-            }
-        }));
+    for (let i = 0; i < orderedTitles.length; i++) {
+        const title = orderedTitles[i];
+        try {
+            const page = await fetchWikisourceChapterWithRetry(info, title, 3);
+            chapters.push({
+                title: normalizeWikisourceChapterTitle(info.title, page.title),
+                content: page.text
+            });
+        } catch (error) {
+            failed.push({ title, error: error?.message || "Unknown error" });
+        }
 
-        for (const result of results) {
-            if (result.ok) {
-                chapters.push({
-                    title: normalizeWikisourceChapterTitle(info.title, result.page.title),
-                    content: result.page.text
-                });
-            } else {
-                failed.push({ title: result.title, error: result.error?.message || "Unknown error" });
-            }
+        if (i < orderedTitles.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 650));
         }
     }
 
@@ -1012,10 +1132,10 @@ async function fetchWikisourceChapters(info) {
     }
 
     if (!chapters.length) {
-        return { mainPage, chapters: parseGenericText(mainPage.text), discoveredCount: orderedTitles.length, failed };
+        return { mainPage, chapters: parseGenericText(mainPage.text), discoveredCount: chapterTitles.length, refinedCount: orderedTitles.length, failed };
     }
 
-    return { mainPage, chapters, discoveredCount: orderedTitles.length, failed };
+    return { mainPage, chapters, discoveredCount: chapterTitles.length, refinedCount: orderedTitles.length, failed };
 }
 
 async function fetchWikisourceSource(sourceUrl, info) {
@@ -1041,7 +1161,7 @@ async function fetchWikisourceSource(sourceUrl, info) {
         console.warn("Wikisource namespace detection failed:", error.message);
     }
 
-    const { mainPage, chapters, discoveredCount = chapters.length, failed = [] } = await fetchWikisourceChapters(info);
+    const { mainPage, chapters, discoveredCount = chapters.length, refinedCount = chapters.length, failed = [] } = await fetchWikisourceChapters(info);
 
     const metadataText = mainPage.text;
     const title = mainPage.title || info.title;
@@ -1070,6 +1190,7 @@ async function fetchWikisourceSource(sourceUrl, info) {
         chapters,
         diagnostics: {
             discoveredChapters: discoveredCount,
+            candidateChapters: refinedCount,
             fetchedChapters: chapters.length,
             failedChapters: failed
         }
