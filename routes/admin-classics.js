@@ -89,9 +89,11 @@ function normalizeImportedChapterTitle(value) {
 
     // Fix source artifacts such as: "Chapter I.]" or "CHAPTER II."
     // while preserving the chapter's Roman numeral.
-    const chapterMatch = title.match(/^chapter\s*(?:[-.:]\s*)?([ivxlcdm]+)\s*\.?\s*\]?$/i);
+    const chapterMatch = title.match(/^chapter\s*(?:[-.:]\s*)?([ivxlcdm]+|\d{1,3})\s*\.?\s*\]?\s*(.*)$/i);
     if (chapterMatch) {
-        return `Chapter ${chapterMatch[1].toUpperCase()}.`;
+        const numeral = chapterMatch[1].match(/^\d+$/) ? chapterMatch[1] : chapterMatch[1].toUpperCase();
+        const tail = String(chapterMatch[2] || "").replace(/^[-–—:.)\s]+/, "").trim();
+        return tail ? `Chapter ${numeral}. ${tail}` : `Chapter ${numeral}.`;
     }
 
     return title
@@ -115,6 +117,8 @@ function htmlToText(html) {
             .replace(/&gt;/gi, ">")
             .replace(/&quot;/gi, '"')
             .replace(/&#39;|&apos;/gi, "'")
+            .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+            .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
     );
 }
 
@@ -233,10 +237,10 @@ function parseGutenbergText(text) {
         const value = line.trim().replace(/[\u200B\uFEFF]/g, "");
         if (!value || value.length > 100) return false;
 
-        return /^(?:chapter|book|part|volume|section)\s+(?:[0-9]{1,3}|[ivxlcdm]+|[a-z]+)\s*[.)\-:]?$/i.test(value)
-            || /^chapter\s*[-.:]\s*(?:[0-9]{1,3}|[ivxlcdm]+|[a-z]+)\s*[.)]?$/.test(value)
-            || /^chapter\s+[ivxlcdm]+\s*\.?\]?$/i.test(value)
-            || /^chapter\s+[a-z]+\s*\.?\]?$/i.test(value);
+        return /^(?:chapter|book|part|volume|section)\s+(?:[0-9]{1,3}|[ivxlcdm]+|[a-z]+)(?:\s*[.)\-:]?\s*.*)?$/i.test(value)
+            || /^chapter\s*[-.:]\s*(?:[0-9]{1,3}|[ivxlcdm]+|[a-z]+)(?:\s*[.)\-:]?\s*.*)?$/i.test(value)
+            || /^chapter\s+[ivxlcdm]+\s*\.?\]?(?:\s+.*)?$/i.test(value)
+            || /^chapter\s+[a-z]+\s*\.?\]?(?:\s+.*)?$/i.test(value);
     };
 
     for (const line of lines) {
@@ -645,11 +649,10 @@ function extractWikisourceCoverFromHtml(html) {
 
 async function fetchWikisourcePage(apiUrl, title, options = {}) {
     const includeCover = options.includeCover !== false;
-
     const data = await wikisourceApi(apiUrl, {
         action: "parse",
         page: title,
-        prop: "text|links",
+        prop: "text|links|wikitext",
         redirects: 1
     });
 
@@ -672,100 +675,40 @@ async function fetchWikisourcePage(apiUrl, title, options = {}) {
         } catch (imageError) {
             console.warn(`Wikisource PageImages detection failed for ${pageTitle}:`, imageError.message);
         }
-
         if (!coverImage) coverImage = extractWikisourceCoverFromHtml(html);
     }
 
     return {
         title: pageTitle,
         html,
+        wikitext: data.parse?.wikitext || "",
         text: cleanWikisourceHtml(html),
         coverImage,
         parsedLinks: Array.isArray(data.parse?.links) ? data.parse.links : []
     };
 }
 
-function decodeWikisourceTitle(value) {
-    let title = String(value || "").trim();
-    try { title = decodeURIComponent(title); } catch (_) {}
-    return title.replace(/_/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function isWikisourceNonChapterSubpage(suffix) {
-    const value = decodeWikisourceTitle(suffix).toLowerCase();
-
-    return /(?:^|\s)(?:contents|content|table of contents|toc|index|index of|preface|foreword|introduction|appendix|acknowledg(?:e)?ments?|about|author|copyright|license|metadata|source|notes|references|bibliography|illustrations?|plates?|glossary|editorial|editor\'s|editors|transcription|proofreading|download|pdf|scan|cover|front matter|back matter|ముందుమాట|కృతజ్ఞతలు|రచయిత|రచయిత చిత్రపటం|అవతారిక|విషయసూచిక|ప్రకటనలు|సంపాదకీయభూమిక|విజ్ఞప్తి|చిత్రపటం|సూచిక|పరిచయం|ఉపోద్ఘాతం)(?:\s|$)/i.test(value);
-}
-
-function isLikelyWikisourceChapterSuffix(suffix) {
-    const value = decodeWikisourceTitle(suffix);
-    if (!value) return false;
-    if (isWikisourceNonChapterSubpage(value)) return false;
-
-    return /(?:chapter|part|section|book|volume|act|canto|song|story|अध्याय|भाग|प्रकरण|காண்டம்|அத்தியாயம்|ಅಧ್ಯಾಯ|ಭಾಗ|അദ്ധ്യായം|ഭാഗം|অধ্যায়|পর্ব|खंड|باب|فصل|కాండం|భాగము|ప్రకరణము|ప్రకరణం)/i.test(value)
-        || /^(?:[IVXLCDM]+|\d{1,3})[.)\-:]?$/i.test(value)
-        || /^(?:మొదటి|రెండవ|రెండవది|మూడవ|నాలుగవ|నాలుగో|ఐదవ|ఆరవ|ఏడవ|ఎనిమిదవ|తొమ్మిదవ|పదవ|పదకొండవ|పదునొకొండవ|పండ్రెండవ|పన్నెండవ|పదుమూడవ|పదునాలుగవ|పదునైదవ|పదునాఱవ)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)/i.test(value);
-}
-
-function extractWikisourceSubpageTitlesFromHtml(html, info) {
-    const source = String(html || "");
-    const prefix = `${info.title}/`;
-    const chapterTitles = [];
-    const seen = new Set();
-    const baseUrl = `https://${info.host}/wiki/${encodeURIComponent(info.title)}`;
-
-    const add = value => {
-        let title = decodeWikisourceTitle(value);
-        if (!title.startsWith(prefix)) return;
-
-        const suffix = title.slice(prefix.length).trim();
-        if (!suffix || suffix.includes("/")) return;
-        if (isWikisourceNonChapterSubpage(suffix)) return;
-        if (!isLikelyWikisourceChapterSuffix(suffix)) return;
-
-        const key = title.toLowerCase();
-        if (seen.has(key)) return;
-        seen.add(key);
-        chapterTitles.push(title);
-    };
-
-    const hrefRegex = /href=["']([^"']+)["']/gi;
-    let match;
-
-    while ((match = hrefRegex.exec(source)) !== null) {
-        const href = String(match[1] || "").trim();
-        if (!href || href.startsWith("#") || /^javascript:/i.test(href)) continue;
-
-        try {
-            const resolved = new URL(href, baseUrl);
-            if (resolved.hostname !== info.host) continue;
-
-            let title = "";
-            if (resolved.pathname.startsWith("/wiki/")) {
-                title = resolved.pathname.slice("/wiki/".length);
-            } else if (resolved.pathname === "/w/index.php") {
-                title = resolved.searchParams.get("title") || "";
-            }
-
-            if (title) add(title);
-        } catch (_) {}
-    }
-
-    return chapterTitles;
-}
-
-function extractWikisourceSubpageTitlesFromParsedLinks(parsedLinks, info) {
+function extractWikisourceSubpageTitlesFromWikitext(wikitext, info) {
+    const source = String(wikitext || "");
     const prefix = `${info.title}/`;
     const titles = [];
     const seen = new Set();
 
-    for (const link of parsedLinks || []) {
-        const title = decodeWikisourceTitle(link?.title || "");
+    // Wikisource TOCs are normally explicit wikilinks. Reading the raw
+    // wikitext preserves their source order and avoids API/link-result
+    // truncation or reordering. We intentionally inspect every direct
+    // subpage link, then let the chapter classifier remove navigation pages.
+    const linkRegex = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+    let match;
+
+    while ((match = linkRegex.exec(source)) !== null) {
+        const title = decodeWikisourceTitle(match[1]);
         if (!title.startsWith(prefix)) continue;
 
         const suffix = title.slice(prefix.length).trim();
         if (!suffix || suffix.includes("/")) continue;
         if (isWikisourceNonChapterSubpage(suffix)) continue;
+        if (!isLikelyWikisourceChapterSuffix(suffix)) continue;
 
         const key = title.toLowerCase();
         if (seen.has(key)) continue;
@@ -776,144 +719,162 @@ function extractWikisourceSubpageTitlesFromParsedLinks(parsedLinks, info) {
     return titles;
 }
 
+function normalizeWikisourceOrdinalNumber(value) {
+    const v = decodeWikisourceTitle(value).trim().toLowerCase();
+    const map = {
+        "మొదటి": 1, "ప్రథమ": 1,
+        "రెండవ": 2, "రెండవది": 2, "ద్వితీయ": 2,
+        "మూడవ": 3, "తృతీయ": 3,
+        "నాలుగవ": 4, "నాలుగో": 4, "చతుర్థ": 4,
+        "ఐదవ": 5, "పంచమ": 5,
+        "ఆరవ": 6, "షష్ఠ": 6,
+        "ఏడవ": 7, "సప్తమ": 7,
+        "ఎనిమిదవ": 8, "అష్టమ": 8,
+        "తొమ్మిదవ": 9, "నవమ": 9,
+        "పదవ": 10, "దశమ": 10,
+        "పదకొండవ": 11, "పదునొకొండవ": 11, "ఏకాదశ": 11,
+        "పన్నెండవ": 12, "పండ్రెండవ": 12, "ద్వాదశ": 12,
+        "పదమూడవ": 13, "పదుమూడవ": 13, "త్రయోదశ": 13,
+        "పదునాలుగవ": 14, "చతుర్దశ": 14,
+        "పదునైదవ": 15, "పంచదశ": 15,
+        "పదునాఱవ": 16, "పదహారవ": 16, "షోడశ": 16,
+        "పదిహేడవ": 17, "సప్తదశ": 17,
+        "పద్దెనిమిదవ": 18, "అష్టాదశ": 18,
+        "పందొమ్మిదవ": 19, "ఏకోనవింశ": 19,
+        "ఇరవయ్యవ": 20, "వింశ": 20
+    };
+    return map[v] || null;
+}
+
+function isLikelyWikisourceChapterSuffix(suffix) {
+    const value = decodeWikisourceTitle(suffix);
+    if (!value) return false;
+    if (isWikisourceNonChapterSubpage(value)) return false;
+
+    if (/(?:chapter|part|section|book|volume|act|canto|song|story|अध्याय|भाग|प्रकरण|காண்டம்|அத்தியாயம்|ಅಧ್ಯಾಯ|ಭಾಗ|അദ്ധ്യായം|ഭാഗം|অধ্যায়|পর্ব|खंड|باب|فصل|కాండం|భాగము|భాగం|ప్రకరణము|ప్రకరణం)/i.test(value)) return true;
+    if (/^(?:[IVXLCDM]+|\d{1,3})[.)\-:]?$/i.test(value)) return true;
+
+    const ordinalMatch = value.match(/^([^\s]+)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)$/i);
+    if (ordinalMatch && normalizeWikisourceOrdinalNumber(ordinalMatch[1]) != null) return true;
+
+    return false;
+}
+
 function sortWikisourceChapterTitles(titles, info) {
-    const prefix = `${info.title}/`;
+    // Preserve the source/TOC order. The order in which Wikisource presents
+    // its TOC is meaningful and is safer than alphabetic/API ordering.
+    return [...titles];
+}
 
-    const teluguOrdinals = new Map([
-        ["మొదటి", 1], ["రెండవ", 2], ["మూడవ", 3], ["నాలుగవ", 4],
-        ["ఐదవ", 5], ["ఆరవ", 6], ["ఏడవ", 7], ["ఎనిమిదవ", 8],
-        ["తొమ్మిదవ", 9], ["పదవ", 10], ["పదకొండవ", 11], ["పదునొకొండవ", 11],
-        ["పండ్రెండవ", 12], ["పన్నెండవ", 12], ["పదుమూడవ", 13],
-        ["పదునాలుగవ", 14], ["పదునైదవ", 15], ["పదునాఱవ", 16]
-    ]);
-
-    const romanToNumber = value => {
-        const values = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
-        let total = 0, previous = 0;
-        for (const ch of String(value || "").toLowerCase().split("").reverse()) {
-            const n = values[ch] || 0;
-            total += n < previous ? -n : n;
-            previous = n;
+async function fetchWikisourceChapterWithRetry(info, title, attempts = 3) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+            const page = await fetchWikisourcePage(info.apiUrl, title, { includeCover: false });
+            if (!page.text || page.text.trim().length < 20) {
+                throw new Error("Chapter page returned no usable text.");
+            }
+            return page;
+        } catch (error) {
+            lastError = error;
+            if (attempt < attempts) {
+                await new Promise(resolve => setTimeout(resolve, 400 * attempt));
+            }
         }
-        return total;
-    };
-
-    const getOrder = title => {
-        const suffix = decodeWikisourceTitle(title).slice(prefix.length).trim();
-
-        const telugu = [...teluguOrdinals.entries()].find(([word]) =>
-            new RegExp(`^${word}\\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)`, "i").test(suffix)
-        );
-        if (telugu) return telugu[1];
-
-        const arabic = suffix.match(/(?:chapter|part|section|book|volume|act|अध्याय|भाग|प्रकरण|అధ్యాయం|భాగము|ప్రకరణము|ప్రకరణం)\s*[-.:]?\s*(\d{1,3})/i);
-        if (arabic) return Number(arabic[1]);
-
-        const roman = suffix.match(/(?:chapter|part|section|book|volume|act)\s*[-.:]?\s*([ivxlcdm]+)/i);
-        if (roman) return romanToNumber(roman[1]);
-
-        const standalone = suffix.match(/^(\d{1,3})[.)\-:]?$/);
-        if (standalone) return Number(standalone[1]);
-
-        const standaloneRoman = suffix.match(/^([ivxlcdm]+)[.)\-:]?$/i);
-        if (standaloneRoman) return romanToNumber(standaloneRoman[1]);
-
-        return Number.MAX_SAFE_INTEGER;
-    };
-
-    return [...titles].sort((a, b) => {
-        const ao = getOrder(a);
-        const bo = getOrder(b);
-        if (ao !== Number.MAX_SAFE_INTEGER || bo !== Number.MAX_SAFE_INTEGER) {
-            if (ao !== bo) return ao - bo;
-        }
-        return 0;
-    });
+    }
+    throw lastError || new Error("Chapter fetch failed.");
 }
 
 async function fetchWikisourceChapters(info) {
     const mainPage = await fetchWikisourcePage(info.apiUrl, info.title, { includeCover: true });
-    const prefix = `${info.title}/`;
     const chapterTitles = [];
     const seen = new Set();
 
     const add = value => {
         const title = decodeWikisourceTitle(value);
+        const prefix = `${info.title}/`;
         if (!title.startsWith(prefix)) return;
-
         const suffix = title.slice(prefix.length).trim();
         if (!suffix || suffix.includes("/")) return;
         if (isWikisourceNonChapterSubpage(suffix)) return;
         if (!isLikelyWikisourceChapterSuffix(suffix)) return;
-
         const key = title.toLowerCase();
         if (seen.has(key)) return;
         seen.add(key);
         chapterTitles.push(title);
     };
 
-    // PRIMARY: MediaWiki's own parsed internal-link list. Unlike search or
-    // prefix enumeration, this reflects the links actually present in the
-    // work page and is therefore the authoritative source for its TOC.
-    for (const title of extractWikisourceSubpageTitlesFromParsedLinks(mainPage.parsedLinks, info)) {
-        add(title);
-    }
+    // 1. Raw wikitext is the strongest source because it preserves the exact
+    // order of explicit TOC wikilinks on the work page.
+    for (const title of extractWikisourceSubpageTitlesFromWikitext(mainPage.wikitext, info)) add(title);
 
-    // SECONDARY: rendered HTML links, preserving their appearance order.
-    for (const title of extractWikisourceSubpageTitlesFromHtml(mainPage.html, info)) {
-        add(title);
-    }
+    // 2. Parsed links and rendered HTML are additional evidence. They can
+    // contain links omitted from a simple TOC, so merge them without changing
+    // the order already established by the wikitext.
+    for (const title of extractWikisourceSubpageTitlesFromParsedLinks(mainPage.parsedLinks, info)) add(title);
+    for (const title of extractWikisourceSubpageTitlesFromHtml(mainPage.html, info)) add(title);
 
-    // SECONDARY/REQUIRED: query=links is used even when parse.links returned
-    // some results. MediaWiki can paginate/limit parsed link output, which was
-    // the reason some books were previously stopping at 3 or 7 chapters.
-    // query=links with continuation gives us the complete direct-link set.
-    {
-        let plcontinue = null;
-        do {
-            const params = {
-                action: "query",
-                prop: "links",
-                titles: info.title,
-                plnamespace: 0,
-                pllimit: "max"
-            };
-            if (plcontinue) params.plcontinue = plcontinue;
+    // 3. Complete query=links with continuation is a final discovery source.
+    let plcontinue = null;
+    do {
+        const params = {
+            action: "query",
+            prop: "links",
+            titles: info.title,
+            plnamespace: 0,
+            pllimit: "max"
+        };
+        if (plcontinue) params.plcontinue = plcontinue;
 
-            const linksData = await wikisourceApi(info.apiUrl, params);
-            const pages = linksData.query?.pages || {};
-            const pageList = Array.isArray(pages) ? pages : Object.values(pages);
-            for (const page of pageList) {
-                for (const link of (page.links || [])) add(link.title);
-            }
-            plcontinue = linksData.continue?.plcontinue || null;
-        } while (plcontinue);
-    }
+        const linksData = await wikisourceApi(info.apiUrl, params);
+        const pages = linksData.query?.pages || {};
+        const pageList = Array.isArray(pages) ? pages : Object.values(pages);
+        for (const page of pageList) {
+            for (const link of (page.links || [])) add(link.title);
+        }
+        plcontinue = linksData.continue?.plcontinue || null;
+    } while (plcontinue);
 
     const orderedTitles = sortWikisourceChapterTitles(chapterTitles, info);
 
-    // Fetch chapter text without running PageImages for every chapter. This
-    // avoids dozens of unnecessary API requests and prevents rate limiting.
+    // Fetch with bounded concurrency and retries. This prevents silent loss of
+    // later chapters caused by transient API failures while avoiding a burst of
+    // dozens of requests against Wikisource.
     const chapters = [];
-    for (const title of orderedTitles) {
-        try {
-            const page = await fetchWikisourcePage(info.apiUrl, title, { includeCover: false });
-            if (!page.text || page.text.length < 20) continue;
+    const failed = [];
+    const concurrency = 3;
+    for (let i = 0; i < orderedTitles.length; i += concurrency) {
+        const batch = orderedTitles.slice(i, i + concurrency);
+        const results = await Promise.all(batch.map(async title => {
+            try {
+                const page = await fetchWikisourceChapterWithRetry(info, title, 3);
+                return { ok: true, title, page };
+            } catch (error) {
+                return { ok: false, title, error };
+            }
+        }));
 
-            chapters.push({
-                title: normalizeWikisourceChapterTitle(info.title, page.title),
-                content: page.text
-            });
-        } catch (error) {
-            console.warn(`Wikisource chapter fetch failed for ${title}:`, error.message);
+        for (const result of results) {
+            if (result.ok) {
+                chapters.push({
+                    title: normalizeWikisourceChapterTitle(info.title, result.page.title),
+                    content: result.page.text
+                });
+            } else {
+                failed.push({ title: result.title, error: result.error?.message || "Unknown error" });
+            }
         }
     }
 
-    if (!chapters.length) {
-        return { mainPage, chapters: parseGenericText(mainPage.text) };
+    if (orderedTitles.length && failed.length) {
+        console.warn(`Wikisource chapter fetch: ${orderedTitles.length} discovered, ${chapters.length} fetched, ${failed.length} failed.`, failed);
     }
 
-    return { mainPage, chapters };
+    if (!chapters.length) {
+        return { mainPage, chapters: parseGenericText(mainPage.text), discoveredCount: orderedTitles.length, failed };
+    }
+
+    return { mainPage, chapters, discoveredCount: orderedTitles.length, failed };
 }
 
 async function fetchWikisourceSource(sourceUrl, info) {
@@ -939,7 +900,7 @@ async function fetchWikisourceSource(sourceUrl, info) {
         console.warn("Wikisource namespace detection failed:", error.message);
     }
 
-    const { mainPage, chapters } = await fetchWikisourceChapters(info);
+    const { mainPage, chapters, discoveredCount = chapters.length, failed = [] } = await fetchWikisourceChapters(info);
 
     const metadataText = mainPage.text;
     const title = mainPage.title || info.title;
@@ -965,7 +926,12 @@ async function fetchWikisourceSource(sourceUrl, info) {
         originalLanguage: info.language,
         publicationYear,
         category: "Classic",
-        chapters
+        chapters,
+        diagnostics: {
+            discoveredChapters: discoveredCount,
+            fetchedChapters: chapters.length,
+            failedChapters: failed
+        }
     };
 }
 
@@ -1114,6 +1080,12 @@ router.post("/import/preview", async (req, res) => {
 
         const imported = await fetchImportSource(String(source_url).trim());
 
+        if (imported.diagnostics && imported.diagnostics.discoveredChapters > imported.diagnostics.fetchedChapters) {
+            const failedCount = imported.diagnostics.discoveredChapters - imported.diagnostics.fetchedChapters;
+            const failedTitles = (imported.diagnostics.failedChapters || []).slice(0, 5).map(item => item.title).join(", ");
+            throw new Error(`Wikisource detected ${imported.diagnostics.discoveredChapters} chapters but only ${imported.diagnostics.fetchedChapters} could be fetched. ${failedCount} chapter(s) failed${failedTitles ? `: ${failedTitles}` : ""}. Import was stopped to prevent missing chapters.`);
+        }
+
         if (!imported.chapters.length) {
             return res.status(422).json({
                 success: false,
@@ -1128,6 +1100,7 @@ router.post("/import/preview", async (req, res) => {
                 url: imported.sourceUrl,
                 format: imported.detectedFormat
             },
+            diagnostics: imported.diagnostics || null,
             suggested: {
                 title: imported.title || "",
                 author: imported.author || "",
