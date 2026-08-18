@@ -612,6 +612,61 @@ function extractAuthorFromWikisourceImageInfo(imageInfo) {
     return "";
 }
 
+async function fetchWikisourceFilePagePreview(apiUrl, fileTitle) {
+    try {
+        const host = new URL(apiUrl).hostname;
+        const title = String(fileTitle || "").replace(/^File\s*:/i, "").replace(/^चित्र\s*:/iu, "").trim();
+        if (!title) return null;
+
+        const filePageUrl = `https://${host}/wiki/${encodeURIComponent(`चित्र:${title}`)}`;
+        const response = await axios.get(filePageUrl, {
+            timeout: 30000,
+            responseType: "text",
+            maxContentLength: 10 * 1024 * 1024,
+            headers: { "User-Agent": "MyLikith-Classics-Importer/1.0" }
+        });
+        const html = String(response.data || "");
+
+        // For PDF-backed Wikisource files the browser page contains a real
+        // first-page thumbnail even though the underlying file MIME is PDF.
+        // Prefer that thumbnail over the raw PDF URL because MyLikith cover
+        // fields are rendered as <img>.
+        const candidates = [];
+        const imgRegex = /<img\b[^>]*?(?:src|data-src)=["']([^"']+)["'][^>]*>/giu;
+        let match;
+        while ((match = imgRegex.exec(html)) !== null) {
+            let src = String(match[1] || "").trim();
+            if (src.startsWith("//")) src = `https:${src}`;
+            else if (src.startsWith("/")) src = `https://${host}${src}`;
+            if (!/^https?:\/\/upload\.wikimedia\.org\//i.test(src)) continue;
+            if (isBadWikisourceCoverUrl(src)) continue;
+            const lower = src.toLowerCase();
+            if (/\/thumb\//.test(lower) && /(?:\.pdf|page1-|\.jpg|\.jpeg|\.png|\.webp)/.test(lower)) {
+                candidates.push(src);
+            }
+        }
+
+        // Some skins expose the preview as a linked image rather than an img
+        // src. Accept the same Wikimedia thumbnail pattern from hrefs.
+        const hrefRegex = /href=["']([^"']+)["']/giu;
+        while ((match = hrefRegex.exec(html)) !== null) {
+            let href = String(match[1] || "").trim();
+            if (href.startsWith("//")) href = `https:${href}`;
+            if (!/^https?:\/\/upload\.wikimedia\.org\//i.test(href)) continue;
+            if (isBadWikisourceCoverUrl(href)) continue;
+            const lower = href.toLowerCase();
+            if (/\/thumb\//.test(lower) && /(?:\.pdf|page1-|\.jpg|\.jpeg|\.png|\.webp)/.test(lower)) {
+                candidates.push(href);
+            }
+        }
+
+        return candidates[0] || null;
+    } catch (error) {
+        console.warn(`Wikisource file-page preview detection failed for ${fileTitle}:`, error.message);
+        return null;
+    }
+}
+
 async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) {
     const pageStem = normalizeWikisourceFileStem(pageTitle);
     let coverImage = null;
@@ -631,6 +686,7 @@ async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) 
     for (const variant of titleVariants) {
         for (const ext of ["pdf", "djvu", "jpg", "jpeg", "png", "webp"]) {
             exactFileCandidates.push(`File:${variant}.${ext}`);
+            exactFileCandidates.push(`चित्र:${variant}.${ext}`);
         }
     }
 
@@ -660,10 +716,18 @@ async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) 
             if (!author) author = extractAuthorFromWikisourceImageInfo(info);
 
             const mime = String(info.mime || "").toLowerCase();
-            const candidateUrl = info.thumburl || info.url || null;
+            const candidateUrl = info.thumburl || null;
             if (!coverImage && candidateUrl && !isBadWikisourceCoverUrl(candidateUrl)
-                && (mime.startsWith("image/") || mime === "application/pdf")) {
+                && mime.startsWith("image/")) {
                 coverImage = candidateUrl;
+            }
+
+            // MediaWiki may return only the raw PDF URL for a PDF file.
+            // Resolve the file description page to obtain its first-page
+            // thumbnail, which is a real image URL suitable for MyLikith.
+            if (!coverImage && mime === "application/pdf") {
+                const preview = await fetchWikisourceFilePagePreview(apiUrl, fileTitle);
+                if (preview) coverImage = preview;
             }
             return Boolean(coverImage || author);
         } catch (error) {
