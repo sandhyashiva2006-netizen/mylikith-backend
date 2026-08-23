@@ -171,6 +171,14 @@ app.use(
     require("./routes/originals")
 );
 app.use(
+    "/api/audio",
+    require("./routes/audio")
+);
+app.use(
+    "/api/audio/media",
+    require("./routes/audio-media")
+);
+app.use(
     "/api/classics",
     require("./routes/classics")
 );
