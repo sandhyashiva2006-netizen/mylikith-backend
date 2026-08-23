@@ -709,5 +709,398 @@ router.post("/:id/view", async (req, res) => {
     }
 });
 
+/*
+=========================================================
+GET AUDIO CHAPTER PROGRESS
+GET /api/audio/chapters/:chapterId/progress
+=========================================================
+*/
+
+router.get(
+    "/chapters/:chapterId/progress",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+            }
+
+            const result =
+                await db.query(`
+                    SELECT
+                        id,
+                        user_id,
+                        chapter_id,
+                        position_seconds,
+                        duration_seconds,
+                        progress_percent,
+                        completed,
+                        updated_at
+
+                    FROM audio_chapter_progress
+
+                    WHERE
+                        user_id = $1
+                        AND chapter_id = $2
+
+                    LIMIT 1
+                `, [
+                    userId,
+                    chapterId
+                ]);
+
+            if (!result.rows.length) {
+
+                return res.json({
+                    success: true,
+                    progress: null
+                });
+
+            }
+
+            return res.json({
+                success: true,
+                progress: result.rows[0]
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET audio progress error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load audio progress."
+            });
+
+        }
+
+    }
+);
+
+
+/*
+=========================================================
+SAVE AUDIO CHAPTER PROGRESS
+POST /api/audio/chapters/:chapterId/progress
+=========================================================
+*/
+
+router.post(
+    "/chapters/:chapterId/progress",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+            }
+
+            let position =
+                Number(
+                    req.body.position_seconds
+                );
+
+            let duration =
+                Number(
+                    req.body.duration_seconds
+                );
+
+            if (
+                !Number.isFinite(position) ||
+                position < 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid position."
+                });
+            }
+
+            if (
+                !Number.isFinite(duration) ||
+                duration <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid duration."
+                });
+            }
+
+            /*
+            =================================================
+            CLAMP POSITION
+            =================================================
+            */
+
+            position =
+                Math.min(
+                    position,
+                    duration
+                );
+
+            /*
+            =================================================
+            ROUND VALUES
+            =================================================
+            */
+
+            position =
+                Math.round(
+                    position * 100
+                ) / 100;
+
+            duration =
+                Math.round(
+                    duration * 100
+                ) / 100;
+
+            let progressPercent =
+                (position / duration) * 100;
+
+            progressPercent =
+                Math.min(
+                    Math.max(
+                        progressPercent,
+                        0
+                    ),
+                    100
+                );
+
+            progressPercent =
+                Math.round(
+                    progressPercent * 100
+                ) / 100;
+
+            /*
+            =================================================
+            COMPLETION
+            =================================================
+            */
+
+            const completed =
+                progressPercent >= 98;
+
+            if (completed) {
+
+                position =
+                    duration;
+
+                progressPercent = 100;
+            }
+
+            /*
+            =================================================
+            UPSERT
+            =================================================
+            */
+
+            const result =
+                await db.query(`
+                    INSERT INTO audio_chapter_progress
+                    (
+                        user_id,
+                        chapter_id,
+                        position_seconds,
+                        duration_seconds,
+                        progress_percent,
+                        completed,
+                        updated_at
+                    )
+
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        $6,
+                        NOW()
+                    )
+
+                    ON CONFLICT
+                        (user_id, chapter_id)
+
+                    DO UPDATE SET
+                        position_seconds =
+                            EXCLUDED.position_seconds,
+
+                        duration_seconds =
+                            EXCLUDED.duration_seconds,
+
+                        progress_percent =
+                            EXCLUDED.progress_percent,
+
+                        completed =
+                            EXCLUDED.completed,
+
+                        updated_at =
+                            NOW()
+
+                    RETURNING
+                        id,
+                        user_id,
+                        chapter_id,
+                        position_seconds,
+                        duration_seconds,
+                        progress_percent,
+                        completed,
+                        updated_at
+                `, [
+                    userId,
+                    chapterId,
+                    position,
+                    duration,
+                    progressPercent,
+                    completed
+                ]);
+
+            return res.json({
+                success: true,
+                progress: result.rows[0]
+            });
+
+        } catch (error) {
+
+            console.error(
+                "POST audio progress error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to save audio progress."
+            });
+
+        }
+
+    }
+);
+
+
+/*
+=========================================================
+CONTINUE LISTENING
+GET /api/audio/continue-listening
+=========================================================
+*/
+
+router.get(
+    "/continue-listening",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const userId =
+                Number(req.user.id);
+
+            const result =
+                await db.query(`
+                    SELECT
+                        p.id,
+                        p.chapter_id,
+                        p.position_seconds,
+                        p.duration_seconds,
+                        p.progress_percent,
+                        p.completed,
+                        p.updated_at,
+
+                        ac.audio_novel_id,
+                        ac.chapter_no,
+                        ac.title AS chapter_title,
+                        ac.audio_duration_seconds,
+                        ac.audio_status,
+
+                        an.title AS audio_novel_title,
+                        an.cover_url,
+                        an.language,
+                        an.category
+
+                    FROM audio_chapter_progress p
+
+                    JOIN audio_chapters ac
+                        ON ac.id = p.chapter_id
+
+                    JOIN audio_novels an
+                        ON an.id = ac.audio_novel_id
+
+                    WHERE
+                        p.user_id = $1
+
+                        AND p.completed = FALSE
+
+                        AND an.publish_status = 'published'
+
+                        AND an.visibility = 'public'
+
+                        AND ac.is_draft = FALSE
+
+                        AND ac.is_published = TRUE
+
+                    ORDER BY
+                        p.updated_at DESC
+
+                    LIMIT 20
+                `, [
+                    userId
+                ]);
+
+            return res.json({
+                success: true,
+                listening: result.rows
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET continue listening error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load continue listening."
+            });
+
+        }
+
+    }
+);
+
 
 module.exports = router;
