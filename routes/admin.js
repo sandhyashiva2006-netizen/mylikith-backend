@@ -1716,6 +1716,545 @@ router.post(
 
 /*
 =========================================================
+ADMIN UPDATE AUDIO NOVEL
+PUT /api/admin/audio/novels/:id
+=========================================================
+*/
+
+router.put(
+    "/audio/novels/:id",
+    async (req, res) => {
+
+        try {
+
+            const novelId =
+                Number(req.params.id);
+
+            if (
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid Audio Novel ID."
+                });
+
+            }
+
+            const {
+                title,
+                description,
+                cover_url,
+                language,
+                category,
+                categories,
+                content_type,
+                status,
+                publish_status,
+                visibility,
+                premium_only,
+                featured,
+                release_date
+            } = req.body;
+
+
+            if (
+                !title ||
+                !String(title).trim()
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Audio Novel title is required."
+                });
+
+            }
+
+
+            const categoryArray =
+                Array.isArray(categories)
+                    ? categories
+                        .map(item => String(item).trim())
+                        .filter(Boolean)
+                    : [];
+
+
+            const result =
+                await db.query(
+                    `
+                    UPDATE audio_novels
+
+                    SET
+                        title = $1,
+                        description = $2,
+                        cover_url = $3,
+                        language = $4,
+                        category = $5,
+                        categories = $6,
+                        content_type = $7,
+                        status = $8,
+                        publish_status = $9,
+                        visibility = $10,
+                        premium_only = $11,
+                        featured = $12,
+                        release_date = $13,
+                        updated_at = NOW()
+
+                    WHERE id = $14
+
+                    RETURNING *
+                    `,
+                    [
+
+                        String(title).trim(),
+
+                        description
+                            ? String(description).trim()
+                            : null,
+
+                        cover_url
+                            ? String(cover_url).trim()
+                            : null,
+
+                        language
+                            ? String(language).trim()
+                            : null,
+
+                        category
+                            ? String(category).trim()
+                            : null,
+
+                        categoryArray,
+
+                        content_type || "story",
+
+                        status || "ongoing",
+
+                        publish_status || "draft",
+
+                        visibility || "private",
+
+                        Boolean(premium_only),
+
+                        Boolean(featured),
+
+                        release_date || null,
+
+                        novelId
+
+                    ]
+                );
+
+
+            if (!result.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio Novel not found."
+                });
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    "Audio Novel updated successfully.",
+
+                audio:
+                    result.rows[0]
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Admin Audio Novel UPDATE error:",
+                error
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to update Audio Novel."
+
+            });
+
+        }
+
+    }
+);
+
+
+/*
+=========================================================
+ADMIN PUBLISH / UNPUBLISH AUDIO NOVEL
+PATCH /api/admin/audio/novels/:id/publish
+=========================================================
+*/
+
+router.patch(
+    "/audio/novels/:id/publish",
+    async (req, res) => {
+
+        try {
+
+            const novelId =
+                Number(req.params.id);
+
+            if (
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid Audio Novel ID."
+                });
+
+            }
+
+
+            const published =
+                Boolean(req.body.published);
+
+
+            const result =
+                await db.query(
+                    `
+                    UPDATE audio_novels
+
+                    SET
+                        publish_status = $1,
+                        visibility = $2,
+                        status = $3,
+                        updated_at = NOW()
+
+                    WHERE id = $4
+
+                    RETURNING
+                        id,
+                        title,
+                        publish_status,
+                        visibility,
+                        status,
+                        featured,
+                        updated_at
+                    `,
+                    [
+
+                        published
+                            ? "published"
+                            : "draft",
+
+                        published
+                            ? "public"
+                            : "private",
+
+                        published
+                            ? "published"
+                            : "draft",
+
+                        novelId
+
+                    ]
+                );
+
+
+            if (!result.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio Novel not found."
+                });
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    published
+                        ? "Audio Novel published successfully."
+                        : "Audio Novel unpublished successfully.",
+
+                audio:
+                    result.rows[0]
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Admin Audio Novel PUBLISH error:",
+                error
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to update Audio Novel publish status."
+
+            });
+
+        }
+
+    }
+);
+
+
+/*
+=========================================================
+ADMIN FEATURE / UNFEATURE AUDIO NOVEL
+PATCH /api/admin/audio/novels/:id/featured
+=========================================================
+*/
+
+router.patch(
+    "/audio/novels/:id/featured",
+    async (req, res) => {
+
+        try {
+
+            const novelId =
+                Number(req.params.id);
+
+            if (
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid Audio Novel ID."
+                });
+
+            }
+
+
+            const featured =
+                Boolean(req.body.featured);
+
+
+            const result =
+                await db.query(
+                    `
+                    UPDATE audio_novels
+
+                    SET
+                        featured = $1,
+                        updated_at = NOW()
+
+                    WHERE id = $2
+
+                    RETURNING
+                        id,
+                        title,
+                        featured,
+                        updated_at
+                    `,
+                    [
+                        featured,
+                        novelId
+                    ]
+                );
+
+
+            if (!result.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio Novel not found."
+                });
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    featured
+                        ? "Audio Novel featured successfully."
+                        : "Audio Novel removed from featured.",
+
+                audio:
+                    result.rows[0]
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Admin Audio Novel FEATURED error:",
+                error
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to update featured status."
+
+            });
+
+        }
+
+    }
+);
+
+
+/*
+=========================================================
+ADMIN DELETE AUDIO NOVEL
+DELETE /api/admin/audio/novels/:id
+=========================================================
+*/
+
+router.delete(
+    "/audio/novels/:id",
+    async (req, res) => {
+
+        try {
+
+            const novelId =
+                Number(req.params.id);
+
+            if (
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid Audio Novel ID."
+                });
+
+            }
+
+
+            /*
+            -------------------------------------------------
+            Prevent accidental deletion when chapters exist.
+            Chapters should be handled first.
+            -------------------------------------------------
+            */
+
+            const chapterCheck =
+                await db.query(
+                    `
+                    SELECT
+                        COUNT(*)::int AS chapter_count
+
+                    FROM audio_chapters
+
+                    WHERE audio_novel_id = $1
+                    `,
+                    [
+                        novelId
+                    ]
+                );
+
+
+            const chapterCount =
+                chapterCheck.rows[0]?.chapter_count || 0;
+
+
+            if (chapterCount > 0) {
+
+                return res.status(409).json({
+
+                    success: false,
+
+                    message:
+                        "This Audio Novel has chapters. Delete its chapters first."
+
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    DELETE FROM audio_novels
+
+                    WHERE id = $1
+
+                    RETURNING
+                        id,
+                        title
+                    `,
+                    [
+                        novelId
+                    ]
+                );
+
+
+            if (!result.rows.length) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "Audio Novel not found."
+
+                });
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    "Audio Novel deleted successfully.",
+
+                audio:
+                    result.rows[0]
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Admin Audio Novel DELETE error:",
+                error
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to delete Audio Novel."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
 ADMIN CREATE AUDIO CHAPTER
 POST /api/admin/audio/chapters
 =========================================================
