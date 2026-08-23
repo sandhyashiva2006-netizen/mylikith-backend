@@ -978,4 +978,146 @@ router.get(
     }
 );
 
+/*
+=========================================================
+ADMIN AUDIO COMMENTS
+GET /api/admin/audio/comments
+=========================================================
+*/
+
+router.get(
+    "/audio/comments",
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(`
+                    SELECT
+                        acc.id,
+                        acc.chapter_id,
+                        acc.user_id,
+                        acc.comment,
+                        acc.created_at,
+                        acc.updated_at,
+
+                        ac.chapter_no,
+                        ac.title AS chapter_title,
+                        ac.audio_novel_id,
+
+                        an.title AS audio_novel_title,
+
+                        u.name AS user_name,
+                        u.profile_image
+
+                    FROM audio_chapter_comments acc
+
+                    JOIN audio_chapters ac
+                        ON ac.id = acc.chapter_id
+
+                    JOIN audio_novels an
+                        ON an.id = ac.audio_novel_id
+
+                    JOIN users u
+                        ON u.id = acc.user_id
+
+                    ORDER BY
+                        acc.created_at DESC
+                `);
+
+            return res.json({
+                success: true,
+                comments: result.rows
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET /api/admin/audio/comments error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load admin audio comments."
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+ADMIN DELETE AUDIO COMMENT
+DELETE /api/admin/audio/comments/:commentId
+=========================================================
+*/
+
+router.delete(
+    "/audio/comments/:commentId",
+    async (req, res) => {
+
+        try {
+
+            const commentId =
+                Number(req.params.commentId);
+
+            if(
+                !Number.isInteger(commentId) ||
+                commentId <= 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid comment ID."
+                });
+
+            }
+
+            const result =
+                await db.query(`
+                    DELETE FROM audio_chapter_comments
+                    WHERE id = $1
+                    RETURNING id
+                `, [
+                    commentId
+                ]);
+
+            if(!result.rows.length){
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio comment not found."
+                });
+
+            }
+
+            return res.json({
+                success: true,
+                message:
+                    "Audio comment deleted successfully."
+            });
+
+        } catch(error) {
+
+            console.error(
+                "DELETE /api/admin/audio/comments error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to delete audio comment."
+            });
+
+        }
+
+    }
+);
+
+
+
 module.exports = router;
