@@ -31,8 +31,9 @@ router.get("/", async (req, res) => {
         const offset = (pageNumber - 1) * limitNumber;
 
         const conditions = [
-            "an.status = 'published'"
-        ];
+    "an.publish_status = 'published'",
+    "an.visibility = 'public'"
+];	
 
         const values = [];
         let parameterIndex = 1;
@@ -166,8 +167,8 @@ router.get("/", async (req, res) => {
                 an.created_at,
                 an.updated_at,
 
-                u.username AS writer_username,
-                u.display_name AS writer_display_name
+                u.name AS writer_name,
+u.profile_image AS writer_profile_image
 
             FROM audio_novels an
 
@@ -241,8 +242,8 @@ router.get("/featured", async (req, res) => {
                 an.created_by,
                 an.created_at,
 
-                u.username AS writer_username,
-                u.display_name AS writer_display_name
+                u.name AS writer_name,
+u.profile_image AS writer_profile_image
 
             FROM audio_novels an
 
@@ -250,8 +251,9 @@ router.get("/featured", async (req, res) => {
                 ON u.id = an.created_by
 
             WHERE
-                an.status = 'published'
-                AND an.featured = TRUE
+    an.publish_status = 'published'
+    AND an.visibility = 'public'
+    AND an.featured = TRUE
 
             ORDER BY
                 an.created_at DESC
@@ -411,8 +413,8 @@ router.get("/:id", async (req, res) => {
                 an.created_at,
                 an.updated_at,
 
-                u.username AS writer_username,
-                u.display_name AS writer_display_name
+                u.name AS writer_name,
+u.profile_image AS writer_profile_image
 
             FROM audio_novels an
 
@@ -420,8 +422,9 @@ router.get("/:id", async (req, res) => {
                 ON u.id = an.created_by
 
             WHERE
-                an.id = $1
-                AND an.status = 'published'
+    an.id = $1
+    AND an.publish_status = 'published'
+    AND an.visibility = 'public'
         `, [audioId]);
 
         if (!result.rows.length) {
@@ -477,10 +480,11 @@ router.get("/:id/chapters", async (req, res) => {
         const novelCheck =
             await db.query(`
                 SELECT id
-                FROM audio_novels
-                WHERE
-                    id = $1
-                    AND status = 'published'
+FROM audio_novels
+WHERE
+    id = $1
+    AND publish_status = 'published'
+    AND visibility = 'public'
             `, [audioId]);
 
         if (!novelCheck.rows.length) {
@@ -608,7 +612,8 @@ router.get("/chapter/:chapterId", async (req, res) => {
                 ac.id = $1
                 AND ac.is_published = TRUE
                 AND ac.is_draft = FALSE
-                AND an.status = 'published'
+                AND an.publish_status = 'published'
+AND an.visibility = 'public'
         `, [chapterId]);
 
         if (!result.rows.length) {
@@ -669,8 +674,9 @@ router.post("/:id/view", async (req, res) => {
                 updated_at = NOW()
 
             WHERE
-                id = $1
-                AND status = 'published'
+    id = $1
+    AND publish_status = 'published'
+    AND visibility = 'public'
 
             RETURNING
                 id,
