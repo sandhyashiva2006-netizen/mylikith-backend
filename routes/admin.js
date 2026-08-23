@@ -811,5 +811,84 @@ router.put("/pages/:slug", async (req, res) => {
 
 });
 
+/*
+=========================================================
+ADMIN AUDIO NOVELS
+GET /api/admin/audio/novels
+=========================================================
+*/
+
+router.get(
+    "/audio/novels",
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(`
+                    SELECT
+                        an.id,
+                        an.title,
+                        an.description,
+                        an.cover_url,
+                        an.language,
+                        an.category,
+                        an.categories,
+                        an.content_type,
+                        an.status,
+                        an.publish_status,
+                        an.visibility,
+                        an.premium_only,
+                        an.featured,
+                        an.views,
+                        an.likes,
+                        an.rating,
+                        an.rating_count,
+                        an.release_date,
+                        an.created_by,
+                        an.created_at,
+                        an.updated_at,
+
+                        u.name AS writer_name,
+                        u.profile_image AS writer_profile_image
+
+                    FROM audio_novels an
+
+                    LEFT JOIN users u
+                        ON u.id = an.created_by
+
+                    ORDER BY
+                        an.created_at DESC
+                `);
+
+
+            return res.json({
+
+                success: true,
+
+                audio:
+                    result.rows
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "GET /api/admin/audio/novels error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load admin audio novels."
+            });
+
+        }
+
+    }
+);
+
 
 module.exports = router;
