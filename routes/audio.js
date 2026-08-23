@@ -1340,5 +1340,268 @@ router.post(
     }
 );
 
+/*
+=========================================================
+GET AUDIO CHAPTER RATING
+GET /api/audio/chapters/:chapterId/rating
+=========================================================
+*/
+
+router.get(
+    "/chapters/:chapterId/rating",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+            }
+
+            const chapter =
+                await db.query(`
+                    SELECT id
+                    FROM audio_chapters
+                    WHERE
+                        id = $1
+                        AND is_published = TRUE
+                        AND is_draft = FALSE
+                `, [chapterId]);
+
+            if (!chapter.rows.length) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio chapter not found."
+                });
+            }
+
+            const userRating =
+                await db.query(`
+                    SELECT
+                        rating
+                    FROM audio_chapter_ratings
+                    WHERE
+                        user_id = $1
+                        AND chapter_id = $2
+                    LIMIT 1
+                `, [
+                    userId,
+                    chapterId
+                ]);
+
+            const aggregate =
+                await db.query(`
+                    SELECT
+                        ROUND(
+                            COALESCE(
+                                AVG(rating),
+                                0
+                            ),
+                            2
+                        ) AS average_rating,
+                        COUNT(*)::int AS rating_count
+                    FROM audio_chapter_ratings
+                    WHERE chapter_id = $1
+                `, [chapterId]);
+
+            return res.json({
+                success: true,
+
+                rating:
+                    userRating.rows.length
+                        ? Number(
+                            userRating.rows[0].rating
+                        )
+                        : null,
+
+                average_rating:
+                    Number(
+                        aggregate.rows[0].average_rating || 0
+                    ),
+
+                rating_count:
+                    Number(
+                        aggregate.rows[0].rating_count || 0
+                    )
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET audio chapter rating error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to load audio rating."
+            });
+        }
+    }
+);
+
+
+/*
+=========================================================
+SUBMIT / UPDATE AUDIO CHAPTER RATING
+POST /api/audio/chapters/:chapterId/rating
+=========================================================
+*/
+
+router.post(
+    "/chapters/:chapterId/rating",
+    auth,
+    async (req, res) => {
+
+        const client =
+            await db.connect();
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            const rating =
+                Number(req.body.rating);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+            }
+
+            if (
+                !Number.isInteger(rating) ||
+                rating < 1 ||
+                rating > 5
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Rating must be between 1 and 5."
+                });
+            }
+
+            await client.query("BEGIN");
+
+            const chapter =
+                await client.query(`
+                    SELECT id
+                    FROM audio_chapters
+                    WHERE
+                        id = $1
+                        AND is_published = TRUE
+                        AND is_draft = FALSE
+                `, [chapterId]);
+
+            if (!chapter.rows.length) {
+
+                await client.query("ROLLBACK");
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio chapter not found."
+                });
+            }
+
+            await client.query(`
+                INSERT INTO audio_chapter_ratings
+                (
+                    user_id,
+                    chapter_id,
+                    rating,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3,
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (
+                    user_id,
+                    chapter_id
+                )
+                DO UPDATE SET
+                    rating = EXCLUDED.rating,
+                    updated_at = NOW()
+            `, [
+                userId,
+                chapterId,
+                rating
+            ]);
+
+            const aggregate =
+                await client.query(`
+                    SELECT
+                        ROUND(
+                            COALESCE(
+                                AVG(rating),
+                                0
+                            ),
+                            2
+                        ) AS average_rating,
+                        COUNT(*)::int AS rating_count
+                    FROM audio_chapter_ratings
+                    WHERE chapter_id = $1
+                `, [chapterId]);
+
+            await client.query("COMMIT");
+
+            return res.json({
+                success: true,
+                rating,
+                average_rating:
+                    Number(
+                        aggregate.rows[0].average_rating || 0
+                    ),
+                rating_count:
+                    Number(
+                        aggregate.rows[0].rating_count || 0
+                    )
+            });
+
+        } catch (error) {
+
+            await client.query("ROLLBACK");
+
+            console.error(
+                "POST audio chapter rating error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to save audio rating."
+            });
+
+        } finally {
+
+            client.release();
+        }
+    }
+);
 
 module.exports = router;
