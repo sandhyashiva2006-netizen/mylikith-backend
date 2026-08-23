@@ -1489,6 +1489,190 @@ router.patch(
     }
 );
 
+/*
+=========================================================
+ADMIN CREATE AUDIO NOVEL
+POST /api/admin/audio/novels
+=========================================================
+*/
+
+router.post(
+    "/audio/novels",
+    async (req, res) => {
+
+        try {
+
+            const {
+                title,
+                description,
+                cover_url,
+                language,
+                category,
+                categories,
+                content_type,
+                status,
+                publish_status,
+                visibility,
+                premium_only,
+                featured,
+                release_date
+            } = req.body;
+
+
+            if(
+                !title ||
+                !title.trim()
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Audio Novel title is required."
+                });
+
+            }
+
+
+            const categoryArray =
+                Array.isArray(categories)
+                    ? categories
+                        .map(
+                            item =>
+                                String(item).trim()
+                        )
+                        .filter(Boolean)
+                    : [];
+
+
+            const result =
+                await db.query(
+                    `
+                    INSERT INTO audio_novels (
+
+                        title,
+                        description,
+                        cover_url,
+                        language,
+                        category,
+                        categories,
+                        content_type,
+                        status,
+                        publish_status,
+                        visibility,
+                        premium_only,
+                        featured,
+                        release_date,
+                        created_by
+
+                    )
+
+                    VALUES (
+
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        $6,
+                        $7,
+                        $8,
+                        $9,
+                        $10,
+                        $11,
+                        $12,
+                        $13,
+                        $14
+
+                    )
+
+                    RETURNING *
+                    `,
+                    [
+
+                        title.trim(),
+
+                        description
+                            ? description.trim()
+                            : null,
+
+                        cover_url
+                            ? cover_url.trim()
+                            : null,
+
+                        language
+                            ? language.trim()
+                            : null,
+
+                        category
+                            ? category.trim()
+                            : null,
+
+                        categoryArray,
+
+                        content_type ||
+                            "story",
+
+                        status ||
+                            "ongoing",
+
+                        publish_status ||
+                            "draft",
+
+                        visibility ||
+                            "private",
+
+                        Boolean(
+                            premium_only
+                        ),
+
+                        Boolean(
+                            featured
+                        ),
+
+                        release_date ||
+                            null,
+
+                        req.user.id
+
+                    ]
+                );
+
+
+            return res.status(201).json({
+
+                success: true,
+
+                message:
+                    "Audio Novel created successfully.",
+
+                audio:
+                    result.rows[0]
+
+            });
+
+
+        } catch(error){
+
+            console.error(
+                "Admin Audio Novel CREATE error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to create Audio Novel."
+
+            });
+
+        }
+
+    }
+);
+
 
 
 module.exports = router;
