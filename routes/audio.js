@@ -969,15 +969,8 @@ router.post(
             =================================================
             */
 
-            position =
-                Math.round(
-                    position * 100
-                ) / 100;
-
-            duration =
-                Math.round(
-                    duration * 100
-                ) / 100;
+position = Math.round(position);
+duration = Math.round(duration);
 
             let progressPercent =
                 (position / duration) * 100;
