@@ -1730,7 +1730,8 @@ router.post(
             if (!chapter.rows.length) {
                 return res.status(404).json({
                     success: false,
-                    message: "Audio chapter not found."
+                    message:
+                        "Audio chapter not found."
                 });
             }
 
@@ -1768,24 +1769,22 @@ router.post(
             const user =
                 await db.query(`
                     SELECT
-                        name,
-                        username,
-                        profile_image
+                        name
                     FROM users
                     WHERE id = $1
                 `, [userId]);
 
             return res.status(201).json({
+
                 success: true,
+
                 comment: {
                     ...result.rows[0],
+
                     name:
-                        user.rows[0]?.name || null,
-                    username:
-                        user.rows[0]?.username || null,
-                    profile_image:
-                        user.rows[0]?.profile_image || null
+                        user.rows[0]?.name || null
                 }
+
             });
 
         } catch (error) {
@@ -1797,7 +1796,8 @@ router.post(
 
             return res.status(500).json({
                 success: false,
-                message: "Failed to add audio comment."
+                message:
+                    "Failed to add audio comment."
             });
         }
     }
