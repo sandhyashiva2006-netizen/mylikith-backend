@@ -1882,4 +1882,206 @@ router.delete(
     }
 );
 
+/*
+=========================================================
+REPORT AUDIO CHAPTER COMMENT
+POST /api/audio/comments/:commentId/report
+=========================================================
+*/
+
+router.post(
+    "/comments/:commentId/report",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const commentId =
+                Number(req.params.commentId);
+
+            const reporterUserId =
+                Number(req.user.id);
+
+            const reason =
+                String(
+                    req.body.reason || ""
+                ).trim();
+
+            if (
+                !Number.isInteger(commentId) ||
+                commentId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid comment ID."
+                });
+            }
+
+            if (!reason) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Please provide a report reason."
+                });
+            }
+
+            if (reason.length > 1000) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Report reason cannot exceed 1000 characters."
+                });
+            }
+
+
+            /*
+            ---------------------------------------------
+            VERIFY COMMENT
+            ---------------------------------------------
+            */
+
+            const comment =
+                await db.query(`
+                    SELECT
+                        id,
+                        chapter_id,
+                        user_id
+                    FROM audio_chapter_comments
+                    WHERE id = $1
+                    LIMIT 1
+                `, [commentId]);
+
+
+            if (!comment.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Comment not found."
+                });
+
+            }
+
+
+            /*
+            ---------------------------------------------
+            PREVENT REPORTING OWN COMMENT
+            ---------------------------------------------
+            */
+
+            if (
+                Number(
+                    comment.rows[0].user_id
+                ) === reporterUserId
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "You cannot report your own comment."
+                });
+
+            }
+
+
+            /*
+            ---------------------------------------------
+            PREVENT DUPLICATE REPORT
+            ---------------------------------------------
+            */
+
+            const existing =
+                await db.query(`
+                    SELECT id
+                    FROM audio_chapter_comment_reports
+                    WHERE
+                        comment_id = $1
+                        AND reporter_user_id = $2
+                    LIMIT 1
+                `, [
+                    commentId,
+                    reporterUserId
+                ]);
+
+
+            if (existing.rows.length) {
+
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "You have already reported this comment."
+                });
+
+            }
+
+
+            /*
+            ---------------------------------------------
+            CREATE REPORT
+            ---------------------------------------------
+            */
+
+            const result =
+                await db.query(`
+                    INSERT INTO audio_chapter_comment_reports
+                    (
+                        comment_id,
+                        reporter_user_id,
+                        reason,
+                        status,
+                        created_at
+                    )
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        $3,
+                        'pending',
+                        NOW()
+                    )
+                    RETURNING
+                        id,
+                        comment_id,
+                        reporter_user_id,
+                        reason,
+                        status,
+                        created_at
+                `, [
+                    commentId,
+                    reporterUserId,
+                    reason
+                ]);
+
+
+            return res.status(201).json({
+
+                success: true,
+
+                message:
+                    "Comment reported successfully.",
+
+                report:
+                    result.rows[0]
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "POST audio comment report error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to report audio comment."
+            });
+
+        }
+
+    }
+);
+
+
 module.exports = router;
