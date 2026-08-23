@@ -1118,6 +1118,377 @@ router.delete(
     }
 );
 
+/*
+=========================================================
+ADMIN AUDIO REPORTS
+GET /api/admin/audio/reports
+=========================================================
+*/
+
+router.get(
+    "/audio/reports",
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(`
+                    SELECT *
+                    FROM (
+
+                        /* ---------------------------------
+                           AUDIO NOVEL COMMENT REPORTS
+                        --------------------------------- */
+
+                        SELECT
+                            acr.id AS report_id,
+
+                            'audio_comment'
+                                AS report_type,
+
+                            acr.comment_id,
+
+                            acr.reporter_user_id,
+
+                            acr.reason,
+
+                            acr.status,
+
+                            acr.reviewed_by,
+
+                            acr.reviewed_at,
+
+                            acr.created_at,
+
+                            ac.comment,
+
+                            NULL::bigint
+                                AS chapter_id,
+
+                            NULL::integer
+                                AS chapter_no,
+
+                            NULL::text
+                                AS chapter_title,
+
+                            an.id
+                                AS audio_novel_id,
+
+                            an.title
+                                AS audio_novel_title,
+
+                            reporter.name
+                                AS reporter_name,
+
+                            reporter.profile_image
+                                AS reporter_profile_image,
+
+                            commenter.name
+                                AS commenter_name
+
+                        FROM audio_comment_reports acr
+
+                        JOIN audio_comments ac
+                            ON ac.id = acr.comment_id
+
+                        JOIN audio_novels an
+                            ON an.id = ac.audio_novel_id
+
+                        JOIN users reporter
+                            ON reporter.id =
+                                acr.reporter_user_id
+
+                        JOIN users commenter
+                            ON commenter.id =
+                                ac.user_id
+
+
+                        UNION ALL
+
+
+                        /* ---------------------------------
+                           AUDIO CHAPTER COMMENT REPORTS
+                        --------------------------------- */
+
+                        SELECT
+                            accr.id AS report_id,
+
+                            'audio_chapter_comment'
+                                AS report_type,
+
+                            accr.comment_id,
+
+                            accr.reporter_user_id,
+
+                            accr.reason,
+
+                            accr.status,
+
+                            accr.reviewed_by,
+
+                            accr.reviewed_at,
+
+                            accr.created_at,
+
+                            acc.comment,
+
+                            ch.id
+                                AS chapter_id,
+
+                            ch.chapter_no,
+
+                            ch.title
+                                AS chapter_title,
+
+                            an.id
+                                AS audio_novel_id,
+
+                            an.title
+                                AS audio_novel_title,
+
+                            reporter.name
+                                AS reporter_name,
+
+                            reporter.profile_image
+                                AS reporter_profile_image,
+
+                            commenter.name
+                                AS commenter_name
+
+                        FROM audio_chapter_comment_reports accr
+
+                        JOIN audio_chapter_comments acc
+                            ON acc.id =
+                                accr.comment_id
+
+                        JOIN audio_chapters ch
+                            ON ch.id =
+                                acc.chapter_id
+
+                        JOIN audio_novels an
+                            ON an.id =
+                                ch.audio_novel_id
+
+                        JOIN users reporter
+                            ON reporter.id =
+                                accr.reporter_user_id
+
+                        JOIN users commenter
+                            ON commenter.id =
+                                acc.user_id
+
+                    ) reports
+
+                    ORDER BY
+                        CASE
+                            WHEN LOWER(
+                                COALESCE(
+                                    reports.status,
+                                    'pending'
+                                )
+                            ) = 'pending'
+                            THEN 0
+                            ELSE 1
+                        END,
+
+                        reports.created_at DESC
+                `);
+
+
+            return res.json({
+
+                success: true,
+
+                reports:
+                    result.rows
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "GET /api/admin/audio/reports error:",
+                error
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Failed to load audio reports."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+ADMIN UPDATE AUDIO REPORT
+PATCH /api/admin/audio/reports/:reportType/:reportId
+=========================================================
+*/
+
+router.patch(
+    "/audio/reports/:reportType/:reportId",
+    async (req, res) => {
+
+        try {
+
+            const reportType =
+                String(
+                    req.params.reportType ||
+                    ""
+                );
+
+            const reportId =
+                Number(
+                    req.params.reportId
+                );
+
+            const status =
+                String(
+                    req.body.status ||
+                    ""
+                )
+                .trim()
+                .toLowerCase();
+
+
+            if(
+                !Number.isInteger(reportId) ||
+                reportId <= 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid report ID."
+                });
+
+            }
+
+
+            if(
+                ![
+                    "resolved",
+                    "rejected"
+                ].includes(status)
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid report status."
+                });
+
+            }
+
+
+            let table;
+
+
+            if(
+                reportType ===
+                "audio_comment"
+            ){
+
+                table =
+                    "audio_comment_reports";
+
+            }else if(
+                reportType ===
+                "audio_chapter_comment"
+            ){
+
+                table =
+                    "audio_chapter_comment_reports";
+
+            }else{
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid report type."
+                });
+
+            }
+
+
+            const result =
+                await db.query(
+                    `
+                    UPDATE ${table}
+
+                    SET
+                        status = $1,
+                        reviewed_by = $2,
+                        reviewed_at = NOW()
+
+                    WHERE id = $3
+
+                    RETURNING
+                        id,
+                        status,
+                        reviewed_by,
+                        reviewed_at
+                    `,
+                    [
+                        status,
+                        req.user.id,
+                        reportId
+                    ]
+                );
+
+
+            if(
+                !result.rows.length
+            ){
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Report not found."
+                });
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                report:
+                    result.rows[0]
+
+            });
+
+
+        } catch(error) {
+
+            console.error(
+                "PATCH /api/admin/audio/reports error:",
+                error
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Failed to update audio report."
+
+            });
+
+        }
+
+    }
+);
+
 
 
 module.exports = router;
