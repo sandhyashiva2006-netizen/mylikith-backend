@@ -1639,9 +1639,7 @@ router.get(
                         c.comment,
                         c.created_at,
                         c.updated_at,
-                        u.name,
-                        u.username,
-                        u.profile_image
+                        u.name
                     FROM audio_chapter_comments c
                     LEFT JOIN users u
                         ON u.id = c.user_id
