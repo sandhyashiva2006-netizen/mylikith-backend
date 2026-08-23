@@ -368,6 +368,97 @@ router.get("/categories", async (req, res) => {
     }
 });
 
+/*
+=========================================================
+CONTINUE LISTENING
+GET /api/audio/continue-listening
+=========================================================
+*/
+
+router.get(
+    "/continue-listening",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const userId =
+                Number(req.user.id);
+
+            const result =
+                await db.query(`
+                    SELECT
+                        p.id,
+                        p.chapter_id,
+                        p.position_seconds,
+                        p.duration_seconds,
+                        p.progress_percent,
+                        p.completed,
+                        p.updated_at,
+
+                        ac.audio_novel_id,
+                        ac.chapter_no,
+                        ac.title AS chapter_title,
+                        ac.audio_duration_seconds,
+                        ac.audio_status,
+
+                        an.title AS audio_novel_title,
+                        an.cover_url,
+                        an.language,
+                        an.category
+
+                    FROM audio_chapter_progress p
+
+                    JOIN audio_chapters ac
+                        ON ac.id = p.chapter_id
+
+                    JOIN audio_novels an
+                        ON an.id = ac.audio_novel_id
+
+                    WHERE
+                        p.user_id = $1
+
+                        AND p.completed = FALSE
+
+                        AND an.publish_status = 'published'
+
+                        AND an.visibility = 'public'
+
+                        AND ac.is_draft = FALSE
+
+                        AND ac.is_published = TRUE
+
+                    ORDER BY
+                        p.updated_at DESC
+
+                    LIMIT 20
+                `, [
+                    userId
+                ]);
+
+            return res.json({
+                success: true,
+                listening: result.rows
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET continue listening error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load continue listening."
+            });
+
+        }
+
+    }
+);
+
 
 /*
 =========================================================
@@ -1013,96 +1104,6 @@ router.post(
 );
 
 
-/*
-=========================================================
-CONTINUE LISTENING
-GET /api/audio/continue-listening
-=========================================================
-*/
-
-router.get(
-    "/continue-listening",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            const userId =
-                Number(req.user.id);
-
-            const result =
-                await db.query(`
-                    SELECT
-                        p.id,
-                        p.chapter_id,
-                        p.position_seconds,
-                        p.duration_seconds,
-                        p.progress_percent,
-                        p.completed,
-                        p.updated_at,
-
-                        ac.audio_novel_id,
-                        ac.chapter_no,
-                        ac.title AS chapter_title,
-                        ac.audio_duration_seconds,
-                        ac.audio_status,
-
-                        an.title AS audio_novel_title,
-                        an.cover_url,
-                        an.language,
-                        an.category
-
-                    FROM audio_chapter_progress p
-
-                    JOIN audio_chapters ac
-                        ON ac.id = p.chapter_id
-
-                    JOIN audio_novels an
-                        ON an.id = ac.audio_novel_id
-
-                    WHERE
-                        p.user_id = $1
-
-                        AND p.completed = FALSE
-
-                        AND an.publish_status = 'published'
-
-                        AND an.visibility = 'public'
-
-                        AND ac.is_draft = FALSE
-
-                        AND ac.is_published = TRUE
-
-                    ORDER BY
-                        p.updated_at DESC
-
-                    LIMIT 20
-                `, [
-                    userId
-                ]);
-
-            return res.json({
-                success: true,
-                listening: result.rows
-            });
-
-        } catch (error) {
-
-            console.error(
-                "GET continue listening error:",
-                error
-            );
-
-            return res.status(500).json({
-                success: false,
-                message:
-                    "Failed to load continue listening."
-            });
-
-        }
-
-    }
-);
 
 
 module.exports = router;
