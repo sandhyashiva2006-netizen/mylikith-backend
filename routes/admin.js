@@ -890,5 +890,92 @@ router.get(
     }
 );
 
+/*
+=========================================================
+ADMIN AUDIO CHAPTERS
+GET /api/admin/audio/chapters
+=========================================================
+*/
+
+router.get(
+    "/audio/chapters",
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await db.query(`
+                    SELECT
+                        ac.id,
+                        ac.audio_novel_id,
+                        ac.chapter_no,
+                        ac.title,
+
+                        ac.audio_provider,
+                        ac.audio_mime_type,
+                        ac.audio_size_bytes,
+                        ac.audio_duration_seconds,
+                        ac.audio_status,
+
+                        ac.is_premium,
+                        ac.coins_required,
+                        ac.early_access,
+
+                        ac.is_draft,
+                        ac.is_published,
+                        ac.publish_at,
+
+                        ac.views,
+                        ac.likes,
+                        ac.rating,
+                        ac.rating_count,
+
+                        ac.created_at,
+                        ac.updated_at,
+
+                        an.title AS audio_novel_title,
+                        an.cover_url AS audio_novel_cover_url
+
+                    FROM audio_chapters ac
+
+                    JOIN audio_novels an
+                        ON an.id = ac.audio_novel_id
+
+                    ORDER BY
+                        an.title ASC,
+                        ac.chapter_no ASC
+                `);
+
+
+            return res.json({
+
+                success: true,
+
+                chapters:
+                    result.rows
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "GET /api/admin/audio/chapters error:",
+                error
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Failed to load admin audio chapters."
+
+            });
+
+        }
+
+    }
+);
 
 module.exports = router;
