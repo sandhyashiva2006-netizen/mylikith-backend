@@ -1604,4 +1604,284 @@ router.post(
     }
 );
 
+/*
+=========================================================
+GET AUDIO CHAPTER COMMENTS
+GET /api/audio/chapters/:chapterId/comments
+=========================================================
+*/
+
+router.get(
+    "/chapters/:chapterId/comments",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+            }
+
+            const result =
+                await db.query(`
+                    SELECT
+                        c.id,
+                        c.chapter_id,
+                        c.user_id,
+                        c.comment,
+                        c.created_at,
+                        c.updated_at,
+                        u.name,
+                        u.username,
+                        u.profile_image
+                    FROM audio_chapter_comments c
+                    LEFT JOIN users u
+                        ON u.id = c.user_id
+                    WHERE c.chapter_id = $1
+                    ORDER BY c.created_at DESC
+                `, [chapterId]);
+
+            return res.json({
+                success: true,
+                comments: result.rows
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET audio chapter comments error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to load audio comments."
+            });
+        }
+    }
+);
+
+/*
+=========================================================
+POST AUDIO CHAPTER COMMENT
+POST /api/audio/chapters/:chapterId/comments
+=========================================================
+*/
+
+router.post(
+    "/chapters/:chapterId/comments",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            const comment =
+                String(
+                    req.body.comment || ""
+                ).trim();
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+            }
+
+            if (!comment) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Comment cannot be empty."
+                });
+            }
+
+            if (comment.length > 2000) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Comment cannot exceed 2000 characters."
+                });
+            }
+
+            const chapter =
+                await db.query(`
+                    SELECT id
+                    FROM audio_chapters
+                    WHERE
+                        id = $1
+                        AND is_published = TRUE
+                        AND is_draft = FALSE
+                `, [chapterId]);
+
+            if (!chapter.rows.length) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio chapter not found."
+                });
+            }
+
+            const result =
+                await db.query(`
+                    INSERT INTO audio_chapter_comments
+                    (
+                        chapter_id,
+                        user_id,
+                        comment,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        $3,
+                        NOW(),
+                        NOW()
+                    )
+                    RETURNING
+                        id,
+                        chapter_id,
+                        user_id,
+                        comment,
+                        created_at,
+                        updated_at
+                `, [
+                    chapterId,
+                    userId,
+                    comment
+                ]);
+
+            const user =
+                await db.query(`
+                    SELECT
+                        name,
+                        username,
+                        profile_image
+                    FROM users
+                    WHERE id = $1
+                `, [userId]);
+
+            return res.status(201).json({
+                success: true,
+                comment: {
+                    ...result.rows[0],
+                    name:
+                        user.rows[0]?.name || null,
+                    username:
+                        user.rows[0]?.username || null,
+                    profile_image:
+                        user.rows[0]?.profile_image || null
+                }
+            });
+
+        } catch (error) {
+
+            console.error(
+                "POST audio chapter comment error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to add audio comment."
+            });
+        }
+    }
+);
+
+/*
+=========================================================
+DELETE AUDIO CHAPTER COMMENT
+DELETE /api/audio/chapters/:chapterId/comments/:commentId
+=========================================================
+*/
+
+router.delete(
+    "/chapters/:chapterId/comments/:commentId",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const commentId =
+                Number(req.params.commentId);
+
+            const userId =
+                Number(req.user.id);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0 ||
+                !Number.isInteger(commentId) ||
+                commentId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid comment ID."
+                });
+            }
+
+            const result =
+                await db.query(`
+                    DELETE FROM audio_chapter_comments
+                    WHERE
+                        id = $1
+                        AND chapter_id = $2
+                        AND user_id = $3
+                    RETURNING id
+                `, [
+                    commentId,
+                    chapterId,
+                    userId
+                ]);
+
+            if (!result.rows.length) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Comment not found or you cannot delete it."
+                });
+            }
+
+            return res.json({
+                success: true,
+                message:
+                    "Comment deleted successfully."
+            });
+
+        } catch (error) {
+
+            console.error(
+                "DELETE audio chapter comment error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to delete audio comment."
+            });
+        }
+    }
+);
+
 module.exports = router;
