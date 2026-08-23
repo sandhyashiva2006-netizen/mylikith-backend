@@ -8,12 +8,50 @@ const {
     UploadPartCommand,
     CompleteMultipartUploadCommand,
     AbortMultipartUploadCommand,
-    HeadObjectCommand
+    HeadObjectCommand,
+    GetObjectCommand
 } = require("@aws-sdk/client-s3");
 
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const router = express.Router();
+
+const jwt = require("jsonwebtoken");
+
+function optionalAuth(req, res, next) {
+
+    const authHeader =
+        req.headers.authorization;
+
+    if (
+        !authHeader ||
+        !authHeader.startsWith("Bearer ")
+    ) {
+        req.user = null;
+        return next();
+    }
+
+    const token =
+        authHeader.split(" ")[1];
+
+    try {
+
+        const decoded =
+            jwt.verify(
+                token,
+                process.env.JWT_SECRET
+            );
+
+        req.user = decoded;
+
+    } catch (err) {
+
+        req.user = null;
+
+    }
+
+    next();
+} 
 
 const b2S3 = new S3Client({
     region: process.env.B2_REGION,
@@ -29,7 +67,7 @@ const PART_SIZE = 10 * 1024 * 1024;
 const MAX_AUDIO_SIZE = 500 * 1024 * 1024;
 const SIGNED_URL_EXPIRES = 900;
 
-router.use(auth);
+
 
 function getChapterId(req) {
     const chapterId = Number(req.params.chapterId);
@@ -94,6 +132,7 @@ async function getAuthorizedChapter(chapterId, user) {
 
 router.post(
     "/chapters/:chapterId/start",
+auth,
     async (req, res) => {
 
         try {
@@ -308,6 +347,7 @@ router.post(
 
 router.post(
     "/chapters/:chapterId/sign-part",
+auth,
     async (req, res) => {
 
         try {
@@ -448,6 +488,7 @@ router.post(
 
 router.post(
     "/chapters/:chapterId/complete",
+auth,
     async (req, res) => {
 
         try {
@@ -770,6 +811,7 @@ router.post(
 
 router.post(
     "/chapters/:chapterId/abort",
+auth,
     async (req, res) => {
 
         try {
@@ -914,6 +956,7 @@ router.post(
 
 router.get(
     "/chapters/:chapterId/status",
+auth,
     async (req, res) => {
 
         try {
@@ -992,6 +1035,1057 @@ router.get(
                 message:
                     "Unable to load audio media status."
             });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   SECURE AUDIO PLAYBACK
+
+   GET /api/audio/media/chapters/:chapterId/playback
+========================================================= */
+
+router.get(
+    "/chapters/:chapterId/playback",
+    optionalAuth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+            /*
+            =================================================
+            GET PUBLISHED AUDIO CHAPTER
+            =================================================
+            */
+
+            const result =
+                await db.query(`
+                    SELECT
+                        ac.id,
+                        ac.audio_novel_id,
+                        ac.chapter_no,
+                        ac.title,
+
+                        ac.audio_provider,
+                        ac.audio_object_key,
+                        ac.audio_mime_type,
+                        ac.audio_original_name,
+                        ac.audio_size_bytes,
+                        ac.audio_duration_seconds,
+                        ac.audio_status,
+
+                        ac.is_premium,
+                        ac.coins_required,
+                        ac.early_access,
+
+                        an.title AS audio_novel_title,
+                        an.cover_url AS audio_novel_cover_url,
+                        an.premium_only AS audio_novel_premium_only,
+                        an.publish_status AS audio_novel_publish_status,
+                        an.visibility AS audio_novel_visibility
+
+                    FROM audio_chapters ac
+
+                    JOIN audio_novels an
+                        ON an.id = ac.audio_novel_id
+
+                    WHERE
+                        ac.id = $1
+
+                        AND ac.is_draft = FALSE
+
+                        AND ac.is_published = TRUE
+
+                        AND (
+                            ac.publish_at IS NULL
+                            OR ac.publish_at <= NOW()
+                        )
+
+                        AND an.publish_status = 'published'
+
+                        AND an.visibility = 'public'
+
+                    LIMIT 1
+                `, [chapterId]);
+
+            if (!result.rows.length) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio chapter not found or not available."
+                });
+
+            }
+
+            const chapter =
+                result.rows[0];
+
+            /*
+            =================================================
+            MEDIA VALIDATION
+            =================================================
+            */
+
+            if (
+                chapter.audio_provider !== "b2"
+            ) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio is not available."
+                });
+
+            }
+
+            if (
+                !chapter.audio_object_key
+            ) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio file is not available."
+                });
+
+            }
+
+            if (
+                String(
+                    chapter.audio_status || ""
+                ).toLowerCase() !== "ready"
+            ) {
+
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "Audio is still processing."
+                });
+
+            }
+
+            /*
+            =================================================
+            ACCESS CHECK
+            =================================================
+            */
+
+            const chapterPremium =
+                Boolean(
+                    chapter.is_premium
+                );
+
+            const novelPremium =
+                Boolean(
+                    chapter.audio_novel_premium_only
+                );
+
+            const requiresAccess =
+                chapterPremium ||
+                novelPremium;
+
+            /*
+            -------------------------------------------------
+            FREE AUDIO
+            -------------------------------------------------
+            */
+
+            if (!requiresAccess) {
+
+                const command =
+                    new GetObjectCommand({
+
+                        Bucket:
+                            process.env.B2_BUCKET_NAME,
+
+                        Key:
+                            chapter.audio_object_key
+
+                    });
+
+                const signedUrl =
+                    await getSignedUrl(
+                        b2S3,
+                        command,
+                        {
+                            expiresIn: 900
+                        }
+                    );
+
+                return res.json({
+
+                    success: true,
+
+                    locked: false,
+
+                    premium: false,
+
+                    url:
+                        signedUrl,
+
+                    expires_in:
+                        900,
+
+                    chapter: {
+
+                        id:
+                            chapter.id,
+
+                        audio_novel_id:
+                            chapter.audio_novel_id,
+
+                        chapter_no:
+                            chapter.chapter_no,
+
+                        title:
+                            chapter.title,
+
+                        audio_novel_title:
+                            chapter.audio_novel_title,
+
+                        mime_type:
+                            chapter.audio_mime_type ||
+                            "audio/mpeg",
+
+                        duration_seconds:
+                            chapter.audio_duration_seconds,
+
+                        original_name:
+                            chapter.audio_original_name,
+
+                        size_bytes:
+                            chapter.audio_size_bytes
+
+                    }
+
+                });
+
+            }
+
+            /*
+            -------------------------------------------------
+            PREMIUM AUDIO REQUIRES LOGIN
+            -------------------------------------------------
+            */
+
+            const userId =
+                req.user?.id
+                    ? Number(req.user.id)
+                    : null;
+
+            if (!userId) {
+
+                return res.status(403).json({
+
+                    success: false,
+
+                    locked: true,
+
+                    requires_login: true,
+
+                    premium: true,
+
+                    message:
+                        "Please login to listen to this premium audio.",
+
+                    chapter: {
+
+                        id:
+                            chapter.id,
+
+                        audio_novel_id:
+                            chapter.audio_novel_id,
+
+                        chapter_no:
+                            chapter.chapter_no,
+
+                        title:
+                            chapter.title,
+
+                        is_premium:
+                            chapterPremium,
+
+                        premium_only:
+                            novelPremium,
+
+                        coins_required:
+                            Number(
+                                chapter.coins_required || 0
+                            )
+
+                    }
+
+                });
+
+            }
+
+            /*
+            =================================================
+            PREMIUM MEMBERSHIP CHECK
+            =================================================
+            */
+
+            const premiumResult =
+                await db.query(`
+                    SELECT id
+
+                    FROM user_premium
+
+                    WHERE
+                        user_id = $1
+
+                        AND status = 'Active'
+
+                        AND expiry_date > NOW()
+
+                    LIMIT 1
+                `, [userId]);
+
+            const isPremiumMember =
+                premiumResult.rows.length > 0;
+
+            if (isPremiumMember) {
+
+                const command =
+                    new GetObjectCommand({
+
+                        Bucket:
+                            process.env.B2_BUCKET_NAME,
+
+                        Key:
+                            chapter.audio_object_key
+
+                    });
+
+                const signedUrl =
+                    await getSignedUrl(
+                        b2S3,
+                        command,
+                        {
+                            expiresIn: 900
+                        }
+                    );
+
+                return res.json({
+
+                    success: true,
+
+                    locked: false,
+
+                    premium: true,
+
+                    access:
+                        "premium_membership",
+
+                    url:
+                        signedUrl,
+
+                    expires_in:
+                        900,
+
+                    chapter: {
+
+                        id:
+                            chapter.id,
+
+                        audio_novel_id:
+                            chapter.audio_novel_id,
+
+                        chapter_no:
+                            chapter.chapter_no,
+
+                        title:
+                            chapter.title,
+
+                        audio_novel_title:
+                            chapter.audio_novel_title,
+
+                        mime_type:
+                            chapter.audio_mime_type ||
+                            "audio/mpeg",
+
+                        duration_seconds:
+                            chapter.audio_duration_seconds,
+
+                        original_name:
+                            chapter.audio_original_name,
+
+                        size_bytes:
+                            chapter.audio_size_bytes
+
+                    }
+
+                });
+
+            }
+
+            /*
+            =================================================
+            COIN UNLOCK CHECK
+            =================================================
+            */
+
+            const unlockResult =
+                await db.query(`
+                    SELECT
+                        id,
+                        coins_paid,
+                        unlocked_at
+
+                    FROM audio_chapter_unlocks
+
+                    WHERE
+                        user_id = $1
+
+                        AND chapter_id = $2
+
+                    LIMIT 1
+                `, [
+                    userId,
+                    chapterId
+                ]);
+
+            if (
+                unlockResult.rows.length > 0
+            ) {
+
+                const command =
+                    new GetObjectCommand({
+
+                        Bucket:
+                            process.env.B2_BUCKET_NAME,
+
+                        Key:
+                            chapter.audio_object_key
+
+                    });
+
+                const signedUrl =
+                    await getSignedUrl(
+                        b2S3,
+                        command,
+                        {
+                            expiresIn: 900
+                        }
+                    );
+
+                return res.json({
+
+                    success: true,
+
+                    locked: false,
+
+                    premium: false,
+
+                    access:
+                        "coin_unlock",
+
+                    already_unlocked: true,
+
+                    coins_paid:
+                        Number(
+                            unlockResult.rows[0]
+                                .coins_paid || 0
+                        ),
+
+                    url:
+                        signedUrl,
+
+                    expires_in:
+                        900,
+
+                    chapter: {
+
+                        id:
+                            chapter.id,
+
+                        audio_novel_id:
+                            chapter.audio_novel_id,
+
+                        chapter_no:
+                            chapter.chapter_no,
+
+                        title:
+                            chapter.title,
+
+                        audio_novel_title:
+                            chapter.audio_novel_title,
+
+                        mime_type:
+                            chapter.audio_mime_type ||
+                            "audio/mpeg",
+
+                        duration_seconds:
+                            chapter.audio_duration_seconds,
+
+                        original_name:
+                            chapter.audio_original_name,
+
+                        size_bytes:
+                            chapter.audio_size_bytes
+
+                    }
+
+                });
+
+            }
+
+            /*
+            =================================================
+            STILL LOCKED
+            =================================================
+            */
+
+            return res.status(403).json({
+
+                success: false,
+
+                locked: true,
+
+                requires_login: false,
+
+                premium: true,
+
+                reason:
+                    "coins_required",
+
+                message:
+                    "This audio chapter requires coins to unlock.",
+
+                chapter: {
+
+                    id:
+                        chapter.id,
+
+                    audio_novel_id:
+                        chapter.audio_novel_id,
+
+                    chapter_no:
+                        chapter.chapter_no,
+
+                    title:
+                        chapter.title,
+
+                    is_premium:
+                        chapterPremium,
+
+                    premium_only:
+                        novelPremium,
+
+                    coins_required:
+                        Number(
+                            chapter.coins_required || 0
+                        )
+
+                }
+
+            });
+
+        } catch (err) {
+
+            console.error(
+                "Audio playback error:",
+                err
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to prepare audio playback."
+
+            });
+
+        }
+
+    }
+);
+
+router.post(
+    "/chapters/:chapterId/unlock",
+    auth,
+    async (req, res) => {
+
+        const client =
+            await db.connect();
+
+        try {
+
+            await client.query("BEGIN");
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId < 1
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+            if (
+                !Number.isInteger(userId) ||
+                userId < 1
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Authentication required."
+                });
+
+            }
+
+            /*
+            ================================================
+            GET PUBLISHED CHAPTER
+            ================================================
+            */
+
+            const chapterResult =
+                await client.query(`
+                    SELECT
+                        ac.id,
+                        ac.audio_novel_id,
+                        ac.chapter_no,
+                        ac.title,
+                        ac.is_premium,
+                        ac.coins_required,
+
+                        an.title AS audio_novel_title,
+                        an.premium_only,
+                        an.publish_status,
+                        an.visibility
+
+                    FROM audio_chapters ac
+
+                    JOIN audio_novels an
+                        ON an.id = ac.audio_novel_id
+
+                    WHERE
+                        ac.id = $1
+
+                        AND ac.is_draft = FALSE
+
+                        AND ac.is_published = TRUE
+
+                        AND (
+                            ac.publish_at IS NULL
+                            OR ac.publish_at <= NOW()
+                        )
+
+                        AND an.publish_status = 'published'
+
+                        AND an.visibility = 'public'
+
+                    LIMIT 1
+                `, [chapterId]);
+
+            if (
+                chapterResult.rows.length === 0
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio chapter not found or not available."
+                });
+
+            }
+
+            const chapter =
+                chapterResult.rows[0];
+
+            /*
+            ================================================
+            FREE CHAPTER
+            ================================================
+            */
+
+            if (
+                !chapter.is_premium &&
+                !chapter.premium_only
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.json({
+
+                    success: true,
+
+                    unlocked: true,
+
+                    premium: false,
+
+                    coins_paid: 0
+
+                });
+
+            }
+
+            /*
+            ================================================
+            PREMIUM MEMBERSHIP
+            ================================================
+            */
+
+            const premiumResult =
+                await client.query(`
+                    SELECT id
+
+                    FROM user_premium
+
+                    WHERE
+                        user_id = $1
+
+                        AND status = 'Active'
+
+                        AND expiry_date > NOW()
+
+                    LIMIT 1
+                `, [userId]);
+
+            if (
+                premiumResult.rows.length > 0
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.json({
+
+                    success: true,
+
+                    unlocked: true,
+
+                    premium: true,
+
+                    coins_paid: 0
+
+                });
+
+            }
+
+            /*
+            ================================================
+            ALREADY UNLOCKED
+            ================================================
+            */
+
+            const existingUnlock =
+                await client.query(`
+                    SELECT
+                        id,
+                        coins_paid,
+                        unlocked_at
+
+                    FROM audio_chapter_unlocks
+
+                    WHERE
+                        user_id = $1
+
+                        AND chapter_id = $2
+
+                    LIMIT 1
+                `, [
+                    userId,
+                    chapterId
+                ]);
+
+            if (
+                existingUnlock.rows.length > 0
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.json({
+
+                    success: true,
+
+                    unlocked: true,
+
+                    premium: false,
+
+                    already_unlocked: true,
+
+                    coins_paid:
+                        Number(
+                            existingUnlock.rows[0]
+                                .coins_paid || 0
+                        )
+
+                });
+
+            }
+
+            /*
+            ================================================
+            COIN PRICE
+            ================================================
+            */
+
+            const coinsRequired =
+                Math.max(
+                    0,
+                    Number(
+                        chapter.coins_required || 0
+                    )
+                );
+
+            if (
+                coinsRequired <= 0
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "This premium audio has an invalid coin price."
+
+                });
+
+            }
+
+            /*
+            ================================================
+            LOCK WALLET
+            ================================================
+            */
+
+            const walletResult =
+                await client.query(`
+                    SELECT
+                        id,
+                        coins,
+                        earned_coins,
+                        spent_coins
+
+                    FROM wallets
+
+                    WHERE user_id = $1
+
+                    FOR UPDATE
+                `, [userId]);
+
+            if (
+                walletResult.rows.length === 0
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Wallet not found."
+
+                });
+
+            }
+
+            const wallet =
+                walletResult.rows[0];
+
+            const currentCoins =
+                Number(
+                    wallet.coins || 0
+                );
+
+            if (
+                currentCoins <
+                coinsRequired
+            ) {
+
+                await client.query("ROLLBACK");
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Not enough coins.",
+
+                    coins_required:
+                        coinsRequired,
+
+                    coins_balance:
+                        currentCoins
+
+                });
+
+            }
+
+            /*
+            ================================================
+            DEDUCT COINS
+            ================================================
+            */
+
+            const updatedWallet =
+                await client.query(`
+                    UPDATE wallets
+
+                    SET
+                        coins =
+                            coins - $1,
+
+                        spent_coins =
+                            spent_coins + $1
+
+                    WHERE
+                        user_id = $2
+
+                    RETURNING coins
+                `, [
+                    coinsRequired,
+                    userId
+                ]);
+
+            const newBalance =
+                Number(
+                    updatedWallet.rows[0].coins
+                );
+
+            /*
+            ================================================
+            WALLET TRANSACTION
+            ================================================
+            */
+
+            await client.query(`
+                INSERT INTO wallet_transactions
+                (
+                    wallet_id,
+                    user_id,
+                    type,
+                    coins,
+                    amount,
+                    description,
+                    reference_id
+                )
+
+                VALUES
+                (
+                    $1,
+                    $2,
+                    'Debit',
+                    $3,
+                    0,
+                    'Audio Chapter Unlock',
+                    $4
+                )
+            `, [
+                wallet.id,
+                userId,
+                coinsRequired,
+                `audio_chapter:${chapterId}`
+            ]);
+
+            /*
+            ================================================
+            RECORD AUDIO UNLOCK
+            ================================================
+            */
+
+            await client.query(`
+                INSERT INTO audio_chapter_unlocks
+                (
+                    user_id,
+                    chapter_id,
+                    coins_paid
+                )
+
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3
+                )
+            `, [
+                userId,
+                chapterId,
+                coinsRequired
+            ]);
+
+            await client.query("COMMIT");
+
+            return res.json({
+
+                success: true,
+
+                unlocked: true,
+
+                premium: false,
+
+                already_unlocked: false,
+
+                coins_paid:
+                    coinsRequired,
+
+                coins_balance:
+                    newBalance
+
+            });
+
+        } catch (err) {
+
+            await client.query("ROLLBACK");
+
+            console.error(
+                "Audio chapter unlock error:",
+                err
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to unlock audio chapter."
+
+            });
+
+        } finally {
+
+            client.release();
 
         }
 
