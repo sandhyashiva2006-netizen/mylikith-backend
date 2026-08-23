@@ -89,14 +89,274 @@ function normalizeImportedChapterTitle(value) {
 
     // Fix source artifacts such as: "Chapter I.]" or "CHAPTER II."
     // while preserving the chapter's Roman numeral.
-    const chapterMatch = title.match(/^chapter\s*(?:[-.:]\s*)?([ivxlcdm]+)\s*\.?\s*\]?$/i);
+    const chapterMatch = title.match(/^chapter\s*(?:[-.:]\s*)?([ivxlcdm]+|\d{1,3})\s*\.?\s*\]?\s*(.*)$/i);
     if (chapterMatch) {
-        return `Chapter ${chapterMatch[1].toUpperCase()}.`;
+        const numeral = chapterMatch[1].match(/^\d+$/) ? chapterMatch[1] : chapterMatch[1].toUpperCase();
+        const tail = String(chapterMatch[2] || "").replace(/^[-–—:.)\s]+/, "").trim();
+        return tail ? `Chapter ${numeral}. ${tail}` : `Chapter ${numeral}.`;
     }
 
     return title
         .replace(/\]\s*$/, "")
         .trim();
+}
+
+function getImportedChapterNumber(title) {
+    const value = String(title || "")
+        .replace(/[०-९]/g, d => String("०१२३४५६७८९".indexOf(d)))
+        .replace(/[০-৯]/g, d => String("০১২৩৪৫৬৭৮৯".indexOf(d)))
+        .replace(/[౦-౯]/g, d => String("౦౧౨౩౪౫౬౭౮౯".indexOf(d)))
+        .trim()
+        .toLowerCase();
+
+    // Arabic / Indic digits
+    const digitMatch = value.match(
+        /(?:chapter|part|book|section|volume|అధ్యాయం|భాగం|కాండం|পরিচ্ছেদ|অধ্যায়|अध्याय|भाग|खंड|खंड)\s*[-.:]?\s*(\d+)/
+    );
+
+    if (digitMatch) {
+        return Number(digitMatch[1]);
+    }
+
+    // Roman numerals
+    const romanMatch = value.match(
+        /(?:chapter|part|book|section|volume)\s*[-.:]?\s*([ivxlcdm]+)\b/i
+    );
+
+    if (romanMatch) {
+        const roman = romanMatch[1].toUpperCase();
+
+        const romanValues = {
+            I: 1,
+            V: 5,
+            X: 10,
+            L: 50,
+            C: 100,
+            D: 500,
+            M: 1000
+        };
+
+        let total = 0;
+        let previous = 0;
+
+        for (let i = roman.length - 1; i >= 0; i--) {
+            const current = romanValues[roman[i]] || 0;
+
+            if (current < previous) {
+                total -= current;
+            } else {
+                total += current;
+            }
+
+            previous = current;
+        }
+
+        if (total > 0) {
+            return total;
+        }
+    }
+
+    /*
+     * Bengali
+     */
+    const bengaliNumbers = {
+        "প্রথম": 1,
+        "দ্বিতীয়": 2,
+        "দ্বিতীয়": 2,
+        "তৃতীয়": 3,
+        "তৃতীয়": 3,
+        "চতুর্থ": 4,
+        "পঞ্চম": 5,
+        "ষষ্ঠ": 6,
+        "সপ্তম": 7,
+        "অষ্টম": 8,
+        "নবম": 9,
+        "দশম": 10,
+        "একাদশ": 11,
+        "দ্বাদশ": 12,
+        "ত্রয়োদশ": 13,
+        "ত্রয়োদশ": 13,
+        "চতুর্দশ": 14,
+        "পঞ্চদশ": 15,
+        "ষোড়শ": 16,
+        "ষোড়শ": 16,
+        "সপ্তদশ": 17,
+        "অষ্টাদশ": 18,
+        "ঊনবিংশ": 19,
+        "উনবিংশ": 19,
+        "বিংশ": 20
+    };
+
+    /*
+     * Hindi
+     */
+    const hindiNumbers = {
+        "प्रथम": 1,
+        "पहला": 1,
+        "पहली": 1,
+        "द्वितीय": 2,
+        "दूसरा": 2,
+        "दूसरी": 2,
+        "तृतीय": 3,
+        "तीसरा": 3,
+        "तीसरी": 3,
+        "चतुर्थ": 4,
+        "चौथा": 4,
+        "चौथी": 4,
+        "पंचम": 5,
+        "पाँचवाँ": 5,
+        "पांचवां": 5,
+        "षष्ठ": 6,
+        "छठा": 6,
+        "छठी": 6,
+        "सप्तम": 7,
+        "सातवाँ": 7,
+        "सातवां": 7,
+        "अष्टम": 8,
+        "आठवाँ": 8,
+        "आठवां": 8,
+        "नवम": 9,
+        "नौवाँ": 9,
+        "नौवां": 9,
+        "दशम": 10,
+        "दसवाँ": 10,
+        "दसवां": 10,
+        "एकादश": 11,
+        "ग्यारहवाँ": 11,
+        "द्वादश": 12,
+        "बारहवाँ": 12,
+        "त्रयोदश": 13,
+        "तेरहवाँ": 13,
+        "चतुर्दश": 14,
+        "चौदहवाँ": 14,
+        "पञ्चदश": 15,
+        "पंचदश": 15,
+        "पंद्रहवाँ": 15,
+        "षोडश": 16,
+        "सोलहवाँ": 16,
+        "सप्तदश": 17,
+        "सत्रहवाँ": 17,
+        "अष्टादश": 18,
+        "अठारहवाँ": 18,
+        "एकोनविंश": 19,
+        "उन्नीसवाँ": 19,
+        "विंश": 20,
+        "बीसवाँ": 20
+    };
+
+    /*
+     * Telugu
+     */
+    const teluguNumbers = {
+        "మొదటి": 1,
+        "ప్రథమ": 1,
+        "రెండవ": 2,
+        "రెండవది": 2,
+        "ద్వితీయ": 2,
+        "మూడవ": 3,
+        "తృతీయ": 3,
+        "నాల్గవ": 4,
+        "నాలుగవ": 4,
+        "చతుర్థ": 4,
+        "ఐదవ": 5,
+        "పంచమ": 5,
+        "ఆరవ": 6,
+        "షష్ఠ": 6,
+        "ఏడవ": 7,
+        "సప్తమ": 7,
+        "ఎనిమిదవ": 8,
+        "అష్టమ": 8,
+        "తొమ్మిదవ": 9,
+        "నవమ": 9,
+        "పదవ": 10,
+        "దశమ": 10,
+        "పదకొండవ": 11,
+        "ఏకాదశ": 11,
+        "పన్నెండవ": 12,
+        "ద్వాదశ": 12,
+        "పదమూడవ": 13,
+        "త్రయోదశ": 13,
+        "పద్నాలుగవ": 14,
+        "చతుర్దశ": 14,
+        "పదిహేనవ": 15,
+        "పంచదశ": 15,
+        "పదహారవ": 16,
+        "షోడశ": 16,
+        "పదిహేడవ": 17,
+        "సప్తదశ": 17,
+        "పద్దెనిమిదవ": 18,
+        "అష్టాదశ": 18,
+        "పంతొమ్మిదవ": 19,
+        "ఏకోనవింశతి": 19,
+        "ఇరవయ్యవ": 20,
+        "వింశతి": 20
+    };
+
+    const numberWords = {
+        ...bengaliNumbers,
+        ...hindiNumbers,
+        ...teluguNumbers
+    };
+
+    const matchingWords = Object.keys(numberWords)
+        .sort((a, b) => b.length - a.length);
+
+    for (const word of matchingWords) {
+        if (value.includes(word.toLowerCase())) {
+            return numberWords[word];
+        }
+    }
+
+    return null;
+}
+
+
+function sortImportedChapters(chapters) {
+    return (Array.isArray(chapters) ? chapters : [])
+        .map((chapter, index) => ({
+            ...chapter,
+            __originalIndex: index,
+            __chapterNumber: getImportedChapterNumber(chapter.title)
+        }))
+        .sort((a, b) => {
+
+            const aNumber = a.__chapterNumber;
+            const bNumber = b.__chapterNumber;
+
+            /*
+             * Keep introductions/prefaces before numbered chapters.
+             */
+            if (aNumber === null && bNumber !== null) {
+                const aTitle = String(a.title || "").toLowerCase();
+
+                if (
+                    /^(introduction|preface|foreword|prologue|ప్రస్తావన|ముఖవాక్యం|परिचय|भूमिका)/i.test(aTitle)
+                ) {
+                    return -1;
+                }
+
+                return 1;
+            }
+
+            if (aNumber !== null && bNumber === null) {
+                const bTitle = String(b.title || "").toLowerCase();
+
+                if (
+                    /^(introduction|preface|foreword|prologue|ప్రస్తావన|ముఖవాక్యం|परिचय|भूमिका)/i.test(bTitle)
+                ) {
+                    return 1;
+                }
+
+                return -1;
+            }
+
+            if (aNumber !== null && bNumber !== null) {
+                return aNumber - bNumber;
+            }
+
+            return a.__originalIndex - b.__originalIndex;
+        })
+        .map(({ __originalIndex, __chapterNumber, ...chapter }) => chapter);
 }
 
 function htmlToText(html) {
@@ -115,6 +375,8 @@ function htmlToText(html) {
             .replace(/&gt;/gi, ">")
             .replace(/&quot;/gi, '"')
             .replace(/&#39;|&apos;/gi, "'")
+            .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+            .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
     );
 }
 
@@ -222,33 +484,30 @@ function parseGutenbergText(text) {
     }
 
     const endMatch = content.match(/\*\*\* END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^\n]*\*\*\*/i);
-    if (endMatch) {
-        content = content.slice(0, endMatch.index).trim();
-    }
+    if (endMatch) content = content.slice(0, endMatch.index).trim();
 
     const lines = content.split("\n");
-    const chapters = [];
+    const rawChapters = [];
     let currentTitle = "Introduction";
     let current = [];
 
     const isChapterHeading = line => {
-        const value = line.trim();
+        const value = line.trim().replace(/[\u200B\uFEFF]/g, "");
         if (!value || value.length > 100) return false;
-        return /^(chapter|book|part|volume|section)\s+[0-9ivxlcdm]+\b/i.test(value)
-            || /^chapter\s+[a-z]+\b/i.test(value)
-            || /^chapter\s*[-.:]/i.test(value)
-            || /^\bCHAPTER\b/i.test(value);
+
+        return /^(?:chapter|book|part|volume|section)\s+(?:[0-9]{1,3}|[ivxlcdm]+|[a-z]+)(?:\s*[.)\-:]?\s*.*)?$/i.test(value)
+            || /^chapter\s*[-.:]\s*(?:[0-9]{1,3}|[ivxlcdm]+|[a-z]+)(?:\s*[.)\-:]?\s*.*)?$/i.test(value)
+            || /^chapter\s+[ivxlcdm]+\s*\.?\]?(?:\s+.*)?$/i.test(value)
+            || /^chapter\s+[a-z]+\s*\.?\]?(?:\s+.*)?$/i.test(value);
     };
 
     for (const line of lines) {
         if (isChapterHeading(line)) {
             const textBlock = cleanImportedText(current.join("\n"));
-            if (textBlock) {
-                chapters.push({
-                    title: currentTitle,
-                    content: textBlock
-                });
-            }
+            rawChapters.push({
+                title: currentTitle,
+                content: textBlock
+            });
             currentTitle = normalizeImportedChapterTitle(line);
             current = [];
         } else {
@@ -257,11 +516,135 @@ function parseGutenbergText(text) {
     }
 
     const finalBlock = cleanImportedText(current.join("\n"));
-    if (finalBlock) {
-        chapters.push({
-            title: currentTitle,
-            content: finalBlock
-        });
+    rawChapters.push({ title: currentTitle, content: finalBlock });
+
+    // Gutenberg editions commonly contain a table of contents before the
+    // real chapters. The TOC can contain the same "CHAPTER 1", "CHAPTER 14",
+    // etc. headings and would otherwise become tiny fake chapters. Collapse
+    // duplicate chapter titles by retaining the largest content block.
+    const grouped = new Map();
+    const introductionBlocks = [];
+
+    const chapterNumber = title => {
+    const value = String(title || "").trim();
+
+    const importedNumber = getImportedChapterNumber(value);
+
+    if (Number.isFinite(importedNumber)) {
+        return importedNumber;
+    }
+
+    return null;
+};
+
+    for (const chapter of rawChapters) {
+        const title = normalizeImportedChapterTitle(chapter.title || "Introduction");
+        const body = cleanImportedText(chapter.content);
+        const number = chapterNumber(title);
+
+        if (number == null) {
+            if (body) introductionBlocks.push({ title, content: body });
+            continue;
+        }
+
+        const key = `chapter-${number}`;
+        const existing = grouped.get(key);
+        if (!existing || body.length > existing.content.length) {
+            grouped.set(key, { title, content: body, number });
+        }
+    }
+
+    const chapters = [];
+
+    // Keep meaningful front matter as Introduction only when it contains real
+    // text. Very small TOC fragments are discarded.
+    const introText = introductionBlocks
+        .map(item => item.content)
+        .filter(text => text.length >= 80)
+        .join("\n\n")
+        .trim();
+
+    if (introText) chapters.push({ title: "Introduction", content: introText });
+
+    const numbered = [...grouped.values()]
+        .filter(chapter => chapter.content.length >= 20)
+        .sort((a, b) => a.number - b.number);
+
+    chapters.push(...numbered.map(chapter => ({
+        title: chapter.title,
+        content: chapter.content
+    })));
+
+    // Some Gutenberg editions use bare Roman numerals (I, II, III...) or
+    // bare Arabic numbers as chapter headings. If the normal parser found
+    // only one enormous block, make a conservative second pass for those
+    // heading styles. This prevents an entire novel from becoming one chapter.
+    if (chapters.length <= 1 && content.length > 20000) {
+        const fallbackLines = content.split("\n");
+        const fallback = [];
+        let fallbackTitle = "Introduction";
+        let fallbackBody = [];
+
+        const isBareChapter = (line, index) => {
+            const value = line.trim();
+            if (!value || value.length > 20) return false;
+            if (index > 0 && fallbackLines[index - 1].trim() !== "") return false;
+            if (index + 1 < fallbackLines.length && fallbackLines[index + 1].trim() === "") return false;
+            return /^[IVXLCDM]{1,12}[.)]?$/.test(value) || /^\d{1,3}[.)]?$/.test(value);
+        };
+
+        for (let i = 0; i < fallbackLines.length; i++) {
+            const line = fallbackLines[i];
+            if (isBareChapter(line, i)) {
+                const body = cleanImportedText(fallbackBody.join("\n"));
+                if (body.length >= 50) fallback.push({ title: fallbackTitle, content: body });
+                fallbackTitle = `Chapter ${line.trim().replace(/[.)]$/, "")}`;
+                fallbackBody = [];
+            } else {
+                fallbackBody.push(line);
+            }
+        }
+
+        const finalFallbackBody = cleanImportedText(fallbackBody.join("\n"));
+        if (finalFallbackBody.length >= 50) {
+            fallback.push({ title: fallbackTitle, content: finalFallbackBody });
+        }
+
+        const realFallback = fallback.filter(item => item.content.length >= 50);
+        if (realFallback.length >= 2) {
+            const fallbackMap = new Map();
+            for (const item of realFallback) {
+                const key = item.title.toLowerCase();
+                const existing = fallbackMap.get(key);
+                if (!existing || item.content.length > existing.content.length) {
+                    fallbackMap.set(key, item);
+                }
+            }
+
+            const chapterItems = [...fallbackMap.values()].filter(item => item.title !== "Introduction");
+            const intro = [...fallbackMap.values()].find(item => item.title === "Introduction" && item.content.length < 5000);
+
+            const fallbackNumber = title => {
+                const value = String(title || "").replace(/^Chapter\s+/i, "").trim();
+                if (/^\d+$/.test(value)) return Number(value);
+                if (/^[IVXLCDM]+$/i.test(value)) {
+                    const values = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
+                    let total = 0, previous = 0;
+                    for (const ch of value.toLowerCase().split("").reverse()) {
+                        const n = values[ch] || 0;
+                        total += n < previous ? -n : n;
+                        previous = n;
+                    }
+                    return total;
+                }
+                return Number.MAX_SAFE_INTEGER;
+            };
+
+            chapterItems.sort((a, b) => fallbackNumber(a.title) - fallbackNumber(b.title));
+            chapters.length = 0;
+            if (intro) chapters.push(intro);
+            chapters.push(...chapterItems);
+        }
     }
 
     if (!chapters.length) {
@@ -400,6 +783,531 @@ function extractFirstImageFromHtml(html) {
     return /^https?:\/\//i.test(src) ? src : null;
 }
 
+function isBadWikisourceAuthorValue(value) {
+    const v = String(value || "").replace(/\s+/g, " ").trim();
+    if (!v) return true;
+    if (v.length > 160) return true;
+    return /^(?:public\s+domain|public domain public domain|false(?:\s+false)?|true(?:\s+true)?|image|license|लाइसेंस|सार्वजनिक\s+डोमेन|सार्वजनिक डोमेन सार्वजनिक डोमेन|पब्लिक\s+डोमेन)$/iu.test(v)
+        || /^(?:public\s+domain\s+public\s+domain)\b/iu.test(v);
+}
+
+function isBadWikisourceCoverUrl(url) {
+    const v = String(url || "").toLowerCase();
+    if (!v) return true;
+    return /pd[-_]?icon|public[_-]?domain|commons-logo|wikimedia-button|edit-clear|no[_-]?image|placeholder|wikimedia-logo/.test(v);
+}
+
+function sanitizeWikisourceAuthor(value) {
+    const v = decodeWikisourceTitle(String(value || "")).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    return isBadWikisourceAuthorValue(v) ? "" : v;
+}
+
+async function getWikisourcePageImageTitles(apiUrl, pageTitle) {
+    const titles = [];
+    let imcontinue = null;
+
+    try {
+        do {
+            const params = {
+                action: "query",
+                prop: "images",
+                titles: pageTitle,
+                imlimit: "max"
+            };
+            if (imcontinue) params.imcontinue = imcontinue;
+
+            const data = await wikisourceApi(apiUrl, params);
+            const pages = data.query?.pages || {};
+            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+            for (const image of (page?.images || [])) {
+                if (image?.title) titles.push(decodeWikisourceTitle(image.title));
+            }
+            imcontinue = data.continue?.imcontinue || null;
+        } while (imcontinue);
+    } catch (error) {
+        console.warn(`Wikisource image-list detection failed for ${pageTitle}:`, error.message);
+    }
+
+    return [...new Set(titles)];
+}
+
+function normalizeWikisourceFileStem(value) {
+    return decodeWikisourceTitle(value)
+        .replace(/^File\\s*:\\s*/i, "")
+        .replace(/\\.(?:pdf|djvu|jpg|jpeg|png|webp|tif|tiff)$/i, "")
+        .replace(/[\\s_\\-–—]+/gu, "")
+        .replace(/[^\\p{L}\\p{N}]/gu, "")
+        .toLowerCase();
+}
+
+function isBadWikisourceImageTitle(value) {
+    const v = decodeWikisourceTitle(value).toLowerCase();
+    if (!v) return true;
+    return /pd[-_]?icon|public[_-]?domain|commons-logo|wikimedia-button|edit-clear|no[_-]?image|placeholder|wikimedia-logo|cc-by|creative commons/.test(v);
+}
+
+function extractAuthorFromWikisourceImageInfo(imageInfo) {
+    const meta = imageInfo?.extmetadata || {};
+    const candidates = [
+        meta.Artist?.value,
+        meta.Author?.value,
+        meta.Creator?.value
+    ];
+
+    for (const value of candidates) {
+        const candidate = sanitizeWikisourceAuthor(String(value || "")
+            .replace(/<br\s*\/?>(?=\S)/gi, " ")
+            .replace(/<[^>]+>/g, " "));
+        if (candidate) return candidate;
+    }
+    return "";
+}
+
+
+
+async function resolveWikisourceIndexCoverPage(apiUrl, fileTitle) {
+    try {
+        const cleanFile = String(fileTitle || "")
+            .replace(/^(?:File|Image|चित्र|फाइल)\s*:/iu, "")
+            .trim();
+        if (!cleanFile) return null;
+
+        // ProofreadPage stores the index metadata as JSON. Its Image field is
+        // the page number used by Wikisource itself for the book preview/cover.
+        const indexTitle = `विषयसूची:${cleanFile}`;
+        const data = await wikisourceApi(apiUrl, {
+            action: "parse",
+            page: indexTitle,
+            prop: "wikitext",
+            contentformat: "application/json",
+            redirects: 1
+        });
+        const raw = String(data.parse?.wikitext || "").trim();
+        if (!raw) return null;
+
+        let fields = null;
+        try {
+            const parsed = JSON.parse(raw);
+            fields = parsed?.fields || null;
+        } catch {
+            return null;
+        }
+        if (!fields) return null;
+
+        const imageField = String(fields.Image ?? fields.image ?? "").trim();
+        if (!imageField) return null;
+
+        // Image can be a filename for image-based indexes, or a numeric page
+        // number for PDF/DjVu-backed indexes.
+        if (!/^\d+$/u.test(imageField)) {
+            const fileName = imageField.replace(/^\[\[\s*(?:File|चित्र)\s*:/iu, "").replace(/\]\].*$/u, "").trim();
+            if (fileName) {
+                const imageTitle = /^(?:File|चित्र)\s*:/iu.test(imageField)
+                    ? imageField
+                    : `File:${fileName}`;
+                const info = await wikisourceApi(apiUrl, {
+                    action: "query",
+                    prop: "imageinfo",
+                    titles: imageTitle,
+                    iiprop: "url|mime",
+                    iiurlwidth: 1400
+                });
+                const pages = info.query?.pages || {};
+                const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+                const ii = page?.imageinfo?.[0];
+                const candidate = ii?.thumburl || ii?.url || null;
+                if (candidate && !isBadWikisourceCoverUrl(candidate)) return candidate;
+            }
+            return null;
+        }
+
+        const preferredNumber = Number(imageField);
+        const pageNamespace = "पृष्ठ";
+        const candidates = [preferredNumber];
+
+        // If the configured cover page is a scan-library sheet (a common DLI
+        // artifact), inspect the next few physical pages and choose the first
+        // real book page instead of saving the scan sheet as the cover.
+        for (let n = preferredNumber + 1; n <= preferredNumber + 4; n++) candidates.push(n);
+
+        for (const pageNumber of candidates) {
+            const pageTitle = `${pageNamespace}:${cleanFile}/${pageNumber}`;
+            try {
+                const pageData = await wikisourceApi(apiUrl, {
+                    action: "parse",
+                    page: pageTitle,
+                    prop: "text",
+                    redirects: 1
+                });
+                const html = String(pageData.parse?.text || "");
+                const text = cleanWikisourceHtml(html).replace(/\s+/gu, " ").trim();
+
+                // Reject common Digital Library / scanner identification sheets.
+                if (/UNIVERSAL\s+LIBRARY|DIGITAL\s+LIBRARY\s+OF\s+INDIA|\bOU[_-]?\d+\b|barcode|scanning\s+centre|scanning\s+center/iu.test(text)) {
+                    continue;
+                }
+
+                const image = extractWikisourceCoverFromHtml(html);
+                if (image && !isBadWikisourceCoverUrl(image)) return image;
+            } catch (error) {
+                // Continue to the next physical page.
+            }
+        }
+    } catch (error) {
+        console.warn(`Wikisource Index cover resolution failed for ${fileTitle}:`, error.message);
+    }
+    return null;
+}
+
+async function resolveWikisourceNamedCoverPage(apiUrl, fileTitle) {
+    // Wikisource proofread books may expose a dedicated cover page in the
+    // Index/TOC, while the PDF's own thumbnail is only a library scan sheet.
+    // Prefer that explicit cover page. This is intentionally independent of
+    // pageimages on the work page, which may return unrelated images.
+    try {
+        const cleanFile = String(fileTitle || "")
+            .replace(/^(?:File|Image|चित्र|फाइल)\s*:/iu, "")
+            .trim();
+        if (!cleanFile) return null;
+
+        const baseName = cleanFile.replace(/\.(?:pdf|djvu)$/iu, "");
+        const coverSuffixes = [
+            "आवरण-पृष्ठ", "आवरण पृष्ठ", "मुखपृष्ठ", "मुख पृष्ठ",
+            "cover", "cover page", "front cover", "frontispiece",
+            "title page", "title-page"
+        ];
+        const namespacePrefixes = ["Page", "पृष्ठ"];
+        const directCandidates = [];
+
+        for (const ns of namespacePrefixes) {
+            for (const suffix of coverSuffixes) {
+                directCandidates.push(`${ns}:${cleanFile}/${suffix}`);
+                directCandidates.push(`${ns}:${baseName}/${suffix}`);
+            }
+        }
+
+        // Also inspect the book's Index/TOC. The Hindi Go-daan index, for
+        // example, explicitly contains an "आवरण-पृष्ठ" entry.
+        const tocCandidates = [
+            `Index:${cleanFile}`,
+            `अनुक्रमणिका:${cleanFile}`,
+            `विषयसूची:${cleanFile}`,
+            `विषयसूची:${baseName}.pdf`
+        ];
+
+        async function getPageImage(title) {
+            const variants = [title, title.replace(/^पृष्ठ:/u, "Page:")];
+            for (const candidateTitle of [...new Set(variants)]) {
+                try {
+                    const data = await wikisourceApi(apiUrl, {
+                        action: "query",
+                        prop: "pageimages",
+                        piprop: "thumbnail|original",
+                        pithumbsize: 1400,
+                        redirects: 1,
+                        titles: candidateTitle
+                    });
+                    const pages = data.query?.pages || {};
+                    const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+                    const image = page?.original?.source || page?.thumbnail?.source || null;
+                    if (image && !isBadWikisourceCoverUrl(image)) return image;
+                } catch (error) {
+                    console.warn(`Wikisource cover pageimages failed for ${candidateTitle}:`, error.message);
+                }
+
+                // Some Proofread Page pages do not expose pageimages. Parse the
+                // rendered page and take the actual scan image instead.
+                try {
+                    const data = await wikisourceApi(apiUrl, {
+                        action: "parse",
+                        page: candidateTitle,
+                        prop: "text",
+                        redirects: 1
+                    });
+                    const html = String(data.parse?.text || "");
+                    const image = extractWikisourceCoverFromHtml(html);
+                    if (image) return image;
+                } catch (error) {
+                    // Candidate page may simply not exist; continue.
+                }
+            }
+            return null;
+        }
+
+        // 1. Directly try the canonical cover-page names.
+        for (const title of directCandidates) {
+            const image = await getPageImage(title);
+            if (image) return image;
+        }
+
+        // 2. Read the Index/TOC and discover the exact page title linked as
+        // "Cover", "आवरण-पृष्ठ", etc. This handles books whose cover page name
+        // is not predictable from the filename.
+        for (const tocTitle of [...new Set(tocCandidates)]) {
+            try {
+                const data = await wikisourceApi(apiUrl, {
+                    action: "parse",
+                    page: tocTitle,
+                    prop: "wikitext|links",
+                    redirects: 1
+                });
+                const wikitext = String(data.parse?.wikitext || "");
+                const linked = [];
+                const seen = new Set();
+                const linkRegex = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/gu;
+                let match;
+                while ((match = linkRegex.exec(wikitext)) !== null) {
+                    const target = decodeWikisourceTitle(match[1] || "").trim();
+                    const label = decodeWikisourceTitle(match[2] || "").trim();
+                    if (!target) continue;
+                    const combined = `${target} ${label}`.toLowerCase();
+                    if (!/(आवरण|मुखपृष्ठ|cover|front cover|frontispiece|title page|title-page)/iu.test(combined)) continue;
+                    if (!/(?:^|:)(?:page|पृष्ठ):/iu.test(target) && !target.includes(`${baseName}/`)) continue;
+                    const key = target.toLowerCase();
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    linked.push(target);
+                }
+
+                for (const target of linked) {
+                    const image = await getPageImage(target);
+                    if (image) return image;
+                }
+            } catch (error) {
+                console.warn(`Wikisource TOC cover discovery failed for ${tocTitle}:`, error.message);
+            }
+        }
+    } catch (error) {
+        console.warn(`Wikisource named cover-page discovery failed for ${fileTitle}:`, error.message);
+    }
+    return null;
+}
+
+async function fetchWikisourceFilePagePreview(apiUrl, fileTitle) {
+    try {
+        const host = new URL(apiUrl).hostname;
+        const title = String(fileTitle || "").replace(/^File\s*:/i, "").replace(/^चित्र\s*:/iu, "").trim();
+        if (!title) return null;
+
+        const filePageUrl = `https://${host}/wiki/${encodeURIComponent(`चित्र:${title}`)}`;
+        const response = await axios.get(filePageUrl, {
+            timeout: 30000,
+            responseType: "text",
+            maxContentLength: 10 * 1024 * 1024,
+            headers: { "User-Agent": "MyLikith-Classics-Importer/1.0" }
+        });
+        const html = String(response.data || "");
+
+        // For PDF-backed Wikisource files the browser page contains a real
+        // first-page thumbnail even though the underlying file MIME is PDF.
+        // Prefer that thumbnail over the raw PDF URL because MyLikith cover
+        // fields are rendered as <img>.
+        const candidates = [];
+        const imgRegex = /<img\b[^>]*?(?:src|data-src)=["']([^"']+)["'][^>]*>/giu;
+        let match;
+        while ((match = imgRegex.exec(html)) !== null) {
+            let src = String(match[1] || "").trim();
+            if (src.startsWith("//")) src = `https:${src}`;
+            else if (src.startsWith("/")) src = `https://${host}${src}`;
+            if (!/^https?:\/\/upload\.wikimedia\.org\//i.test(src)) continue;
+            if (isBadWikisourceCoverUrl(src)) continue;
+            const lower = src.toLowerCase();
+            if (/\/thumb\//.test(lower) && /(?:\.pdf|page1-|\.jpg|\.jpeg|\.png|\.webp)/.test(lower)) {
+                candidates.push(src);
+            }
+        }
+
+        // Some skins expose the preview as a linked image rather than an img
+        // src. Accept the same Wikimedia thumbnail pattern from hrefs.
+        const hrefRegex = /href=["']([^"']+)["']/giu;
+        while ((match = hrefRegex.exec(html)) !== null) {
+            let href = String(match[1] || "").trim();
+            if (href.startsWith("//")) href = `https:${href}`;
+            if (!/^https?:\/\/upload\.wikimedia\.org\//i.test(href)) continue;
+            if (isBadWikisourceCoverUrl(href)) continue;
+            const lower = href.toLowerCase();
+            if (/\/thumb\//.test(lower) && /(?:\.pdf|page1-|\.jpg|\.jpeg|\.png|\.webp)/.test(lower)) {
+                candidates.push(href);
+            }
+        }
+
+        return candidates[0] || null;
+    } catch (error) {
+        console.warn(`Wikisource file-page preview detection failed for ${fileTitle}:`, error.message);
+        return null;
+    }
+}
+
+async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) {
+    const pageStem = normalizeWikisourceFileStem(pageTitle);
+    let coverImage = null;
+    let author = "";
+
+    // IMPORTANT: Do not take author metadata from arbitrary images on a Wikisource
+    // page. Illustrations are often uploaded by Wikimedia contributors, whose
+    // names can otherwise be mistaken for the book author. First inspect the
+    // likely edition file itself (e.g. गो-दान -> File:गोदान.pdf).
+    const titleVariants = [...new Set([
+        decodeWikisourceTitle(pageTitle),
+        decodeWikisourceTitle(pageTitle).replace(/[\s\-_–—]+/gu, ""),
+        decodeWikisourceTitle(pageTitle).replace(/[\s\-_–—]+/gu, " ").trim()
+    ].filter(Boolean))];
+
+    const exactFileCandidates = [];
+    for (const variant of titleVariants) {
+        for (const ext of ["pdf", "djvu", "jpg", "jpeg", "png", "webp"]) {
+            exactFileCandidates.push(`File:${variant}.${ext}`);
+            exactFileCandidates.push(`चित्र:${variant}.${ext}`);
+        }
+    }
+
+    const checked = new Set();
+
+    async function inspectFile(fileTitle, score = 0) {
+        const key = String(fileTitle || "").toLowerCase();
+        if (!fileTitle || checked.has(key)) return false;
+        checked.add(key);
+
+        try {
+            const data = await wikisourceApi(apiUrl, {
+                action: "query",
+                prop: "imageinfo",
+                titles: fileTitle,
+                iiprop: "url|mime|size|extmetadata",
+                iiextmetadatafilter: "Artist|Author|Creator|ImageDescription|DateTimeOriginal",
+                iiurlwidth: 1400
+            });
+            const pages = data.query?.pages || {};
+            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+            const info = page?.imageinfo?.[0];
+            if (!info) return false;
+
+            // Only accept author metadata from the edition/cover file we
+            // intentionally selected, never from unrelated page images.
+            if (!author) author = extractAuthorFromWikisourceImageInfo(info);
+
+            const mime = String(info.mime || "").toLowerCase();
+            const candidateUrl = info.thumburl || null;
+            if (!coverImage && candidateUrl && !isBadWikisourceCoverUrl(candidateUrl)
+                && mime.startsWith("image/")) {
+                coverImage = candidateUrl;
+            }
+
+            // MediaWiki may return only the raw PDF URL for a PDF file.
+            // Resolve the file description page to obtain its first-page
+            // thumbnail, which is a real image URL suitable for MyLikith.
+            if (!coverImage && mime === "application/pdf") {
+                // A PDF's first page is often a library/scan identification sheet,
+                // not the book cover. Proofread Wikisource editions may expose a
+                // dedicated "आवरण-पृष्ठ" or "मुखपृष्ठ" page. Prefer that named
+                // cover page, then fall back to the PDF preview only if no named
+                // cover page exists.
+                const indexCover = await resolveWikisourceIndexCoverPage(apiUrl, fileTitle);
+                if (indexCover) coverImage = indexCover;
+                if (!coverImage) {
+                    const namedCover = await resolveWikisourceNamedCoverPage(apiUrl, fileTitle);
+                    if (namedCover) coverImage = namedCover;
+                }
+                if (!coverImage) {
+                    const preview = await fetchWikisourceFilePagePreview(apiUrl, fileTitle);
+                    if (preview) coverImage = preview;
+                }
+            }
+            return Boolean(coverImage || author);
+        } catch (error) {
+            console.warn(`Wikisource exact file metadata detection failed for ${fileTitle}:`, error.message);
+            return false;
+        }
+    }
+
+    // First pass: exact edition-file candidates. This is what fixes sources
+    // whose cover/author live on a File:<book>.pdf page rather than directly on
+    // the work page.
+    for (const fileTitle of exactFileCandidates) {
+        await inspectFile(fileTitle, 200);
+        if (coverImage && author) break;
+    }
+
+    // Second pass: inspect images actually embedded on the work page, but only
+    // use them for the cover when their filename strongly matches the book.
+    // Never use these arbitrary image metadata values as the author.
+    const imageTitles = await getWikisourcePageImageTitles(apiUrl, pageTitle);
+    const scored = imageTitles
+        .filter(title => !isBadWikisourceImageTitle(title))
+        .map((title, index) => {
+            const stem = normalizeWikisourceFileStem(title);
+            let score = 0;
+            if (stem === pageStem) score += 100;
+            if (stem.includes(pageStem) || pageStem.includes(stem)) score += 60;
+            if (/\.(?:pdf|jpg|jpeg|png|webp|tif|tiff)$/i.test(title)) score += 15;
+            if (/cover|मुखपृष्ठ|आवरण|front/i.test(title)) score += 25;
+            if (/page|पृष्ठ|djvu/i.test(title)) score -= 50;
+            return { title, score, index };
+        })
+        .filter(item => item.score >= 60)
+        .sort((a, b) => b.score - a.score || a.index - b.index);
+
+    for (const candidate of scored) {
+        if (coverImage) break;
+        await inspectFile(candidate.title, candidate.score);
+    }
+
+    return { coverImage, author };
+}
+
+function extractWikisourceAuthorFromWikitext(wikitext) {
+    const source = String(wikitext || "");
+    const fieldPatterns = [
+        /(?:^|\n)\s*\|\s*(?:author|writer|poet|रचनाकार|लेखक|रचयिता|कवि|लेखक का नाम)\s*=\s*([^\n|]+)/iu,
+        /(?:^|\n)\s*(?:author|writer|poet|रचनाकार|लेखक|रचयिता|कवि)\s*[:：]\s*([^\n|]+)/iu
+    ];
+    for (const re of fieldPatterns) {
+        const m = source.match(re);
+        if (m && m[1]) {
+            const value = sanitizeWikisourceAuthor(m[1]);
+            if (value) return value;
+        }
+    }
+    return "";
+}
+
+function extractWikisourceAuthorHeuristic(text, title) {
+    const lines = String(text || "")
+        .split("\n")
+        .map(line => line.replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+    const normalize = value => decodeWikisourceTitle(value)
+        .replace(/[\s\-–—_:：.,'"“”‘’()\[\]{}]/g, "")
+        .toLowerCase();
+    const titleKey = normalize(title);
+    if (!titleKey) return "";
+
+    const titleIndexes = [];
+    for (let i = 0; i < Math.min(lines.length, 120); i++) {
+        if (normalize(lines[i]) === titleKey) titleIndexes.push(i);
+    }
+
+    // Many Wikisource work pages render a simple bibliographic block as:
+    // title -> author -> publisher/edition. Use the second title occurrence
+    // because the first occurrence is often the page heading.
+    const start = titleIndexes.length >= 2 ? titleIndexes[1] + 1 : -1;
+    if (start < 0) return "";
+
+    const blocked = /^(?:लेखक|रचनाकार|कवि|प्रकाशक|मुद्रक|प्रथम संस्करण|वर्तमान संस्करण|प्रकाशन|प्रकाशित|मूल्य|दिनांक|स्रोत|Image|Public domain|सार्वजनिक डोमेन|©|वर्ष|author|writer|publisher|publication|copyright)$/iu;
+    for (let i = start; i < Math.min(start + 6, lines.length); i++) {
+        const value = lines[i];
+        if (!value || blocked.test(value)) continue;
+        if (/^(?:19|20)\d{2}$/u.test(value)) continue;
+        if (value.length < 2 || value.length > 120) continue;
+        if (normalize(value) === titleKey) continue;
+        // Avoid obvious metadata sentences/URLs.
+        if (/https?:\/\//i.test(value) || /(?:प्रथम संस्करण|वर्तमान संस्करण|रचना-काल|publication|copyright)/iu.test(value)) continue;
+        const candidate = sanitizeWikisourceAuthor(value);
+        if (candidate) return candidate;
+    }
+    return "";
+}
+
 function extractWikisourceAuthor(text) {
     const lines = String(text || "")
         .split("\n")
@@ -408,19 +1316,28 @@ function extractWikisourceAuthor(text) {
 
     const patterns = [
         /^(?:author|written by|poet|writer)\s*[:\-]\s*(.+)$/i,
-        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s*[:\-]?\s*(.+)$/i,
-        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s+(.+)$/i
+        /^(?:रचनाकार|लेखक|रचयिता|कवि)\s*[:\-]\s*(.+)$/u,
+        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s*[:\-]?\s*(.+)$/iu,
+        /^(?:रचनाकार|लेखक|रचयिता|कवि)\s+(.+)$/u,
+        /^(?:రచయిత|రచించినవారు|రచించిన వారు|కవి)\s+(.+)$/iu
     ];
 
-    for (const line of lines.slice(0, 80)) {
-        for (const pattern of patterns) {
-            const match = line.match(pattern);
-            if (match && match[1].trim().length <= 160) {
-                return match[1].trim();
+    for (let i = 0; i < Math.min(lines.length, 100); i++) {
+        const line = lines[i];
+        if (/^(?:author|written by|poet|writer|रचनाकार|लेखक|रचयिता|कवि|రచయిత|రచించినవారు|రచించిన వారు|కవి)$/iu.test(line)) {
+            const next = lines[i + 1] || "";
+            const candidate = sanitizeWikisourceAuthor(next);
+            if (candidate && !/^(?:प्रथम संस्करण|वर्तमान संस्करण|publication|published|copyright|©)$/iu.test(candidate)) {
+                return candidate;
             }
         }
+        for (const pattern of patterns) {
+            const match = line.match(pattern);
+            if (!match || !match[1]) continue;
+            const candidate = sanitizeWikisourceAuthor(match[1]);
+            if (candidate) return candidate;
+        }
     }
-
     return "";
 }
 
@@ -469,6 +1386,63 @@ function normalizeWikisourceChapterTitle(mainTitle, linkedTitle) {
     return title.replace(/_/g, " ").replace(/\s+/g, " ").trim() || "Chapter";
 }
 
+function extractWikisourceImageTitlesFromWikitext(wikitext) {
+    const source = String(wikitext || "");
+    const titles = [];
+    const seen = new Set();
+    const re = /\[\[(?:File|Image|चित्र|फाइल)\s*:\s*([^|\]\n]+)(?:\|[^\]]*)?\]\]/giu;
+    let match;
+    while ((match = re.exec(source)) !== null) {
+        const name = decodeWikisourceTitle(match[1]).trim();
+        if (!name) continue;
+        const lower = name.toLowerCase();
+        if (
+            lower.includes("pd-icon") ||
+            lower.includes("public_domain") ||
+            lower.includes("commons-logo") ||
+            lower.includes("wikimedia-button") ||
+            lower.includes("edit-clear") ||
+            lower.includes("no_image")
+        ) continue;
+        const key = lower;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        titles.push(name);
+    }
+    return titles;
+}
+
+async function resolveWikisourceImageFromWikitext(apiUrl, wikitext) {
+    const imageTitles = extractWikisourceImageTitlesFromWikitext(wikitext);
+    for (const imageName of imageTitles) {
+        try {
+            const title = /^(?:file|image|चित्र|फाइल)\s*:/iu.test(imageName)
+                ? imageName
+                : `File:${imageName}`;
+            const data = await wikisourceApi(apiUrl, {
+                action: "query",
+                prop: "imageinfo",
+                titles: title,
+                iiprop: "url|mime|size",
+                iiurlwidth: 1200
+            });
+            const pages = data.query?.pages || {};
+            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+            const info = page?.imageinfo?.[0];
+            if (!info?.url) continue;
+            const mime = String(info.mime || "").toLowerCase();
+            // Prefer a real image/cover file, but allow PDF files because
+            // Wikisource commonly stores the edition cover as a PDF scan.
+            if (mime.startsWith("image/") || mime === "application/pdf") {
+                return info.thumburl || info.url;
+            }
+        } catch (error) {
+            console.warn(`Wikisource imageinfo detection failed for ${imageName}:`, error.message);
+        }
+    }
+    return null;
+}
+
 function extractWikisourceCoverFromHtml(html) {
     const source = String(html || "");
     const candidates = [];
@@ -490,7 +1464,7 @@ function extractWikisourceCoverFromHtml(html) {
             lower.includes("edit-clear")
         ) continue;
 
-        candidates.push(href);
+        if (!isBadWikisourceCoverUrl(href)) candidates.push(href);
     }
 
     // Also inspect image src values, but never blindly use the first image.
@@ -509,134 +1483,642 @@ function extractWikisourceCoverFromHtml(html) {
             lower.includes("edit-clear")
         ) continue;
 
-        candidates.push(src);
+        if (!isBadWikisourceCoverUrl(src)) candidates.push(src);
     }
 
     return candidates[0] || null;
 }
 
-async function fetchWikisourcePage(apiUrl, title) {
-    const data = await wikisourceApi(apiUrl, {
-        action: "parse",
-        page: title,
-        prop: "text",
-        redirects: 1
+
+function wikisourcePageUrl(info, title) {
+    return `https://${info.host}/wiki/${encodeURIComponent(title).replace(/%2F/g, "/")}`;
+}
+
+function extractElementHtmlByMarker(html, markerType, markerValue) {
+    const source = String(html || "");
+    const openRegex = markerType === "id"
+        ? new RegExp(`<([a-z0-9]+)\b[^>]*\bid=["']${markerValue}["'][^>]*>`, "i")
+        : new RegExp(`<([a-z0-9]+)\b[^>]*\bclass=["'][^"']*\b${markerValue}\b[^"']*["'][^>]*>`, "i");
+    const match = source.match(openRegex);
+    if (!match || match.index == null) return source;
+
+    const tag = match[1].toLowerCase();
+    const start = match.index;
+    const tagRegex = new RegExp(`<\\/?${tag}\b[^>]*>`, "gi");
+    tagRegex.lastIndex = start;
+    let depth = 0;
+    let first = true;
+    let token;
+    while ((token = tagRegex.exec(source)) !== null) {
+        const raw = token[0];
+        if (/^<\//.test(raw)) {
+            depth--;
+            if (depth === 0) {
+                return source.slice(start, tagRegex.lastIndex);
+            }
+        } else if (!/\/\s*>$/.test(raw)) {
+            depth++;
+            first = false;
+        }
+    }
+    return source.slice(start);
+}
+
+async function fetchWikisourceDirectHtml(info, title, options = {}) {
+    const includeCover = options.includeCover !== false;
+    const url = wikisourcePageUrl(info, title);
+    const response = await axios.get(url, {
+        timeout: 30000,
+        responseType: "text",
+        maxContentLength: 20 * 1024 * 1024,
+        headers: {
+            "User-Agent": "MyLikith-Classics-Importer/1.0"
+        }
     });
 
-    const html = data.parse?.text || "";
-    const pageTitle = data.parse?.title || title;
+    const rawHtml = String(response.data || "");
+    const contentHtml = extractElementHtmlByMarker(rawHtml, "id", "mw-content-text") || rawHtml;
+    const parserHtml = extractElementHtmlByMarker(contentHtml, "class", "mw-parser-output") || contentHtml;
+    const text = cleanWikisourceHtml(parserHtml);
 
     let coverImage = null;
-    try {
-        const imageData = await wikisourceApi(apiUrl, {
-            action: "query",
-            prop: "pageimages",
-            piprop: "thumbnail|original",
-            pithumbsize: 1000,
-            titles: pageTitle
-        });
-        const pages = imageData.query?.pages || {};
-        const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
-        coverImage = page?.original?.source || page?.thumbnail?.source || null;
-    } catch (imageError) {
-        console.warn(`Wikisource PageImages detection failed for ${pageTitle}:`, imageError.message);
-    }
-
-    if (!coverImage) {
-        coverImage = extractWikisourceCoverFromHtml(html);
+    if (includeCover) {
+        coverImage = extractWikisourceCoverFromHtml(parserHtml) || extractFirstImageFromHtml(parserHtml);
     }
 
     return {
-        title: pageTitle,
-        html,
-        text: cleanWikisourceHtml(html),
-        coverImage
+        title,
+        html: parserHtml,
+        wikitext: "",
+        text,
+        coverImage,
+        parsedLinks: []
     };
+}
+
+async function resolveWikisourceCoverByTitle(info, pageTitle) {
+    const raw = decodeWikisourceTitle(pageTitle).trim();
+    if (!raw) return null;
+    const variants = new Set();
+    const compact = raw.replace(/[\s\-_–—]+/gu, "");
+    const spaced = raw.replace(/[\s\-_–—]+/gu, " ").trim();
+    const candidates = [
+        `${raw}.pdf`, `${spaced}.pdf`, `${compact}.pdf`,
+        `${raw}.jpg`, `${raw}.jpeg`, `${raw}.png`,
+        `${spaced}.jpg`, `${spaced}.jpeg`, `${spaced}.png`,
+        `${compact}.jpg`, `${compact}.jpeg`, `${compact}.png`
+    ];
+    for (const name of candidates) variants.add(`File:${name}`);
+    for (const fileTitle of variants) {
+        try {
+            const data = await wikisourceApi(info.apiUrl, {
+                action: "query",
+                prop: "imageinfo",
+                titles: fileTitle,
+                iiprop: "url|mime|size",
+                iiurlwidth: 1400
+            });
+            const pages = data.query?.pages || {};
+            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+            const ii = page?.imageinfo?.[0];
+            const candidate = ii?.thumburl || ii?.url || null;
+            if (!candidate || isBadWikisourceCoverUrl(candidate)) continue;
+            const mime = String(ii?.mime || "").toLowerCase();
+            if (mime.startsWith("image/") || mime === "application/pdf") return candidate;
+        } catch (error) {
+            // Candidate filenames are optional; keep trying the other variants.
+        }
+    }
+    return null;
+}
+
+async function fetchWikisourcePage(apiUrl, title, options = {}) {
+    const includeCover = options.includeCover !== false;
+
+    try {
+        const data = await wikisourceApi(apiUrl, {
+            action: "parse",
+            page: title,
+            prop: "text|links|wikitext",
+            redirects: 1
+        });
+
+        const html = data.parse?.text || "";
+        const pageTitle = data.parse?.title || title;
+
+        let coverImage = null;
+        if (includeCover) {
+            try {
+                const imageData = await wikisourceApi(apiUrl, {
+                    action: "query",
+                    prop: "pageimages",
+                    piprop: "thumbnail|original",
+                    pithumbsize: 1000,
+                    titles: pageTitle
+                });
+                const pages = imageData.query?.pages || {};
+                const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
+                const candidate = page?.original?.source || page?.thumbnail?.source || null;
+                coverImage = isBadWikisourceCoverUrl(candidate) ? null : candidate;
+            } catch (imageError) {
+                console.warn(`Wikisource PageImages detection failed for ${pageTitle}:`, imageError.message);
+            }
+            if (!coverImage) coverImage = extractWikisourceCoverFromHtml(html);
+            if (!coverImage) {
+                coverImage = await resolveWikisourceImageFromWikitext(apiUrl, data.parse?.wikitext || "");
+            }
+        }
+
+        return {
+            title: pageTitle,
+            html,
+            wikitext: data.parse?.wikitext || "",
+            text: cleanWikisourceHtml(html),
+            coverImage,
+            parsedLinks: Array.isArray(data.parse?.links) ? data.parse.links : []
+        };
+    } catch (apiError) {
+        console.warn(`Wikisource API fetch failed for ${title}; trying direct page HTML:`, apiError.message);
+        return fetchWikisourceDirectHtml({
+            host: new URL(apiUrl).hostname
+        }, title, { includeCover });
+    }
+}
+
+
+
+function decodeWikisourceTitle(value) {
+    let text = String(value || "").trim();
+
+    // Decode URL encoding repeatedly when Wikisource returns encoded titles.
+    for (let i = 0; i < 3; i++) {
+        try {
+            const decoded = decodeURIComponent(text);
+            if (decoded === text) break;
+            text = decoded;
+        } catch {
+            break;
+        }
+    }
+
+    // Decode the small set of HTML entities that commonly occur in page
+    // titles/links. Numeric entities are handled generically.
+    text = text
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&#(\d+);/g, (_, n) => {
+            try { return String.fromCodePoint(Number(n)); } catch { return _; }
+        })
+        .replace(/&#x([0-9a-f]+);/gi, (_, n) => {
+            try { return String.fromCodePoint(parseInt(n, 16)); } catch { return _; }
+        });
+
+    return text.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function extractWikisourceSubpageTitlesFromParsedLinks(parsedLinks, info) {
+    const titles = [];
+    const seen = new Set();
+    for (const link of Array.isArray(parsedLinks) ? parsedLinks : []) {
+        const title = decodeWikisourceTitle(typeof link === "string" ? link : link?.title);
+        if (!title) continue;
+        const prefix = `${info.title}/`;
+        if (!title.startsWith(prefix)) continue;
+        const suffix = title.slice(prefix.length).trim();
+        if (!suffix || suffix.includes("/")) continue;
+        if (isWikisourceNonChapterSubpage(suffix)) continue;
+        const key = title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        titles.push(title);
+    }
+    return titles;
 }
 
 function extractWikisourceSubpageTitlesFromHtml(html, info) {
     const source = String(html || "");
-    const prefix = `${info.title}/`;
-    const chapterTitles = [];
+    const titles = [];
     const seen = new Set();
-    const baseUrl = `https://${info.host}/wiki/${encodeURIComponent(info.title)}`;
-
-    const add = value => {
-        let title = String(value || "").trim().replace(/_/g, " ");
-        if (!title) return;
-
-        try {
-            title = decodeURIComponent(title);
-        } catch (_) {}
-
-        title = title.replace(/_/g, " ").trim();
-        if (!title.startsWith(prefix)) return;
-
-        const suffix = title.slice(prefix.length).trim();
-        if (!suffix || suffix.includes("/")) return;
-
-        const key = title.toLowerCase();
-        if (seen.has(key)) return;
-        seen.add(key);
-        chapterTitles.push(title);
-    };
-
-    const hrefRegex = /href=["']([^"']+)["']/gi;
+    const hrefRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi;
     let match;
 
     while ((match = hrefRegex.exec(source)) !== null) {
-        const href = String(match[1] || "").trim();
+        let href = String(match[1] || "").trim();
         if (!href || href.startsWith("#") || /^javascript:/i.test(href)) continue;
 
+        let title = "";
         try {
-            const resolved = new URL(href, baseUrl);
-            if (resolved.hostname !== info.host) continue;
-
-            let title = "";
-            if (resolved.pathname.startsWith("/wiki/")) {
-                title = resolved.pathname.slice("/wiki/".length);
-            } else if (resolved.pathname === "/w/index.php") {
-                title = resolved.searchParams.get("title") || "";
+            const base = `https://${info.host}`;
+            const absolute = new URL(href, base);
+            if (absolute.pathname.startsWith("/wiki/")) {
+                title = decodeWikisourceTitle(absolute.pathname.slice("/wiki/".length));
+            } else if (absolute.pathname === "/w/index.php") {
+                title = decodeWikisourceTitle(absolute.searchParams.get("title") || "");
             }
+        } catch {
+            continue;
+        }
 
-            if (title) add(title);
-        } catch (_) {
-            // Ignore malformed links.
+        if (!title) continue;
+        const prefix = `${info.title}/`;
+        if (!title.startsWith(prefix)) continue;
+        const suffix = title.slice(prefix.length).trim();
+        if (!suffix || suffix.includes("/")) continue;
+        if (isWikisourceNonChapterSubpage(suffix)) continue;
+
+        const key = title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        titles.push(title);
+    }
+
+    return titles;
+}
+
+function isWikisourceNonChapterSubpage(value) {
+    const v = decodeWikisourceTitle(value).toLowerCase().trim();
+    if (!v) return true;
+
+    const excluded = [
+        "toc", "table of contents", "contents", "preface", "foreword", "introduction",
+        "front matter", "copyright", "license", "notes", "references", "bibliography",
+        "author", "author portrait", "illustrations", "images", "index", "appendix",
+        "విషయసూచిక", "పూర్తివిషయసూచిక", "ప్రవేశిక", "అవతారిక", "ముందుమాట", "కృతజ్ఞతలు",
+        "సంపాదకీయభూమిక", "సంపాదకీయ భూమిక", "భూమిక", "రచయిత చిత్రపటం", "ఆంధ్రమహాజనులకు విజ్ఞప్తి", "ప్రకటనలు", "ఇతర మూల ప్రతులు",
+        "వికీసోర్స్ కూర్పు ముందుమాట", "ఇవీచూడండి"
+    ];
+
+    return excluded.some(item => v === item || v.startsWith(`${item} `));
+}
+
+
+function extractWikisourceTocSubpageTitlesFromWikitext(wikitext, info) {
+    const source = String(wikitext || "");
+    const lines = source.split(/\r?\n/);
+    const headingRe = /^(={2,6})\s*(.*?)\s*\1\s*$/u;
+    let tocStart = -1;
+    let tocLevel = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(headingRe);
+        if (!m) continue;
+        const heading = decodeWikisourceTitle(m[2]).toLowerCase();
+        if (
+            heading === "విషయసూచిక" ||
+            heading.includes("విషయసూచిక") ||
+            heading === "table of contents" ||
+            heading === "contents" ||
+            heading === "toc" ||
+            heading.includes("table of contents") ||
+            heading === "विषय सूची" ||
+            heading === "अनुक्रमणिका" ||
+            heading === "সূচিপত্র" ||
+            heading === "தலைப்புகளின் பட்டியல்" ||
+            heading === "பொருளடக்கம்" ||
+            heading === "ಪರಿವಿಡಿ" ||
+            heading === "ವಿಷಯ ಸೂಚಿ"
+        ) {
+            tocStart = i + 1;
+            tocLevel = m[1].length;
+            break;
         }
     }
 
-    return chapterTitles;
+    if (tocStart < 0) return [];
+
+    const tocLines = [];
+    for (let i = tocStart; i < lines.length; i++) {
+        const m = lines[i].match(headingRe);
+        if (m && m[1].length <= tocLevel) break;
+        tocLines.push(lines[i]);
+    }
+
+    const prefix = `${info.title}/`;
+    const titles = [];
+    const seen = new Set();
+    const linkRegex = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+
+    for (const line of tocLines) {
+        let match;
+        while ((match = linkRegex.exec(line)) !== null) {
+            const title = decodeWikisourceTitle(match[1]);
+            if (!title.startsWith(prefix)) continue;
+            const suffix = title.slice(prefix.length).trim();
+            if (!suffix || suffix.includes("/")) continue;
+            if (isWikisourceNonChapterSubpage(suffix)) continue;
+            const key = canonicalWikisourceChapterKey(title);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            titles.push(title);
+        }
+    }
+
+    return titles;
+}
+
+function extractWikisourceSubpageTitlesFromWikitext(wikitext, info) {
+    const source = String(wikitext || "");
+    const prefix = `${info.title}/`;
+    const titles = [];
+    const seen = new Set();
+
+    // Wikisource TOCs are normally explicit wikilinks. Reading the raw
+    // wikitext preserves their source order and avoids API/link-result
+    // truncation or reordering. We intentionally inspect every direct
+    // subpage link, then let the chapter classifier remove navigation pages.
+    const linkRegex = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+    let match;
+
+    while ((match = linkRegex.exec(source)) !== null) {
+        const title = decodeWikisourceTitle(match[1]);
+        if (!title.startsWith(prefix)) continue;
+
+        const suffix = title.slice(prefix.length).trim();
+        if (!suffix || suffix.includes("/")) continue;
+        if (isWikisourceNonChapterSubpage(suffix)) continue;
+        if (!isLikelyWikisourceChapterSuffix(suffix)) continue;
+
+        const key = title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        titles.push(title);
+    }
+
+    return titles;
+}
+
+function normalizeWikisourceOrdinalNumber(value) {
+    const v = decodeWikisourceTitle(value).trim().toLowerCase();
+    const map = {
+        "మొదటి": 1, "ప్రథమ": 1,
+        "రెండవ": 2, "రెండవది": 2, "ద్వితీయ": 2,
+        "మూడవ": 3, "తృతీయ": 3,
+        "నాలుగవ": 4, "నాలుగో": 4, "చతుర్థ": 4,
+        "ఐదవ": 5, "పంచమ": 5,
+        "ఆరవ": 6, "షష్ఠ": 6,
+        "ఏడవ": 7, "సప్తమ": 7,
+        "ఎనిమిదవ": 8, "అష్టమ": 8,
+        "తొమ్మిదవ": 9, "నవమ": 9,
+        "పదవ": 10, "దశమ": 10,
+        "పదకొండవ": 11, "పదునొకొండవ": 11, "ఏకాదశ": 11,
+        "పన్నెండవ": 12, "పండ్రెండవ": 12, "ద్వాదశ": 12,
+        "పదమూడవ": 13, "పదుమూడవ": 13, "త్రయోదశ": 13,
+        "పదునాలుగవ": 14, "చతుర్దశ": 14,
+        "పదునైదవ": 15, "పంచదశ": 15,
+        "పదునాఱవ": 16, "పదహారవ": 16, "షోడశ": 16,
+        "పదిహేడవ": 17, "సప్తదశ": 17,
+        "పద్దెనిమిదవ": 18, "అష్టాదశ": 18,
+        "పందొమ్మిదవ": 19, "ఏకోనవింశ": 19,
+        "ఇరవయ్యవ": 20, "వింశ": 20
+    };
+    return map[v] || null;
+}
+
+function isPureWikisourceNumberSuffix(suffix) {
+    const value = normalizeWikisourceNumeral(suffix).trim();
+    return /^\d{1,3}[.)]?$/u.test(value);
+}
+
+function isLikelyWikisourceChapterSuffix(suffix) {
+    const value = decodeWikisourceTitle(suffix);
+    if (!value) return false;
+    if (isWikisourceNonChapterSubpage(value)) return false;
+
+    // Direct first-level subpages on a Wikisource work page are candidates.
+    // Named sections such as Telugu literary chapter titles often do not
+    // contain words like "chapter" or "part", so do not reject them merely
+    // because their title is descriptive.
+    return true;
+}
+
+
+function isStrongWikisourceChapterTitle(suffix) {
+    const v = decodeWikisourceTitle(suffix).trim();
+    if (!v) return false;
+
+    if (/(?:chapter|part|section|book|volume|act|canto)\s*[-.:#]?\s*(?:\d{1,3}|[IVXLCDM]{1,12})(?:\b|\.)/i.test(v)) return true;
+    if (/^(?:[\p{L}]+)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)$/u.test(v)) return true;
+    if (/^(?:అధ్యాయం|అధ్యాయము|భాగం|భాగము|కాండము|కాండం)\s*(?:[-.:#]?\s*)?(?:\d{1,3}|[IVXLCDM]{1,12})/iu.test(v)) return true;
+    if (/^(?:అధ్యాయ|भाग|अध्याय|प्रकरण|खंड|खण्ड|अंक|பகுதி|அத்தியாயம்|பிரிவு|ಅಧ್ಯಾಯ|ಭಾಗ)\s*[-.:#]?\s*[\dIVXLCDM०-९]+/iu.test(v)) return true;
+    return false;
+}
+
+function refineWikisourceChapterTitles(titles, info) {
+    if (!titles.length) return titles;
+    const suffixes = titles.map(title => title.slice(`${info.title}/`.length));
+    const strong = suffixes.filter(isStrongWikisourceChapterTitle);
+
+    // If the work has a clearly numbered/ordinal chapter family, use that
+    // family as the authoritative set. This prevents front-matter subpages
+    // such as "Wikisource notes" from becoming a chapter while still allowing
+    // genuinely named sections for works that have no numbered chapter family.
+    if (strong.length >= 2 && strong.length >= Math.ceil(suffixes.length * 0.5)) {
+        const strongSet = new Set(strong.map(value => decodeWikisourceTitle(value).toLowerCase()));
+        return titles.filter(title => strongSet.has(decodeWikisourceTitle(title.slice(`${info.title}/`.length)).toLowerCase()));
+    }
+
+    return titles;
+}
+
+
+function canonicalWikisourceChapterKey(value) {
+    let text = decodeWikisourceTitle(value);
+    try { text = text.normalize("NFKC"); } catch {}
+    return text
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/[\u2010-\u2015]/g, "-")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function canonicalWikisourceChapterContentKey(value) {
+    return String(value || "")
+        .normalize("NFKC")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function dedupeWikisourceChapterTitles(titles, info) {
+    const seen = new Set();
+    const result = [];
+    for (const title of titles) {
+        const suffix = normalizeWikisourceChapterTitle(info.title, title);
+        const key = canonicalWikisourceChapterKey(suffix);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        result.push(title);
+    }
+    return result;
+}
+
+function normalizeWikisourceNumeral(value) {
+    const raw = decodeWikisourceTitle(value).trim();
+    const devanagari = "०१२३४५६७८९";
+    const telugu = "౦౧౨౩౪౫౬౭౮౯";
+    let out = "";
+    for (const ch of raw) {
+        const d = devanagari.indexOf(ch);
+        if (d >= 0) { out += String(d); continue; }
+        const t = telugu.indexOf(ch);
+        if (t >= 0) { out += String(t); continue; }
+        out += ch;
+    }
+    return out;
+}
+
+function sortWikisourceChapterTitles(titles, info) {
+    const ordinal = value => {
+        const v = normalizeWikisourceNumeral(value).trim();
+        const numeric = v.match(/(?:chapter|part|section|book|volume|act|canto|प्रकरण|अध्याय|भाग|खंड|खण्ड|अंक|प्रकरणము|ప్రకరణం|భాగము|భాగం)\s*[-.:#]?\s*(\d{1,3})/iu);
+        if (numeric) return Number(numeric[1]);
+
+        const bare = v.match(/^(\d{1,3})[.)]?$/u);
+        if (bare) return Number(bare[1]);
+
+        const roman = v.match(/(?:chapter|part|section|book|volume|act|canto)\s*[-.:#]?\s*([IVXLCDM]{1,10})\b/i);
+        if (roman) {
+            const map = {I:1,V:5,X:10,L:50,C:100,D:500,M:1000};
+            let total=0, prev=0;
+            for (const ch of roman[1].toUpperCase().split("").reverse()) {
+                const n=map[ch] || 0;
+                if (n < prev) total -= n; else { total += n; prev=n; }
+            }
+            return total || null;
+        }
+
+        const hindi = v.match(/^([^\s]+)\s+(?:अध्याय|भाग|खंड|खण्ड|अंक)$/iu);
+        if (hindi) return normalizeWikisourceOrdinalNumber(hindi[1]);
+
+        const telugu = v.match(/^([^\s]+)\s+(?:ప్రకరణము|ప్రకరణం|భాగము|భాగం)$/iu);
+        if (telugu) return normalizeWikisourceOrdinalNumber(telugu[1]);
+        return null;
+    };
+
+    const withIndex = titles.map((title, index) => ({ title, index, n: ordinal(title.slice(info.title.length + 1)) }));
+    const recognized = withIndex.filter(item => Number.isFinite(item.n));
+
+    if (recognized.length >= Math.max(2, Math.ceil(withIndex.length * 0.5))) {
+        return withIndex
+            .sort((a, b) => {
+                if (a.n == null && b.n == null) return a.index - b.index;
+                if (a.n == null) return 1;
+                if (b.n == null) return -1;
+                return a.n - b.n || a.index - b.index;
+            })
+            .map(item => item.title);
+    }
+    return titles;
+}
+
+async function fetchWikisourceChapterWithRetry(info, title, attempts = 3) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+            // Prefer the normal public Wikisource page for chapter content.
+            // This avoids API throttling/partial parse responses on large works.
+            const page = await fetchWikisourceDirectHtml(info, title, { includeCover: false });
+            if (!page.text || page.text.trim().length < 20) {
+                throw new Error("Chapter page returned no usable text.");
+            }
+            return page;
+        } catch (directError) {
+            lastError = directError;
+            try {
+                const page = await fetchWikisourcePage(info.apiUrl, title, { includeCover: false });
+                if (!page.text || page.text.trim().length < 20) {
+                    throw new Error("Chapter page returned no usable text.");
+                }
+                return page;
+            } catch (apiError) {
+                lastError = apiError;
+            }
+        }
+
+        if (attempt < attempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+    }
+    throw lastError || new Error("Chapter fetch failed.");
+}
+
+
+async function extractWikisourcePrefixSubpageTitles(info) {
+    const titles = [];
+    const prefix = `${info.title}/`;
+    let apcontinue = null;
+
+    try {
+        do {
+            const params = {
+                action: "query",
+                list: "allpages",
+                apprefix: prefix,
+                apnamespace: 0,
+                aplimit: "max"
+            };
+            if (apcontinue) params.apcontinue = apcontinue;
+
+            const data = await wikisourceApi(info.apiUrl, params);
+            for (const page of (data.query?.allpages || [])) {
+                const title = decodeWikisourceTitle(page.title);
+                if (!title.startsWith(prefix)) continue;
+                const suffix = title.slice(prefix.length).trim();
+                if (!suffix || suffix.includes("/")) continue;
+                if (isWikisourceNonChapterSubpage(suffix)) continue;
+                if (!isLikelyWikisourceChapterSuffix(suffix)) continue;
+                titles.push(title);
+            }
+            apcontinue = data.continue?.apcontinue || null;
+        } while (apcontinue);
+    } catch (error) {
+        console.warn("Wikisource allpages prefix discovery failed:", error.message);
+    }
+    return dedupeWikisourceChapterTitles(titles, info);
 }
 
 async function fetchWikisourceChapters(info) {
-    const mainPage = await fetchWikisourcePage(info.apiUrl, info.title);
-    const prefix = `${info.title}/`;
+    const mainPage = await fetchWikisourcePage(info.apiUrl, info.title, { includeCover: true });
     const chapterTitles = [];
     const seen = new Set();
 
-    const addChapterTitle = value => {
-        let title = String(value || "").replace(/_/g, " ").trim();
-        try { title = decodeURIComponent(title); } catch (_) {}
-        title = title.replace(/_/g, " ").trim();
-        if (!title || !title.startsWith(prefix)) return;
-
+    const add = value => {
+        const title = decodeWikisourceTitle(value);
+        const prefix = `${info.title}/`;
+        if (!title.startsWith(prefix)) return;
         const suffix = title.slice(prefix.length).trim();
         if (!suffix || suffix.includes("/")) return;
-
+        if (isWikisourceNonChapterSubpage(suffix)) return;
+        if (!isLikelyWikisourceChapterSuffix(suffix)) return;
         const key = title.toLowerCase();
         if (seen.has(key)) return;
         seen.add(key);
         chapterTitles.push(title);
     };
 
-    // Primary: actual links in the rendered page, preserving the author's
-    // intended chapter order. Resolve relative links as well as /wiki/ links.
-    for (const title of extractWikisourceSubpageTitlesFromHtml(mainPage.html, info)) {
-        addChapterTitle(title);
+    // 1. If the work has an explicit Table of Contents section, it is the
+    // authoritative chapter list. Do NOT merge broad subpage discovery into
+    // a TOC-backed work: Wikisource often contains alternate editions, scans,
+    // front matter, and helper subpages that share the same parent title.
+    const tocTitles = extractWikisourceTocSubpageTitlesFromWikitext(mainPage.wikitext, info);
+    if (tocTitles.length) {
+        for (const title of tocTitles) add(title);
+    } else {
+        // 2. No explicit TOC was found, so fall back to parsed links and
+        // rendered HTML as broader discovery sources.
+        for (const title of extractWikisourceSubpageTitlesFromWikitext(mainPage.wikitext, info)) add(title);
+        for (const title of extractWikisourceSubpageTitlesFromParsedLinks(mainPage.parsedLinks, info)) add(title);
+        for (const title of extractWikisourceSubpageTitlesFromHtml(mainPage.html, info)) add(title);
     }
 
-    // Secondary: MediaWiki links API, with pagination.
-    if (!chapterTitles.length) {
+    // 3. Complete query=links is only a fallback when no explicit TOC was
+    // found. With a TOC, broad link discovery must never add extra subpages.
+    if (!tocTitles.length) try {
         let plcontinue = null;
         do {
             const params = {
@@ -652,133 +2134,90 @@ async function fetchWikisourceChapters(info) {
             const pages = linksData.query?.pages || {};
             const pageList = Array.isArray(pages) ? pages : Object.values(pages);
             for (const page of pageList) {
-                for (const link of (page.links || [])) addChapterTitle(link.title);
+                for (const link of (page.links || [])) add(link.title);
             }
             plcontinue = linksData.continue?.plcontinue || null;
         } while (plcontinue);
+    } catch (linkDiscoveryError) {
+        console.warn("Wikisource query=links discovery failed; continuing with page TOC links:", linkDiscoveryError.message);
     }
 
-    // Tertiary: use MediaWiki search with an explicit title-prefix query.
-    // Some Wikisource pages expose only part of their TOC through the rendered
-    // HTML and the links API. Search is much more reliable for such works.
-    {
-        let sroffset = 0;
-        do {
-            const params = {
-                action: "query",
-                list: "search",
-                srsearch: `prefix:\"${prefix}\"`,
-                srnamespace: 0,
-                srlimit: "max"
-            };
-            if (sroffset) params.sroffset = sroffset;
-
-            const searchData = await wikisourceApi(info.apiUrl, params);
-            for (const result of (searchData.query?.search || [])) {
-                addChapterTitle(result.title);
-            }
-
-            const next = searchData.continue?.sroffset;
-            sroffset = Number.isFinite(Number(next)) ? Number(next) : 0;
-        } while (sroffset);
+    // 3b. Some Wikisource books, especially Hindi/Devanagari editions, have
+    // real numbered chapter subpages but no usable TOC links on the main page.
+    // MediaWiki allpages with the work-title prefix is the reliable fallback.
+    // It can discover children such as "गो-दान/१" ... "गो-दान/३६" while the
+    // direct-subpage filter excludes scan pages such as "पृष्ठ:...".
+    if (!tocTitles.length && chapterTitles.length <= 1) {
+        const prefixTitles = await extractWikisourcePrefixSubpageTitles(info);
+        const numericTitles = prefixTitles.filter(title => isPureWikisourceNumberSuffix(title.slice(`${info.title}/`.length)));
+        // When the source uses a pure numbered-subpage family (for example
+        // गो-दान/१ ... गो-दान/३६), only those numbered pages are chapters.
+        // The category may also expose scan/helper pages, so never import the
+        // entire prefix result blindly.
+        const candidates = numericTitles.length >= 2 && numericTitles.length >= Math.ceil(prefixTitles.length * 0.75)
+            ? numericTitles
+            : prefixTitles;
+        for (const title of candidates) add(title);
     }
 
-    // Fourth: enumerate the subpage namespace by prefix. This catches pages
-    // that are not indexed by search.
-    {
-        let gapcontinue = null;
-        do {
-            const params = {
-                action: "query",
-                generator: "allpages",
-                gapnamespace: 0,
-                gapprefix: prefix,
-                gaplimit: "max"
-            };
-            if (gapcontinue) params.gapcontinue = gapcontinue;
+    // The same Wikisource chapter can be discovered through the TOC, parsed
+    // links, rendered HTML, the links API, and prefix discovery. Normalize
+    // Unicode/whitespace before deciding whether two candidates are the same page.
+    const uniqueTitles = dedupeWikisourceChapterTitles(chapterTitles, info);
+    const refinedTitles = refineWikisourceChapterTitles(uniqueTitles, info);
+    const orderedTitles = sortWikisourceChapterTitles(refinedTitles, info);
 
-            const pagesData = await wikisourceApi(info.apiUrl, params);
-            const pages = pagesData.query?.pages || {};
-            const pageList = Array.isArray(pages) ? pages : Object.values(pages);
-            for (const page of pageList) addChapterTitle(page.title);
-            gapcontinue = pagesData.continue?.gapcontinue || null;
-        } while (gapcontinue);
-    }
-
-    // Remove obvious navigation/front-matter subpages. Keep actual literary
-    // chapter/part/section pages even when their titles are in another script.
-    const chapterWordPattern = /(?:chapter|part|section|book|volume|act|अध्याय|भाग|प्रकरण|காண்டம்|அத்தியாயம்|ಅಧ್ಯಾಯ|ಭಾಗ|അദ്ധ്യായം|ഭാഗം|অধ্যায়|পর্ব|खंड|अध्याय|खंड|باب|فصل|अध्याय|प्रकरण|కాండం|భాగము|ప్రకరణము)/i;
-    const filteredChapterTitles = chapterTitles.filter(title => {
-        const suffix = title.slice(prefix.length).trim();
-        return chapterWordPattern.test(suffix) || /^(?:[ivxlcdm]+|\d+)[.)\-]?$/i.test(suffix);
-    });
-
-    const teluguOrdinals = new Map([
-        ["మొదటి", 1], ["రెండవ", 2], ["మూడవ", 3], ["నాలుగవ", 4],
-        ["ఐదవ", 5], ["ఆరవ", 6], ["ఏడవ", 7], ["ఎనిమిదవ", 8],
-        ["తొమ్మిదవ", 9], ["పదవ", 10], ["పదకొండవ", 11], ["పండ్రెండవ", 12],
-        ["పన్నెండవ", 12], ["పదుమూడవ", 13], ["పదునాలుగవ", 14],
-        ["పదునైదవ", 15], ["పదునాఱవ", 16]
-    ]);
-
-    const getChapterOrder = title => {
-        const suffix = title.slice(prefix.length).trim();
-        const telugu = [...teluguOrdinals.entries()].find(([word]) => suffix.includes(word));
-        if (telugu) return telugu[1];
-
-        const arabic = suffix.match(/(?:chapter|part|section|book|volume|act|అధ్యాయం|భాగం|ప్రకరణము|ప్రకరణం)\s*(\d+)/i);
-        if (arabic) return Number(arabic[1]);
-
-        const roman = suffix.match(/(?:chapter|part|section|book|volume|act)\s*([ivxlcdm]+)/i);
-        if (roman) {
-            const values = {i:1,v:5,x:10,l:50,c:100,d:500,m:1000};
-            let total = 0, prev = 0;
-            for (const ch of roman[1].toLowerCase().split('').reverse()) {
-                const value = values[ch] || 0;
-                total += value < prev ? -value : value;
-                prev = value;
-            }
-            return total;
-        }
-        return Number.MAX_SAFE_INTEGER;
-    };
-
-    if (filteredChapterTitles.length >= 2) {
-        filteredChapterTitles.sort((a, b) => {
-            const ao = getChapterOrder(a);
-            const bo = getChapterOrder(b);
-            if (ao !== Number.MAX_SAFE_INTEGER || bo !== Number.MAX_SAFE_INTEGER) {
-                if (ao !== bo) return ao - bo;
-            }
-            return 0;
-        });
-        chapterTitles.length = 0;
-        chapterTitles.push(...filteredChapterTitles);
-    }
-
+    // Fetch sequentially with a small delay. Wikisource can throttle bursts of
+    // API/page requests, especially when a work contains many long chapters.
+    // Sequential fetching is slower but substantially more reliable for a
+    // production importer and avoids the exact "6 fetched, 11 failed" pattern.
     const chapters = [];
-    for (const title of chapterTitles) {
+    const failed = [];
+    const fetchedPageKeys = new Set();
+    const fetchedContentKeys = new Set();
+    for (let i = 0; i < orderedTitles.length; i++) {
+        const title = orderedTitles[i];
         try {
-            const page = await fetchWikisourcePage(info.apiUrl, title);
-            if (!page.text || page.text.length < 20) continue;
+            const page = await fetchWikisourceChapterWithRetry(info, title, 3);
+            const canonicalTitle = normalizeWikisourceChapterTitle(info.title, page.title || title);
+            const pageKey = canonicalWikisourceChapterKey(canonicalTitle);
+            const contentKey = canonicalWikisourceChapterContentKey(page.text);
 
+            // A redirect/alias can cause two different discovered URLs to
+            // resolve to the same Wikisource page. Never create that chapter
+            // twice. A long identical body is also treated as a duplicate
+            // safety net for mirrored/aliased subpages.
+            if (pageKey && fetchedPageKeys.has(pageKey)) {
+                continue;
+            }
+            if (contentKey.length >= 500 && fetchedContentKeys.has(contentKey)) {
+                continue;
+            }
+
+            if (pageKey) fetchedPageKeys.add(pageKey);
+            if (contentKey.length >= 500) fetchedContentKeys.add(contentKey);
             chapters.push({
-                title: normalizeWikisourceChapterTitle(info.title, page.title),
+                title: canonicalTitle,
                 content: page.text
             });
         } catch (error) {
-            console.warn(`Wikisource chapter fetch failed for ${title}:`, error.message);
+            failed.push({ title, error: error?.message || "Unknown error" });
+        }
+
+        if (i < orderedTitles.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 650));
         }
     }
 
-    if (!chapters.length) {
-        return {
-            mainPage,
-            chapters: parseGenericText(mainPage.text)
-        };
+    if (orderedTitles.length && failed.length) {
+        console.warn(`Wikisource chapter fetch: ${orderedTitles.length} discovered, ${chapters.length} fetched, ${failed.length} failed.`, failed);
     }
 
-    return { mainPage, chapters };
+    if (!chapters.length) {
+        return { mainPage, chapters: parseGenericText(mainPage.text), discoveredCount: chapterTitles.length, refinedCount: orderedTitles.length, failed };
+    }
+
+    return { mainPage, chapters, discoveredCount: chapterTitles.length, refinedCount: orderedTitles.length, failed };
 }
 
 async function fetchWikisourceSource(sourceUrl, info) {
@@ -804,11 +2243,18 @@ async function fetchWikisourceSource(sourceUrl, info) {
         console.warn("Wikisource namespace detection failed:", error.message);
     }
 
-    const { mainPage, chapters } = await fetchWikisourceChapters(info);
+    const { mainPage, chapters, discoveredCount = chapters.length, refinedCount = chapters.length, failed = [] } = await fetchWikisourceChapters(info);
 
     const metadataText = mainPage.text;
     const title = mainPage.title || info.title;
-    const author = extractWikisourceAuthor(metadataText);
+
+    // Wikisource pages frequently render author information through templates
+    // and file metadata rather than a simple visible "Author:" line. Prefer
+    // structured wikitext, then file metadata, then visible-text heuristics.
+    let author = sanitizeWikisourceAuthor(extractWikisourceAuthorFromWikitext(mainPage.wikitext))
+        || sanitizeWikisourceAuthor(extractWikisourceAuthor(metadataText))
+        || sanitizeWikisourceAuthor(extractWikisourceAuthorHeuristic(metadataText, title));
+
     const publicationYear = extractWikisourcePublicationYear(metadataText);
     const description = metadataText
         .split("\n")
@@ -817,6 +2263,30 @@ async function fetchWikisourceSource(sourceUrl, info) {
         .slice(0, 8)
         .join(" ")
         .slice(0, 700);
+
+    // IMPORTANT: For Wikisource, never trust the generic pageimages cover that
+    // was collected while fetching the work page. Wikisource frequently returns
+    // the Public Domain icon or another unrelated image there. The dedicated
+    // file resolver below must be the ONLY authority for the book cover.
+    // Otherwise an already-set pageimages URL prevents the real edition-file
+    // cover (for example "गोदान.pdf") from ever being selected.
+    mainPage.coverImage = null;
+
+    // Use the work page's actual edition file. This avoids selecting the generic
+    // Public Domain icon or Wikimedia contributor images and lets us read the
+    // author from the edition file metadata (e.g. Artist).
+    const fileMetadata = await resolveWikisourceCoverAndAuthorFromPageImages(info.apiUrl, title);
+    if (!author && fileMetadata.author) author = fileMetadata.author;
+    if (fileMetadata.coverImage) mainPage.coverImage = fileMetadata.coverImage;
+
+    // These are secondary fallbacks only. They are used after the exact edition
+    // file resolver has had a chance to find the real cover.
+    if (!mainPage.coverImage) {
+        mainPage.coverImage = await resolveWikisourceImageFromWikitext(info.apiUrl, mainPage.wikitext);
+    }
+    if (!mainPage.coverImage) {
+        mainPage.coverImage = await resolveWikisourceCoverByTitle(info, title);
+    }
 
     return {
         sourceName: info.sourceName,
@@ -830,7 +2300,13 @@ async function fetchWikisourceSource(sourceUrl, info) {
         originalLanguage: info.language,
         publicationYear,
         category: "Classic",
-        chapters
+        chapters,
+        diagnostics: {
+            discoveredChapters: discoveredCount,
+            candidateChapters: refinedCount,
+            fetchedChapters: chapters.length,
+            failedChapters: failed
+        }
     };
 }
 
@@ -979,6 +2455,12 @@ router.post("/import/preview", async (req, res) => {
 
         const imported = await fetchImportSource(String(source_url).trim());
 
+        if (imported.diagnostics && imported.diagnostics.discoveredChapters > imported.diagnostics.fetchedChapters) {
+            const failedCount = imported.diagnostics.discoveredChapters - imported.diagnostics.fetchedChapters;
+            const failedTitles = (imported.diagnostics.failedChapters || []).slice(0, 5).map(item => item.title).join(", ");
+            throw new Error(`Wikisource detected ${imported.diagnostics.discoveredChapters} chapters but only ${imported.diagnostics.fetchedChapters} could be fetched. ${failedCount} chapter(s) failed${failedTitles ? `: ${failedTitles}` : ""}. Import was stopped to prevent missing chapters.`);
+        }
+
         if (!imported.chapters.length) {
             return res.status(422).json({
                 success: false,
@@ -993,6 +2475,7 @@ router.post("/import/preview", async (req, res) => {
                 url: imported.sourceUrl,
                 format: imported.detectedFormat
             },
+            diagnostics: imported.diagnostics || null,
             suggested: {
                 title: imported.title || "",
                 author: imported.author || "",
