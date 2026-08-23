@@ -4,6 +4,47 @@ const router = express.Router();
 
 const db = require("../db");
 
+const {
+    S3Client,
+    CreateMultipartUploadCommand,
+    UploadPartCommand,
+    CompleteMultipartUploadCommand,
+    AbortMultipartUploadCommand
+} = require("@aws-sdk/client-s3");
+
+const {
+    getSignedUrl
+} = require("@aws-sdk/s3-request-presigner");
+
+
+/* =========================================================
+   BACKBLAZE B2 S3 CLIENT
+   ========================================================= */
+
+const b2S3 =
+    new S3Client({
+
+        region:
+            process.env.B2_REGION,
+
+        endpoint:
+            process.env.B2_ENDPOINT,
+
+        credentials: {
+
+            accessKeyId:
+                process.env.B2_KEY_ID,
+
+            secretAccessKey:
+                process.env.B2_APPLICATION_KEY
+
+        },
+
+        forcePathStyle:
+            true
+
+    });
+
 const{
 
 createNotification
@@ -1665,6 +1706,861 @@ router.post(
 
                 message:
                     "Unable to create Audio Novel."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+ADMIN CREATE AUDIO CHAPTER
+POST /api/admin/audio/chapters
+=========================================================
+*/
+
+router.post(
+    "/audio/chapters",
+    async (req, res) => {
+
+        try {
+
+            const {
+                audio_novel_id,
+                chapter_no,
+                title,
+                is_premium,
+                coins_required,
+                early_access,
+                is_draft,
+                is_published,
+                publish_at
+            } = req.body;
+
+
+            const novelId =
+                Number(audio_novel_id);
+
+            const chapterNumber =
+                Number(chapter_no);
+
+            const coins =
+                Number(coins_required || 0);
+
+
+            if(
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Audio Novel."
+                });
+
+            }
+
+
+            if(
+                !Number.isInteger(chapterNumber) ||
+                chapterNumber <= 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Chapter number must be greater than zero."
+                });
+
+            }
+
+
+            if(
+                !title ||
+                !title.trim()
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Chapter title is required."
+                });
+
+            }
+
+
+            if(
+                !Number.isInteger(coins) ||
+                coins < 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Coins required must be zero or greater."
+                });
+
+            }
+
+
+            const novel =
+                await db.query(`
+                    SELECT
+                        id,
+                        title
+                    FROM audio_novels
+                    WHERE id = $1
+                `, [
+                    novelId
+                ]);
+
+
+            if(
+                !novel.rows.length
+            ){
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio Novel not found."
+                });
+
+            }
+
+
+            const existing =
+                await db.query(`
+                    SELECT id
+                    FROM audio_chapters
+                    WHERE
+                        audio_novel_id = $1
+                        AND chapter_no = $2
+                `, [
+                    novelId,
+                    chapterNumber
+                ]);
+
+
+            if(
+                existing.rows.length
+            ){
+
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "This chapter number already exists."
+                });
+
+            }
+
+
+            const published =
+                Boolean(
+                    is_published
+                );
+
+            const draft =
+                Boolean(
+                    is_draft
+                );
+
+
+            const result =
+                await db.query(
+                    `
+                    INSERT INTO audio_chapters (
+
+                        audio_novel_id,
+                        chapter_no,
+                        title,
+
+                        audio_status,
+
+                        is_premium,
+                        coins_required,
+                        early_access,
+
+                        is_draft,
+                        is_published,
+                        publish_at
+
+                    )
+
+                    VALUES (
+
+                        $1,
+                        $2,
+                        $3,
+
+                        'pending',
+
+                        $4,
+                        $5,
+                        $6,
+
+                        $7,
+                        $8,
+                        $9
+
+                    )
+
+                    RETURNING *
+                    `,
+                    [
+
+                        novelId,
+
+                        chapterNumber,
+
+                        title.trim(),
+
+                        Boolean(
+                            is_premium
+                        ),
+
+                        coins,
+
+                        Boolean(
+                            early_access
+                        ),
+
+                        draft,
+
+                        published,
+
+                        publish_at ||
+                            null
+
+                    ]
+                );
+
+
+            return res.status(201).json({
+
+                success: true,
+
+                message:
+                    "Audio Chapter created successfully.",
+
+                chapter:
+                    result.rows[0]
+
+            });
+
+
+        } catch(error){
+
+            console.error(
+                "Admin Audio Chapter CREATE error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to create Audio Chapter."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+START AUDIO CHAPTER MULTIPART UPLOAD
+POST /api/admin/audio/chapters/:chapterId/media/start
+=========================================================
+*/
+
+router.post(
+    "/audio/chapters/:chapterId/media/start",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(
+                    req.params.chapterId
+                );
+
+
+            const {
+                file_name,
+                mime_type,
+                file_size
+            } = req.body;
+
+
+            if(
+                !Number.isInteger(
+                    chapterId
+                ) ||
+                chapterId <= 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if(
+                !file_name ||
+                !mime_type ||
+                !mime_type.startsWith(
+                    "audio/"
+                )
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "A valid audio file is required."
+                });
+
+            }
+
+
+            const size =
+                Number(file_size);
+
+
+            if(
+                !Number.isFinite(size) ||
+                size <= 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid audio file size."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(`
+                    SELECT
+                        ac.id,
+                        ac.audio_novel_id
+                    FROM audio_chapters ac
+                    WHERE ac.id = $1
+                `, [
+                    chapterId
+                ]);
+
+
+            if(
+                !chapter.rows.length
+            ){
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio Chapter not found."
+                });
+
+            }
+
+
+            const safeName =
+                file_name
+                    .replace(
+                        /[^a-zA-Z0-9._-]/g,
+                        "_"
+                    );
+
+
+            const objectKey =
+                `audio/${chapter.rows[0].audio_novel_id}/chapters/${chapterId}/${Date.now()}-${safeName}`;
+
+
+            const command =
+                new CreateMultipartUploadCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        objectKey,
+
+                    ContentType:
+                        mime_type
+
+                });
+
+
+            const upload =
+                await b2S3.send(
+                    command
+                );
+
+
+            if(
+                !upload.UploadId
+            ){
+
+                throw new Error(
+                    "B2 did not return an upload ID."
+                );
+
+            }
+
+
+            await db.query(`
+                UPDATE audio_chapters
+                SET
+                    audio_provider = 'b2',
+                    audio_object_key = $1,
+                    audio_mime_type = $2,
+                    audio_original_name = $3,
+                    audio_size_bytes = $4,
+                    audio_status = 'uploading',
+                    updated_at = NOW()
+                WHERE id = $5
+            `, [
+
+                objectKey,
+
+                mime_type,
+
+                file_name,
+
+                size,
+
+                chapterId
+
+            ]);
+
+
+            return res.json({
+
+                success: true,
+
+                upload_id:
+                    upload.UploadId,
+
+                object_key:
+                    objectKey,
+
+                chapter_id:
+                    chapterId,
+
+                part_size:
+                    10 * 1024 * 1024
+
+            });
+
+
+        } catch(error){
+
+            console.error(
+                "B2 Audio upload start error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to start audio upload."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+SIGN AUDIO MULTIPART PART
+POST /api/admin/audio/chapters/:chapterId/media/sign-part
+=========================================================
+*/
+
+router.post(
+    "/audio/chapters/:chapterId/media/sign-part",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(
+                    req.params.chapterId
+                );
+
+
+            const {
+                upload_id,
+                object_key,
+                part_number
+            } = req.body;
+
+
+            if(
+                !Number.isInteger(
+                    chapterId
+                ) ||
+                chapterId <= 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            const partNumber =
+                Number(
+                    part_number
+                );
+
+
+            if(
+                !upload_id ||
+                !object_key ||
+                !Number.isInteger(
+                    partNumber
+                ) ||
+                partNumber < 1
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Upload information is incomplete."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(`
+                    SELECT id
+                    FROM audio_chapters
+                    WHERE
+                        id = $1
+                        AND audio_provider = 'b2'
+                        AND audio_object_key = $2
+                `, [
+                    chapterId,
+                    object_key
+                ]);
+
+
+            if(
+                !chapter.rows.length
+            ){
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio upload session not found."
+                });
+
+            }
+
+
+            const command =
+                new UploadPartCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        object_key,
+
+                    UploadId:
+                        upload_id,
+
+                    PartNumber:
+                        partNumber
+
+                });
+
+
+            const signedUrl =
+                await getSignedUrl(
+                    b2S3,
+                    command,
+                    {
+                        expiresIn:
+                            900
+                    }
+                );
+
+
+            return res.json({
+
+                success: true,
+
+                url:
+                    signedUrl,
+
+                expires_in:
+                    900
+
+            });
+
+
+        } catch(error){
+
+            console.error(
+                "B2 Audio sign part error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to create audio upload URL."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+COMPLETE AUDIO MULTIPART UPLOAD
+POST /api/admin/audio/chapters/:chapterId/media/complete
+=========================================================
+*/
+
+router.post(
+    "/audio/chapters/:chapterId/media/complete",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(
+                    req.params.chapterId
+                );
+
+
+            const {
+                upload_id,
+                object_key,
+                parts,
+                duration_seconds
+            } = req.body;
+
+
+            if(
+                !Number.isInteger(
+                    chapterId
+                ) ||
+                chapterId <= 0
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid chapter ID."
+                });
+
+            }
+
+
+            if(
+                !upload_id ||
+                !object_key ||
+                !Array.isArray(parts) ||
+                !parts.length
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Upload completion information is incomplete."
+                });
+
+            }
+
+
+            const chapter =
+                await db.query(`
+                    SELECT
+                        id,
+                        audio_object_key
+                    FROM audio_chapters
+                    WHERE
+                        id = $1
+                        AND audio_provider = 'b2'
+                        AND audio_object_key = $2
+                `, [
+                    chapterId,
+                    object_key
+                ]);
+
+
+            if(
+                !chapter.rows.length
+            ){
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio upload session not found."
+                });
+
+            }
+
+
+            const normalizedParts =
+                parts
+                    .map(
+                        part => ({
+
+                            PartNumber:
+                                Number(
+                                    part.PartNumber
+                                ),
+
+                            ETag:
+                                String(
+                                    part.ETag
+                                )
+
+                        })
+                    )
+                    .filter(
+                        part =>
+                            Number.isInteger(
+                                part.PartNumber
+                            ) &&
+                            part.PartNumber > 0 &&
+                            part.ETag
+                    )
+                    .sort(
+                        (a,b) =>
+                            a.PartNumber -
+                            b.PartNumber
+                    );
+
+
+            if(
+                !normalizedParts.length
+            ){
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "No valid uploaded parts."
+                });
+
+            }
+
+
+            const command =
+                new CompleteMultipartUploadCommand({
+
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+
+                    Key:
+                        object_key,
+
+                    UploadId:
+                        upload_id,
+
+                    MultipartUpload: {
+
+                        Parts:
+                            normalizedParts
+
+                    }
+
+                });
+
+
+            await b2S3.send(
+                command
+            );
+
+
+            const duration =
+                Number(
+                    duration_seconds
+                );
+
+
+            await db.query(`
+                UPDATE audio_chapters
+                SET
+                    audio_status = 'ready',
+                    audio_duration_seconds = $1,
+                    updated_at = NOW()
+                WHERE id = $2
+            `, [
+
+                Number.isFinite(
+                    duration
+                )
+                    ? Math.max(
+                        0,
+                        Math.round(
+                            duration
+                        )
+                    )
+                    : null,
+
+                chapterId
+
+            ]);
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    "Audio upload completed successfully.",
+
+                chapter_id:
+                    chapterId
+
+            });
+
+
+        } catch(error){
+
+            console.error(
+                "B2 Audio complete upload error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to complete audio upload."
 
             });
 
