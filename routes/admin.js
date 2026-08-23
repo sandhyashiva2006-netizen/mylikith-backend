@@ -9,7 +9,8 @@ const {
     CreateMultipartUploadCommand,
     UploadPartCommand,
     CompleteMultipartUploadCommand,
-    AbortMultipartUploadCommand
+    AbortMultipartUploadCommand,
+    DeleteObjectCommand
 } = require("@aws-sdk/client-s3");
 
 const {
@@ -2504,6 +2505,606 @@ router.post(
 
                 message:
                     "Unable to create Audio Chapter."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+ADMIN UPDATE AUDIO CHAPTER
+PUT /api/admin/audio/chapters/:id
+=========================================================
+*/
+
+router.put(
+    "/audio/chapters/:id",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.id);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Invalid Audio Chapter ID."
+
+                });
+
+            }
+
+
+            const {
+                chapter_no,
+                title,
+                is_premium,
+                coins_required,
+                early_access,
+                is_draft,
+                is_published,
+                publish_at
+            } = req.body;
+
+
+            const chapterNumber =
+                Number(chapter_no);
+
+
+            const coins =
+                Number(
+                    coins_required || 0
+                );
+
+
+            if (
+                !Number.isInteger(
+                    chapterNumber
+                ) ||
+                chapterNumber <= 0
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Chapter number must be greater than zero."
+
+                });
+
+            }
+
+
+            if (
+                !title ||
+                !String(title).trim()
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Chapter title is required."
+
+                });
+
+            }
+
+
+            if (
+                !Number.isInteger(coins) ||
+                coins < 0
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Coins required must be zero or greater."
+
+                });
+
+            }
+
+
+            /*
+            -------------------------------------------------
+            GET CURRENT CHAPTER
+            -------------------------------------------------
+            */
+
+            const current =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        audio_novel_id
+                    FROM audio_chapters
+                    WHERE id = $1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            if (
+                !current.rows.length
+            ) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "Audio Chapter not found."
+
+                });
+
+            }
+
+
+            const novelId =
+                current.rows[0]
+                    .audio_novel_id;
+
+
+            /*
+            -------------------------------------------------
+            PREVENT DUPLICATE CHAPTER NUMBER
+            -------------------------------------------------
+            */
+
+            const duplicate =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM audio_chapters
+                    WHERE
+                        audio_novel_id = $1
+                        AND chapter_no = $2
+                        AND id <> $3
+                    `,
+                    [
+                        novelId,
+                        chapterNumber,
+                        chapterId
+                    ]
+                );
+
+
+            if (
+                duplicate.rows.length
+            ) {
+
+                return res.status(409).json({
+
+                    success: false,
+
+                    message:
+                        "This chapter number already exists."
+
+                });
+
+            }
+
+
+            /*
+            -------------------------------------------------
+            UPDATE CHAPTER
+            -------------------------------------------------
+            */
+
+            const result =
+                await db.query(
+                    `
+                    UPDATE audio_chapters
+
+                    SET
+
+                        chapter_no = $1,
+
+                        title = $2,
+
+                        is_premium = $3,
+
+                        coins_required = $4,
+
+                        early_access = $5,
+
+                        is_draft = $6,
+
+                        is_published = $7,
+
+                        publish_at = $8,
+
+                        updated_at = NOW()
+
+                    WHERE id = $9
+
+                    RETURNING *
+                    `,
+                    [
+
+                        chapterNumber,
+
+                        String(
+                            title
+                        ).trim(),
+
+                        Boolean(
+                            is_premium
+                        ),
+
+                        coins,
+
+                        Boolean(
+                            early_access
+                        ),
+
+                        Boolean(
+                            is_draft
+                        ),
+
+                        Boolean(
+                            is_published
+                        ),
+
+                        publish_at ||
+                            null,
+
+                        chapterId
+
+                    ]
+                );
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    "Audio Chapter updated successfully.",
+
+                chapter:
+                    result.rows[0]
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Admin Audio Chapter UPDATE error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to update Audio Chapter."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+ADMIN PUBLISH / UNPUBLISH AUDIO CHAPTER
+PATCH /api/admin/audio/chapters/:id/publish
+=========================================================
+*/
+
+router.patch(
+    "/audio/chapters/:id/publish",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.id);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Invalid Audio Chapter ID."
+
+                });
+
+            }
+
+
+            const published =
+                Boolean(
+                    req.body.published
+                );
+
+
+            const result =
+                await db.query(
+                    `
+                    UPDATE audio_chapters
+
+                    SET
+
+                        is_published = $1,
+
+                        is_draft = $2,
+
+                        updated_at = NOW()
+
+                    WHERE id = $3
+
+                    RETURNING
+                        id,
+                        chapter_no,
+                        title,
+                        is_published,
+                        is_draft,
+                        updated_at
+                    `,
+                    [
+
+                        published,
+
+                        !published,
+
+                        chapterId
+
+                    ]
+                );
+
+
+            if (
+                !result.rows.length
+            ) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "Audio Chapter not found."
+
+                });
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    published
+                        ? "Audio Chapter published successfully."
+                        : "Audio Chapter unpublished successfully.",
+
+                chapter:
+                    result.rows[0]
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Admin Audio Chapter PUBLISH error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to update Audio Chapter publish status."
+
+            });
+
+        }
+
+    }
+);
+
+/*
+=========================================================
+ADMIN DELETE AUDIO CHAPTER
+DELETE /api/admin/audio/chapters/:id
+=========================================================
+*/
+
+router.delete(
+    "/audio/chapters/:id",
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.id);
+
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Invalid Audio Chapter ID."
+
+                });
+
+            }
+
+
+            /*
+            -------------------------------------------------
+            GET AUDIO OBJECT KEY FIRST
+            -------------------------------------------------
+            */
+
+            const current =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        title,
+                        audio_object_key
+                    FROM audio_chapters
+                    WHERE id = $1
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            if (
+                !current.rows.length
+            ) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "Audio Chapter not found."
+
+                });
+
+            }
+
+
+            const chapter =
+                current.rows[0];
+
+
+            /*
+            -------------------------------------------------
+            DELETE DATABASE RECORD
+            -------------------------------------------------
+            */
+
+            const deleted =
+                await db.query(
+                    `
+                    DELETE FROM audio_chapters
+                    WHERE id = $1
+                    RETURNING id, title
+                    `,
+                    [
+                        chapterId
+                    ]
+                );
+
+
+            /*
+            -------------------------------------------------
+            DELETE B2 AUDIO OBJECT
+            -------------------------------------------------
+            */
+
+            if (
+                chapter.audio_object_key
+            ) {
+
+                try {
+
+                    await b2S3.send(
+
+                        new DeleteObjectCommand({
+
+                            Bucket:
+                                process.env.B2_BUCKET_NAME,
+
+                            Key:
+                                chapter.audio_object_key
+
+                        })
+
+                    );
+
+                } catch (
+                    storageError
+                ) {
+
+                    /*
+                    The DB record has already been removed.
+                    Log B2 cleanup failure rather than turning
+                    a successful chapter deletion into an error.
+                    */
+
+                    console.error(
+                        "B2 Audio Chapter cleanup error:",
+                        storageError
+                    );
+
+                }
+
+            }
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    "Audio Chapter deleted successfully.",
+
+                chapter:
+                    deleted.rows[0]
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Admin Audio Chapter DELETE error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Unable to delete Audio Chapter."
 
             });
 
