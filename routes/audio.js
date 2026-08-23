@@ -1103,7 +1103,242 @@ router.post(
     }
 );
 
+/*
+=========================================================
+AUDIO CHAPTER LIKE STATUS
+GET /api/audio/chapters/:chapterId/like
+=========================================================
+*/
 
+router.get(
+    "/chapters/:chapterId/like",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+            }
+
+            const chapter =
+                await db.query(`
+                    SELECT id
+                    FROM audio_chapters
+                    WHERE
+                        id = $1
+                        AND is_published = TRUE
+                        AND is_draft = FALSE
+                `, [chapterId]);
+
+            if (!chapter.rows.length) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio chapter not found."
+                });
+            }
+
+            const result =
+                await db.query(`
+                    SELECT id
+                    FROM audio_chapter_likes
+                    WHERE
+                        user_id = $1
+                        AND chapter_id = $2
+                    LIMIT 1
+                `, [
+                    userId,
+                    chapterId
+                ]);
+
+            const count =
+                await db.query(`
+                    SELECT COUNT(*)::int AS likes
+                    FROM audio_chapter_likes
+                    WHERE chapter_id = $1
+                `, [chapterId]);
+
+            return res.json({
+                success: true,
+                liked: result.rows.length > 0,
+                likes: count.rows[0].likes
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET audio chapter like error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to load audio like status."
+            });
+        }
+    }
+);
+
+
+/*
+=========================================================
+TOGGLE AUDIO CHAPTER LIKE
+POST /api/audio/chapters/:chapterId/like
+=========================================================
+*/
+
+router.post(
+    "/chapters/:chapterId/like",
+    auth,
+    async (req, res) => {
+
+        const client =
+            await db.connect();
+
+        try {
+
+            const chapterId =
+                Number(req.params.chapterId);
+
+            const userId =
+                Number(req.user.id);
+
+            if (
+                !Number.isInteger(chapterId) ||
+                chapterId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid chapter ID."
+                });
+            }
+
+            await client.query("BEGIN");
+
+            const chapter =
+                await client.query(`
+                    SELECT id
+                    FROM audio_chapters
+                    WHERE
+                        id = $1
+                        AND is_published = TRUE
+                        AND is_draft = FALSE
+                `, [chapterId]);
+
+            if (!chapter.rows.length) {
+
+                await client.query("ROLLBACK");
+
+                return res.status(404).json({
+                    success: false,
+                    message: "Audio chapter not found."
+                });
+            }
+
+            const existing =
+                await client.query(`
+                    SELECT id
+                    FROM audio_chapter_likes
+                    WHERE
+                        user_id = $1
+                        AND chapter_id = $2
+                    LIMIT 1
+                `, [
+                    userId,
+                    chapterId
+                ]);
+
+            let liked;
+
+            if (existing.rows.length) {
+
+                await client.query(`
+                    DELETE FROM audio_chapter_likes
+                    WHERE
+                        user_id = $1
+                        AND chapter_id = $2
+                `, [
+                    userId,
+                    chapterId
+                ]);
+
+                liked = false;
+
+            } else {
+
+                await client.query(`
+                    INSERT INTO audio_chapter_likes
+                    (
+                        user_id,
+                        chapter_id,
+                        created_at
+                    )
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        NOW()
+                    )
+                    ON CONFLICT (
+                        user_id,
+                        chapter_id
+                    )
+                    DO NOTHING
+                `, [
+                    userId,
+                    chapterId
+                ]);
+
+                liked = true;
+            }
+
+            const count =
+                await client.query(`
+                    SELECT COUNT(*)::int AS likes
+                    FROM audio_chapter_likes
+                    WHERE chapter_id = $1
+                `, [chapterId]);
+
+            await client.query("COMMIT");
+
+            return res.json({
+                success: true,
+                liked,
+                likes: count.rows[0].likes
+            });
+
+        } catch (error) {
+
+            await client.query("ROLLBACK");
+
+            console.error(
+                "POST audio chapter like error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to update audio like."
+            });
+
+        } finally {
+
+            client.release();
+        }
+    }
+);
 
 
 module.exports = router;
