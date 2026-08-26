@@ -1304,6 +1304,19 @@ router.post(
                     WHERE chapter_id = $1
                 `, [chapterId]);
 
+            await client.query(`
+                UPDATE audio_chapters
+                SET
+                    likes = $1,
+                    updated_at = NOW()
+                WHERE id = $2
+            `, [
+                Number(
+                    count.rows[0].likes || 0
+                ),
+                chapterId
+            ]);
+
             await client.query("COMMIT");
 
             return res.json({
@@ -1560,6 +1573,23 @@ router.post(
                     FROM audio_chapter_ratings
                     WHERE chapter_id = $1
                 `, [chapterId]);
+
+            await client.query(`
+                UPDATE audio_chapters
+                SET
+                    rating = $1,
+                    rating_count = $2,
+                    updated_at = NOW()
+                WHERE id = $3
+            `, [
+                Number(
+                    aggregate.rows[0].average_rating || 0
+                ),
+                Number(
+                    aggregate.rows[0].rating_count || 0
+                ),
+                chapterId
+            ]);
 
             await client.query("COMMIT");
 
