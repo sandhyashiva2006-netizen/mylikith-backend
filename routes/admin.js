@@ -1035,42 +1035,111 @@ router.get(
 
             const result =
                 await db.query(`
-                    SELECT
-                        acc.id,
-                        acc.chapter_id,
-                        acc.user_id,
-                        acc.comment,
-                        acc.created_at,
-                        acc.updated_at,
+                    SELECT *
+                    FROM (
 
-                        ac.chapter_no,
-                        ac.title AS chapter_title,
-                        ac.audio_novel_id,
+                        /* ---------------------------------
+                           AUDIO NOVEL COMMENTS
+                        --------------------------------- */
 
-                        an.title AS audio_novel_title,
+                        SELECT
+                            ac.id,
+                            'audio_comment'
+                                AS comment_type,
 
-                        u.name AS user_name,
-                        u.profile_image
+                            ac.audio_novel_id,
+                            NULL::bigint
+                                AS chapter_id,
 
-                    FROM audio_chapter_comments acc
+                            NULL::integer
+                                AS chapter_no,
 
-                    JOIN audio_chapters ac
-                        ON ac.id = acc.chapter_id
+                            NULL::text
+                                AS chapter_title,
 
-                    JOIN audio_novels an
-                        ON an.id = ac.audio_novel_id
+                            an.title
+                                AS audio_novel_title,
 
-                    JOIN users u
-                        ON u.id = acc.user_id
+                            ac.user_id,
+                            ac.comment,
+                            ac.created_at,
+                            ac.updated_at,
+
+                            u.name
+                                AS user_name,
+
+                            u.profile_image
+
+                        FROM audio_comments ac
+
+                        JOIN audio_novels an
+                            ON an.id =
+                                ac.audio_novel_id
+
+                        JOIN users u
+                            ON u.id =
+                                ac.user_id
+
+
+                        UNION ALL
+
+
+                        /* ---------------------------------
+                           AUDIO CHAPTER COMMENTS
+                        --------------------------------- */
+
+                        SELECT
+                            acc.id,
+                            'audio_chapter_comment'
+                                AS comment_type,
+
+                            ac.audio_novel_id,
+                            acc.chapter_id,
+
+                            ac.chapter_no,
+                            ac.title
+                                AS chapter_title,
+
+                            an.title
+                                AS audio_novel_title,
+
+                            acc.user_id,
+                            acc.comment,
+                            acc.created_at,
+                            acc.updated_at,
+
+                            u.name
+                                AS user_name,
+
+                            u.profile_image
+
+                        FROM audio_chapter_comments acc
+
+                        JOIN audio_chapters ac
+                            ON ac.id =
+                                acc.chapter_id
+
+                        JOIN audio_novels an
+                            ON an.id =
+                                ac.audio_novel_id
+
+                        JOIN users u
+                            ON u.id =
+                                acc.user_id
+
+                    ) comments
 
                     ORDER BY
-                        acc.created_at DESC
+                        comments.created_at DESC
                 `);
+
 
             return res.json({
                 success: true,
-                comments: result.rows
+                comments:
+                    result.rows
             });
+
 
         } catch (error) {
 
@@ -1106,6 +1175,7 @@ router.delete(
             const commentId =
                 Number(req.params.commentId);
 
+
             if(
                 !Number.isInteger(commentId) ||
                 commentId <= 0
@@ -1113,34 +1183,97 @@ router.delete(
 
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid comment ID."
+                    message:
+                        "Invalid comment ID."
                 });
 
             }
 
-            const result =
-                await db.query(`
-                    DELETE FROM audio_chapter_comments
+
+            /*
+            -------------------------------------------------
+            CHECK AUDIO NOVEL COMMENT FIRST
+            -------------------------------------------------
+            */
+
+            const novelComment =
+                await db.query(
+                    `
+                    DELETE FROM audio_comments
+
                     WHERE id = $1
+
                     RETURNING id
-                `, [
-                    commentId
-                ]);
+                    `,
+                    [
+                        commentId
+                    ]
+                );
 
-            if(!result.rows.length){
 
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio comment not found."
+            if(
+                novelComment.rows.length
+            ){
+
+                return res.json({
+                    success: true,
+                    comment_type:
+                        "audio_comment",
+                    message:
+                        "Audio novel comment deleted successfully."
                 });
 
             }
 
-            return res.json({
-                success: true,
+
+            /*
+            -------------------------------------------------
+            CHECK AUDIO CHAPTER COMMENT
+            -------------------------------------------------
+            */
+
+            const chapterComment =
+                await db.query(
+                    `
+                    DELETE FROM audio_chapter_comments
+
+                    WHERE id = $1
+
+                    RETURNING id
+                    `,
+                    [
+                        commentId
+                    ]
+                );
+
+
+            if(
+                chapterComment.rows.length
+            ){
+
+                return res.json({
+                    success: true,
+                    comment_type:
+                        "audio_chapter_comment",
+                    message:
+                        "Audio chapter comment deleted successfully."
+                });
+
+            }
+
+
+            /*
+            -------------------------------------------------
+            COMMENT NOT FOUND
+            -------------------------------------------------
+            */
+
+            return res.status(404).json({
+                success: false,
                 message:
-                    "Audio comment deleted successfully."
+                    "Audio comment not found."
             });
+
 
         } catch(error) {
 
