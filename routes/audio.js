@@ -831,7 +831,7 @@ router.get(
                     EXISTS (
                         SELECT 1
                         FROM audio_likes al
-                        WHERE al.audio_id = an.id
+                        WHERE al.audio_novel_id = an.id
                           AND al.user_id = $2
                     ) AS liked
                 FROM audio_novels an
@@ -903,7 +903,7 @@ router.post(
                 SELECT id
                 FROM audio_likes
                 WHERE
-                    audio_id = $1
+                    audio_novel_id = $1
                     AND user_id = $2
                 LIMIT 1
             `, [audioId, userId]);
@@ -920,12 +920,12 @@ router.post(
                 await client.query(`
                     INSERT INTO audio_likes
                     (
-                        audio_id,
+                        audio_novel_id,
                         user_id,
                         created_at
                     )
                     VALUES ($1, $2, NOW())
-                    ON CONFLICT (audio_id, user_id)
+                    ON CONFLICT (audio_novel_id, user_id)
                     DO NOTHING
                 `, [audioId, userId]);
                 liked = true;
@@ -934,7 +934,7 @@ router.post(
             const count = await client.query(`
                 SELECT COUNT(*)::int AS likes
                 FROM audio_likes
-                WHERE audio_id = $1
+                WHERE audio_novel_id = $1
             `, [audioId]);
 
             await client.query(`
@@ -1008,7 +1008,7 @@ router.get(
                 SELECT rating
                 FROM audio_ratings
                 WHERE
-                    audio_id = $1
+                    audio_novel_id = $1
                     AND user_id = $2
                 LIMIT 1
             `, [audioId, userId]);
@@ -1018,7 +1018,7 @@ router.get(
                     ROUND(COALESCE(AVG(rating), 0), 2) AS average_rating,
                     COUNT(*)::int AS rating_count
                 FROM audio_ratings
-                WHERE audio_id = $1
+                WHERE audio_novel_id = $1
             `, [audioId]);
 
             return res.json({
@@ -1086,14 +1086,14 @@ router.post(
             await client.query(`
                 INSERT INTO audio_ratings
                 (
-                    audio_id,
+                    audio_novel_id,
                     user_id,
                     rating,
                     created_at,
                     updated_at
                 )
                 VALUES ($1, $2, $3, NOW(), NOW())
-                ON CONFLICT (audio_id, user_id)
+                ON CONFLICT (audio_novel_id, user_id)
                 DO UPDATE SET
                     rating = EXCLUDED.rating,
                     updated_at = NOW()
@@ -1104,7 +1104,7 @@ router.post(
                     ROUND(COALESCE(AVG(rating), 0), 2) AS average_rating,
                     COUNT(*)::int AS rating_count
                 FROM audio_ratings
-                WHERE audio_id = $1
+                WHERE audio_novel_id = $1
             `, [audioId]);
 
             await client.query(`
