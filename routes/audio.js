@@ -1,2724 +1,1628 @@
-const express = require("express");
-const router = express.Router();
-const db = require("../db");
+const AUDIO_API_BASE =
+    "https://mylikith-backend.onrender.com/api/audio";
 
-const auth = require("../middleware/auth");
+let audioSearchTimer = null;
+let currentAudioNovelId = null;
+let currentAudioNovel = null;
 
-/*
-=========================================================
-GET AUDIO NOVELS
-/api/audio
-=========================================================
-*/
+const audio$ = (id) => document.getElementById(id);
 
-router.get("/", async (req, res) => {
-    try {
-        const {
-            search = "",
-            language = "",
-            category = "",
-            premium,
-            featured,
-            sort = "latest",
-            page = 1,
-            limit = 20
-        } = req.query;
+function audioEscape(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
 
-        const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
-        const limitNumber = Math.min(
-            Math.max(parseInt(limit, 10) || 20, 1),
-            50
+function audioToken() {
+    return localStorage.getItem("token") || "";
+}
+
+function audioHeaders() {
+    const headers = {};
+
+    if (audioToken()) {
+        headers.Authorization = "Bearer " + audioToken();
+    }
+
+    return headers;
+}
+
+function audioFormatNumber(value) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+        return "0";
+    }
+
+    return number.toLocaleString();
+}
+
+function audioFormatTime(seconds) {
+    const value = Number(seconds);
+
+    if (!Number.isFinite(value) || value < 0) {
+        return "00:00";
+    }
+
+    const total = Math.floor(value);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+
+    if (hours > 0) {
+        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+
+    return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+
+function audioNovelCoverUrl(url, novelId){
+
+    if(!url){
+        return "";
+    }
+
+    const value =
+        String(url);
+
+    if(
+        value.includes(
+            "/api/audio/media/novels/"
+        )
+    ){
+        return value;
+    }
+
+    if(
+        value.includes(
+            "backblazeb2.com/"
+        )
+    ){
+        return (
+            AUDIO_API_BASE.replace(
+                "/api/audio",
+                ""
+            ) +
+            "/api/audio/media/novels/" +
+            encodeURIComponent(novelId) +
+            "/cover"
         );
+    }
 
-        const offset = (pageNumber - 1) * limitNumber;
+    return value;
+}
 
-        const conditions = [
-    "an.publish_status = 'published'",
-    "an.visibility = 'public'"
-];	
+function audioCover(url, title, novelId) {
+    if (!url) {
+        return `<div class="audio-card-cover-fallback">🎧</div>`;
+    }
 
-        const values = [];
-        let parameterIndex = 1;
-
-        if (search.trim()) {
-            conditions.push(`
-                (
-                    an.title ILIKE $${parameterIndex}
-                    OR an.description ILIKE $${parameterIndex}
+    return `
+        <img
+            class="audio-card-cover"
+            src="${audioEscape(
+                audioNovelCoverUrl(
+                    url,
+                    novelId
                 )
-            `);
+            )}"
+            alt="${audioEscape(title)}"
+            loading="lazy"
+            onerror="this.style.display='none';this.nextElementSibling.hidden=false;"
+        >
+        <div class="audio-card-cover-fallback" hidden>🎧</div>
+    `;
+}
 
-            values.push(`%${search.trim()}%`);
-            parameterIndex++;
+function audioBadges(item) {
+    const badges = [];
+
+    if (item.premium_only) {
+        badges.push(`<span class="audio-badge premium">👑 Premium</span>`);
+    }
+
+    if (item.featured) {
+        badges.push(`<span class="audio-badge featured">✦ Featured</span>`);
+    }
+
+    return badges.length
+        ? `<div class="audio-card-badges">${badges.join("")}</div>`
+        : "";
+}
+
+function renderAudioCard(item) {
+    const title = audioEscape(item.title || "Untitled Audio");
+    const writer = audioEscape(item.writer_name || "MyLikith Writer");
+    const category = audioEscape(item.category || "Story");
+    const language = audioEscape(item.language || "Unknown");
+    const rating = Number(item.rating || 0);
+
+    return `
+        <a
+            class="audio-card"
+            href="audio.html?id=${encodeURIComponent(item.id)}"
+        >
+            <div class="audio-card-cover-wrap">
+                ${audioCover(item.cover_url, item.title, item.id)}
+                ${audioBadges(item)}
+                <span class="audio-card-play">▶</span>
+            </div>
+
+            <div class="audio-card-body">
+                <h3>${title}</h3>
+
+                <p class="audio-card-writer">
+                    ${writer}
+                </p>
+
+                <div class="audio-card-meta">
+                    <span>${category}</span>
+                    <span>${language}</span>
+                </div>
+
+                <div class="audio-card-stats">
+                    <span>⭐ ${rating > 0 ? rating.toFixed(1) : "New"}</span>
+                    <span>♥ ${audioFormatNumber(item.likes)}</span>
+                    <span>👁 ${audioFormatNumber(item.views)}</span>
+                </div>
+            </div>
+        </a>
+    `;
+}
+
+function renderFeatured(items) {
+    const container = audio$("featuredAudio");
+
+    if (!container) {
+        return;
+    }
+
+    if (!items.length) {
+        container.innerHTML = `
+            <div class="audio-empty">
+                <div>🎧</div>
+                <h3>No featured audio yet</h3>
+                <p>Featured audio stories will appear here.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = items
+        .map(renderAudioCard)
+        .join("");
+}
+
+function renderAudioResults(items) {
+    const container = audio$("audioResults");
+
+    if (!container) {
+        return;
+    }
+
+    if (!items.length) {
+        container.innerHTML = `
+            <div class="audio-empty">
+                <div>🔎</div>
+                <h3>No audio found</h3>
+                <p>Try another search, language or category.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = items
+        .map(renderAudioCard)
+        .join("");
+}
+
+function renderContinueListening(items) {
+    const section = audio$("continueListeningSection");
+    const container = audio$("continueListening");
+
+    if (!section || !container) {
+        return;
+    }
+
+    if (!items.length) {
+        section.hidden = true;
+        return;
+    }
+
+    section.hidden = false;
+
+    container.innerHTML = items.map(item => {
+        const duration = Number(item.duration_seconds || item.audio_duration_seconds || 0);
+        const position = Number(item.position_seconds || 0);
+
+        let percent = Number(item.progress_percent);
+
+        if (!Number.isFinite(percent)) {
+            percent = duration > 0
+                ? (position / duration) * 100
+                : 0;
         }
 
-        if (language.trim()) {
-            conditions.push(
-                `an.language = $${parameterIndex}`
-            );
+        percent = Math.min(100, Math.max(0, percent));
 
-            values.push(language.trim());
-            parameterIndex++;
+        return `
+            <a
+                class="continue-audio-card"
+                href="audio-chapter.html?id=${encodeURIComponent(item.chapter_id)}"
+            >
+                <div class="continue-cover-wrap">
+                    ${audioCover(item.cover_url, item.audio_novel_title, item.audio_novel_id)}
+                </div>
+
+                <div class="continue-info">
+                    <span class="audio-section-label">CONTINUE LISTENING</span>
+
+                    <h3>${audioEscape(item.audio_novel_title || "Audio Novel")}</h3>
+
+                    <p>
+                        Chapter ${audioEscape(item.chapter_no || "")}
+                        • ${audioEscape(item.chapter_title || "Untitled")}
+                    </p>
+
+                    <div class="continue-progress">
+                        <span style="width:${percent}%"></span>
+                    </div>
+
+                    <div class="continue-meta">
+                        <span>${Math.round(percent)}% listened</span>
+                        <span>${audioFormatTime(position)} / ${audioFormatTime(duration)}</span>
+                    </div>
+                </div>
+
+                <div class="continue-play">▶</div>
+            </a>
+        `;
+    }).join("");
+}
+
+async function loadFeaturedAudio() {
+    const container = audio$("featuredAudio");
+
+    if (container) {
+        container.innerHTML = `<div class="audio-loading">Loading featured audio...</div>`;
+    }
+
+    try {
+        const response = await fetch(`${AUDIO_API_BASE}/featured`);
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || "Unable to load featured audio.");
         }
 
-        if (category.trim()) {
-            conditions.push(`
-                (
-                    an.category = $${parameterIndex}
-                    OR $${parameterIndex} = ANY(an.categories)
+        renderFeatured(Array.isArray(data.audio) ? data.audio : []);
+    } catch (error) {
+        console.error("Featured audio error:", error);
+
+        if (container) {
+            container.innerHTML = `
+                <div class="audio-empty">
+                    <div>⚠️</div>
+                    <h3>Unable to load featured audio</h3>
+                    <p>Please try again.</p>
+                </div>
+            `;
+        }
+    }
+}
+
+async function loadLanguages() {
+    try {
+        const response = await fetch(`${AUDIO_API_BASE}/languages`);
+        const data = await response.json();
+
+        if (!data.success) {
+            return;
+        }
+
+        const select = audio$("languageFilter");
+
+        if (!select) {
+            return;
+        }
+
+        select.innerHTML =
+            `<option value="">All Languages</option>` +
+            (data.languages || [])
+                .map(language =>
+                    `<option value="${audioEscape(language)}">${audioEscape(language)}</option>`
                 )
-            `);
-
-            values.push(category.trim());
-            parameterIndex++;
-        }
-
-        if (premium !== undefined) {
-            const premiumValue =
-                String(premium).toLowerCase() === "true";
-
-            conditions.push(
-                `an.premium_only = $${parameterIndex}`
-            );
-
-            values.push(premiumValue);
-            parameterIndex++;
-        }
-
-        if (featured !== undefined) {
-            const featuredValue =
-                String(featured).toLowerCase() === "true";
-
-            conditions.push(
-                `an.featured = $${parameterIndex}`
-            );
-
-            values.push(featuredValue);
-            parameterIndex++;
-        }
-
-        let orderBy = "an.created_at DESC";
-
-        switch (String(sort).toLowerCase()) {
-            case "popular":
-                orderBy = "an.views DESC, an.created_at DESC";
-                break;
-
-            case "rating":
-                orderBy = "an.rating DESC, an.created_at DESC";
-                break;
-
-            case "likes":
-                orderBy = "an.likes DESC, an.created_at DESC";
-                break;
-
-            case "oldest":
-                orderBy = "an.created_at ASC";
-                break;
-
-            case "latest":
-            default:
-                orderBy = "an.created_at DESC";
-                break;
-        }
-
-        const whereClause =
-            conditions.length
-                ? `WHERE ${conditions.join(" AND ")}`
-                : "";
-
-        const countResult = await db.query(
-            `
-            SELECT COUNT(*)::int AS total
-            FROM audio_novels an
-            ${whereClause}
-            `,
-            values
-        );
-
-        const total =
-            countResult.rows[0]?.total || 0;
-
-        const queryValues = [
-            ...values,
-            limitNumber,
-            offset
-        ];
-
-        const result = await db.query(
-            `
-            SELECT
-                an.id,
-                an.title,
-                an.description,
-                an.cover_url,
-                an.language,
-                an.category,
-                an.categories,
-                an.content_type,
-                an.status,
-                an.publish_status,
-                an.visibility,
-                an.premium_only,
-                an.featured,
-                an.views,
-                an.likes,
-                an.rating,
-                an.release_date,
-                an.created_by,
-                an.created_at,
-                an.updated_at,
-
-                u.name AS writer_name,
-u.profile_image AS writer_profile_image
-
-            FROM audio_novels an
-
-            LEFT JOIN users u
-                ON u.id = an.created_by
-
-            ${whereClause}
-
-            ORDER BY ${orderBy}
-
-            LIMIT $${parameterIndex}
-            OFFSET $${parameterIndex + 1}
-            `,
-            queryValues
-        );
-
-        return res.json({
-            success: true,
-            audio: result.rows,
-            pagination: {
-                page: pageNumber,
-                limit: limitNumber,
-                total,
-                totalPages:
-                    total > 0
-                        ? Math.ceil(total / limitNumber)
-                        : 0
-            }
-        });
-
+                .join("");
     } catch (error) {
-
-        console.error(
-            "GET /api/audio error:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to load audio novels."
-        });
+        console.error("Audio languages error:", error);
     }
-});
+}
 
-
-/*
-=========================================================
-FEATURED AUDIO
-/api/audio/featured
-=========================================================
-*/
-
-router.get("/featured", async (req, res) => {
+async function loadCategories() {
     try {
+        const response = await fetch(`${AUDIO_API_BASE}/categories`);
+        const data = await response.json();
 
-        const result = await db.query(`
-            SELECT
-                an.id,
-                an.title,
-                an.description,
-                an.cover_url,
-                an.language,
-                an.category,
-                an.categories,
-                an.premium_only,
-                an.featured,
-                an.views,
-                an.likes,
-                an.rating,
-                an.release_date,
-                an.created_by,
-                an.created_at,
+        if (!data.success) {
+            return;
+        }
 
-                u.name AS writer_name,
-u.profile_image AS writer_profile_image
+        const select = audio$("categoryFilter");
 
-            FROM audio_novels an
+        if (!select) {
+            return;
+        }
 
-            LEFT JOIN users u
-                ON u.id = an.created_by
-
-            WHERE
-    an.publish_status = 'published'
-    AND an.visibility = 'public'
-    AND an.featured = TRUE
-
-            ORDER BY
-                an.created_at DESC
-
-            LIMIT 20
-        `);
-
-        return res.json({
-            success: true,
-            audio: result.rows
-        });
-
-    } catch (error) {
-
-        console.error(
-            "GET /api/audio/featured error:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to load featured audio."
-        });
-    }
-});
-
-
-/*
-=========================================================
-LANGUAGES
-/api/audio/languages
-=========================================================
-*/
-
-router.get("/languages", async (req, res) => {
-    try {
-
-        const result = await db.query(`
-            SELECT DISTINCT language
-            FROM audio_novels
-            WHERE
-                status = 'published'
-                AND language IS NOT NULL
-                AND TRIM(language) <> ''
-            ORDER BY language ASC
-        `);
-
-        return res.json({
-            success: true,
-            languages:
-                result.rows.map(
-                    row => row.language
+        select.innerHTML =
+            `<option value="">All Categories</option>` +
+            (data.categories || [])
+                .map(category =>
+                    `<option value="${audioEscape(category)}">${audioEscape(category)}</option>`
                 )
-        });
-
+                .join("");
     } catch (error) {
-
-        console.error(
-            "GET /api/audio/languages error:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to load audio languages."
-        });
+        console.error("Audio categories error:", error);
     }
-});
+}
 
+async function loadContinueListening() {
+    if (!audioToken()) {
+        return;
+    }
 
-/*
-=========================================================
-CATEGORIES
-/api/audio/categories
-=========================================================
-*/
-
-router.get("/categories", async (req, res) => {
     try {
-
-        const result = await db.query(`
-            SELECT DISTINCT category
-            FROM audio_novels
-            WHERE
-                status = 'published'
-                AND category IS NOT NULL
-                AND TRIM(category) <> ''
-            ORDER BY category ASC
-        `);
-
-        return res.json({
-            success: true,
-            categories:
-                result.rows.map(
-                    row => row.category
-                )
-        });
-
-    } catch (error) {
-
-        console.error(
-            "GET /api/audio/categories error:",
-            error
+        const response = await fetch(
+            `${AUDIO_API_BASE}/continue-listening`,
+            {
+                headers: audioHeaders()
+            }
         );
 
-        return res.status(500).json({
-            success: false,
-            message: "Failed to load audio categories."
-        });
-    }
-});
+        if (!response.ok) {
+            return;
+        }
 
-/*
-=========================================================
-CONTINUE LISTENING
-GET /api/audio/continue-listening
-=========================================================
-*/
+        const data = await response.json();
 
-router.get(
-    "/continue-listening",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            const userId =
-                Number(req.user.id);
-
-            const result =
-                await db.query(`
-                    SELECT
-                        p.id,
-                        p.chapter_id,
-                        p.position_seconds,
-                        p.duration_seconds,
-                        p.progress_percent,
-                        p.completed,
-                        p.updated_at,
-
-                        ac.audio_novel_id,
-                        ac.chapter_no,
-                        ac.title AS chapter_title,
-                        ac.audio_duration_seconds,
-                        ac.audio_status,
-
-                        an.title AS audio_novel_title,
-                        an.cover_url,
-                        an.language,
-                        an.category
-
-                    FROM audio_chapter_progress p
-
-                    JOIN audio_chapters ac
-                        ON ac.id = p.chapter_id
-
-                    JOIN audio_novels an
-                        ON an.id = ac.audio_novel_id
-
-                    WHERE
-                        p.user_id = $1
-
-                        AND p.completed = FALSE
-
-                        AND an.publish_status = 'published'
-
-                        AND an.visibility = 'public'
-
-                        AND ac.is_draft = FALSE
-
-                        AND ac.is_published = TRUE
-
-                    ORDER BY
-                        p.updated_at DESC
-
-                    LIMIT 20
-                `, [
-                    userId
-                ]);
-
-            return res.json({
-                success: true,
-                listening: result.rows
-            });
-
-        } catch (error) {
-
-            console.error(
-                "GET continue listening error:",
-                error
+        if (data.success) {
+            renderContinueListening(
+                Array.isArray(data.listening)
+                    ? data.listening
+                    : []
             );
-
-            return res.status(500).json({
-                success: false,
-                message:
-                    "Failed to load continue listening."
-            });
-
         }
-
-    }
-);
-
-
-/*
-=========================================================
-GET SINGLE AUDIO NOVEL
-/api/audio/:id
-=========================================================
-*/
-
-router.get("/:id", async (req, res) => {
-    try {
-
-        const audioId =
-            parseInt(req.params.id, 10);
-
-        if (
-            !Number.isInteger(audioId) ||
-            audioId <= 0
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid audio ID."
-            });
-        }
-
-        const result = await db.query(`
-            SELECT
-                an.id,
-                an.title,
-                an.description,
-                an.cover_url,
-                an.language,
-                an.category,
-                an.categories,
-                an.content_type,
-                an.status,
-                an.publish_status,
-                an.visibility,
-                an.premium_only,
-                an.featured,
-                an.views,
-                an.likes,
-                an.rating,
-                an.release_date,
-                an.created_by,
-                an.created_at,
-                an.updated_at,
-
-                u.name AS writer_name,
-u.profile_image AS writer_profile_image
-
-            FROM audio_novels an
-
-            LEFT JOIN users u
-                ON u.id = an.created_by
-
-            WHERE
-    an.id = $1
-    AND an.publish_status = 'published'
-    AND an.visibility = 'public'
-        `, [audioId]);
-
-        if (!result.rows.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Audio novel not found."
-            });
-        }
-
-        return res.json({
-            success: true,
-            audio: result.rows[0]
-        });
-
     } catch (error) {
+        console.error("Continue listening error:", error);
+    }
+}
 
-        console.error(
-            "GET /api/audio/:id error:",
-            error
+async function loadAudioResults() {
+    const search = audio$("audioSearch")?.value.trim() || "";
+    const language = audio$("languageFilter")?.value || "";
+    const category = audio$("categoryFilter")?.value || "";
+    const sort = audio$("sortFilter")?.value || "latest";
+
+    const params = new URLSearchParams();
+
+    if (search) {
+        params.set("search", search);
+    }
+
+    if (language) {
+        params.set("language", language);
+    }
+
+    if (category) {
+        params.set("category", category);
+    }
+
+    params.set("sort", sort);
+    params.set("limit", "20");
+
+    const container = audio$("audioResults");
+
+    if (container) {
+        container.innerHTML =
+            `<div class="audio-loading">Loading audio stories...</div>`;
+    }
+
+    try {
+        const response = await fetch(
+            `${AUDIO_API_BASE}?${params.toString()}`
         );
 
-        return res.status(500).json({
-            success: false,
-            message: "Failed to load audio novel."
-        });
-    }
-});
+        const data = await response.json();
 
-
-/*
-=========================================================
-GET AUDIO CHAPTERS
-/api/audio/:id/chapters
-=========================================================
-*/
-
-router.get("/:id/chapters", async (req, res) => {
-    try {
-
-        const audioId =
-            parseInt(req.params.id, 10);
-
-        if (
-            !Number.isInteger(audioId) ||
-            audioId <= 0
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid audio ID."
-            });
-        }
-
-        const novelCheck =
-            await db.query(`
-                SELECT id
-FROM audio_novels
-WHERE
-    id = $1
-    AND publish_status = 'published'
-    AND visibility = 'public'
-            `, [audioId]);
-
-        if (!novelCheck.rows.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Audio novel not found."
-            });
-        }
-
-        const result = await db.query(`
-            SELECT
-                id,
-                audio_novel_id,
-                chapter_no,
-                title,
-
-                audio_provider,
-                audio_mime_type,
-                audio_original_name,
-                audio_size_bytes,
-                audio_duration_seconds,
-                audio_status,
-
-                is_premium,
-                coins_required,
-                early_access,
-
-                is_draft,
-                is_published,
-                publish_at,
-
-                created_at,
-                updated_at
-
-            FROM audio_chapters
-
-            WHERE
-                audio_novel_id = $1
-                AND is_published = TRUE
-                AND is_draft = FALSE
-
-            ORDER BY chapter_no ASC
-        `, [audioId]);
-
-        return res.json({
-            success: true,
-            chapters: result.rows
-        });
-
-    } catch (error) {
-
-        console.error(
-            "GET /api/audio/:id/chapters error:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to load audio chapters."
-        });
-    }
-});
-
-
-/*
-=========================================================
-GET SINGLE AUDIO CHAPTER
-/api/audio/chapter/:chapterId
-=========================================================
-*/
-
-router.get("/chapter/:chapterId", async (req, res) => {
-    try {
-
-        const chapterId =
-            parseInt(
-                req.params.chapterId,
-                10
+        if (!response.ok || !data.success) {
+            throw new Error(
+                data.message || "Unable to load audio."
             );
-
-        if (
-            !Number.isInteger(chapterId) ||
-            chapterId <= 0
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid chapter ID."
-            });
         }
 
-        const result = await db.query(`
-            SELECT
-                ac.id,
-                ac.audio_novel_id,
-                ac.chapter_no,
-                ac.title,
+        const items = Array.isArray(data.audio)
+            ? data.audio
+            : [];
 
-                ac.audio_provider,
-                ac.audio_mime_type,
-                ac.audio_size_bytes,
-                ac.audio_duration_seconds,
-                ac.audio_status,
+        renderAudioResults(items);
 
-                ac.is_premium,
-                ac.coins_required,
-                ac.early_access,
+        const title = search
+            ? `Search results for “${audioEscape(search)}”`
+            : sort === "popular"
+                ? "Popular Audio"
+                : sort === "rating"
+                    ? "Highest Rated Audio"
+                    : sort === "likes"
+                        ? "Most Liked Audio"
+                        : "Latest Audio";
 
-                ac.is_draft,
-                ac.is_published,
-                ac.publish_at,
-
-                ac.created_at,
-                ac.updated_at,
-
-                an.title AS audio_novel_title,
-                an.cover_url AS audio_novel_cover_url,
-                an.status AS audio_novel_status
-
-            FROM audio_chapters ac
-
-            JOIN audio_novels an
-                ON an.id = ac.audio_novel_id
-
-            WHERE
-                ac.id = $1
-                AND ac.is_published = TRUE
-                AND ac.is_draft = FALSE
-                AND an.publish_status = 'published'
-AND an.visibility = 'public'
-        `, [chapterId]);
-
-        if (!result.rows.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Audio chapter not found."
-            });
+        if (audio$("resultsTitle")) {
+            audio$("resultsTitle").textContent = title;
         }
 
-        return res.json({
-            success: true,
-            chapter: result.rows[0]
-        });
+        if (audio$("resultsSummary")) {
+            audio$("resultsSummary").textContent =
+                `${Number(data.pagination?.total || items.length)} audio stories available.`;
+        }
 
     } catch (error) {
+        console.error("Audio results error:", error);
 
-        console.error(
-            "GET /api/audio/chapter/:chapterId error:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to load audio chapter."
-        });
+        if (container) {
+            container.innerHTML = `
+                <div class="audio-empty">
+                    <div>⚠️</div>
+                    <h3>Unable to load audio</h3>
+                    <p>${audioEscape(error.message || "Please try again.")}</p>
+                </div>
+            `;
+        }
     }
-});
+}
 
+function updatePagination(page, totalPages) {
+    const wrapper = audio$("audioPagination");
+    const info = audio$("pageInfo");
+    const previous = audio$("previousPage");
+    const next = audio$("nextPage");
 
-/*
-=========================================================
-INCREMENT AUDIO NOVEL VIEW
-POST /api/audio/:id/view
-=========================================================
-*/
+    if (!wrapper || !info || !previous || !next) {
+        return;
+    }
 
-router.post("/:id/view", async (req, res) => {
+    if (totalPages <= 1) {
+        wrapper.hidden = true;
+        return;
+    }
+
+    wrapper.hidden = false;
+    info.textContent = `Page ${page} of ${totalPages}`;
+
+    previous.disabled = page <= 1;
+    next.disabled = page >= totalPages;
+
+    audioPageNumber = page;
+}
+
+async function loadNovelDetails(novelId) {
+    const section = audio$("novelDetailsSection");
+
+    if (!section) {
+        return;
+    }
+
+    section.hidden = false;
+
     try {
-
-        const audioId =
-            parseInt(req.params.id, 10);
-
-        if (
-            !Number.isInteger(audioId) ||
-            audioId <= 0
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid audio ID."
-            });
-        }
-
-        const result = await db.query(`
-            UPDATE audio_novels
-
-            SET
-                views = COALESCE(views, 0) + 1,
-                updated_at = NOW()
-
-            WHERE
-    id = $1
-    AND publish_status = 'published'
-    AND visibility = 'public'
-
-            RETURNING
-                id,
-                views
-        `, [audioId]);
-
-        if (!result.rows.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Audio novel not found."
-            });
-        }
-
-        return res.json({
-            success: true,
-            views: result.rows[0].views
-        });
-
-    } catch (error) {
-
-        console.error(
-            "POST /api/audio/:id/view error:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to update audio views."
-        });
-    }
-});
-
-/*
-=========================================================
-AUDIO NOVEL LIKE
-GET /api/audio/:id/like
-POST /api/audio/:id/like
-=========================================================
-*/
-
-router.get(
-    "/:id/like",
-    auth,
-    async (req, res) => {
-        try {
-            const audioId = Number(req.params.id);
-            const userId = Number(req.user.id);
-
-            if (!Number.isInteger(audioId) || audioId <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid audio ID."
-                });
-            }
-
-            const result = await db.query(`
-                SELECT
-                    an.likes,
-                    EXISTS (
-                        SELECT 1
-                        FROM audio_likes al
-                        WHERE al.audio_novel_id = an.id
-                          AND al.user_id = $2
-                    ) AS liked
-                FROM audio_novels an
-                WHERE
-                    an.id = $1
-                    AND an.publish_status = 'published'
-                    AND an.visibility = 'public'
-            `, [audioId, userId]);
-
-            if (!result.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio novel not found."
-                });
-            }
-
-            return res.json({
-                success: true,
-                liked: Boolean(result.rows[0].liked),
-                likes: Number(result.rows[0].likes || 0)
-            });
-        } catch (error) {
-            console.error("GET audio novel like error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Failed to load audio novel like status."
-            });
-        }
-    }
-);
-
-router.post(
-    "/:id/like",
-    auth,
-    async (req, res) => {
-        const client = await db.connect();
-
-        try {
-            const audioId = Number(req.params.id);
-            const userId = Number(req.user.id);
-
-            if (!Number.isInteger(audioId) || audioId <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid audio ID."
-                });
-            }
-
-            await client.query("BEGIN");
-
-            const novel = await client.query(`
-                SELECT id
-                FROM audio_novels
-                WHERE
-                    id = $1
-                    AND publish_status = 'published'
-                    AND visibility = 'public'
-            `, [audioId]);
-
-            if (!novel.rows.length) {
-                await client.query("ROLLBACK");
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio novel not found."
-                });
-            }
-
-            const existing = await client.query(`
-                SELECT id
-                FROM audio_likes
-                WHERE
-                    audio_novel_id = $1
-                    AND user_id = $2
-                LIMIT 1
-            `, [audioId, userId]);
-
-            let liked;
-
-            if (existing.rows.length) {
-                await client.query(`
-                    DELETE FROM audio_likes
-                    WHERE id = $1
-                `, [existing.rows[0].id]);
-                liked = false;
-            } else {
-                await client.query(`
-                    INSERT INTO audio_likes
-                    (
-                        audio_novel_id,
-                        user_id,
-                        created_at
-                    )
-                    VALUES ($1, $2, NOW())
-                    ON CONFLICT (audio_novel_id, user_id)
-                    DO NOTHING
-                `, [audioId, userId]);
-                liked = true;
-            }
-
-            const count = await client.query(`
-                SELECT COUNT(*)::int AS likes
-                FROM audio_likes
-                WHERE audio_novel_id = $1
-            `, [audioId]);
-
-            await client.query(`
-                UPDATE audio_novels
-                SET
-                    likes = $1,
-                    updated_at = NOW()
-                WHERE id = $2
-            `, [Number(count.rows[0].likes || 0), audioId]);
-
-            await client.query("COMMIT");
-
-            return res.json({
-                success: true,
-                liked,
-                likes: Number(count.rows[0].likes || 0)
-            });
-        } catch (error) {
-            await client.query("ROLLBACK");
-            console.error("POST audio novel like error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Failed to update audio novel like."
-            });
-        } finally {
-            client.release();
-        }
-    }
-);
-
-/*
-=========================================================
-AUDIO NOVEL RATING
-GET /api/audio/:id/rating
-POST /api/audio/:id/rating
-=========================================================
-*/
-
-router.get(
-    "/:id/rating",
-    auth,
-    async (req, res) => {
-        try {
-            const audioId = Number(req.params.id);
-            const userId = Number(req.user.id);
-
-            if (!Number.isInteger(audioId) || audioId <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid audio ID."
-                });
-            }
-
-            const novel = await db.query(`
-                SELECT id
-                FROM audio_novels
-                WHERE
-                    id = $1
-                    AND publish_status = 'published'
-                    AND visibility = 'public'
-            `, [audioId]);
-
-            if (!novel.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio novel not found."
-                });
-            }
-
-            const userRating = await db.query(`
-                SELECT rating
-                FROM audio_ratings
-                WHERE
-                    audio_novel_id = $1
-                    AND user_id = $2
-                LIMIT 1
-            `, [audioId, userId]);
-
-            const aggregate = await db.query(`
-                SELECT
-                    ROUND(COALESCE(AVG(rating), 0), 2) AS average_rating,
-                    COUNT(*)::int AS rating_count
-                FROM audio_ratings
-                WHERE audio_novel_id = $1
-            `, [audioId]);
-
-            return res.json({
-                success: true,
-                rating: userRating.rows.length
-                    ? Number(userRating.rows[0].rating)
-                    : null,
-                average_rating: Number(aggregate.rows[0].average_rating || 0),
-                rating_count: Number(aggregate.rows[0].rating_count || 0)
-            });
-        } catch (error) {
-            console.error("GET audio novel rating error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Failed to load audio novel rating."
-            });
-        }
-    }
-);
-
-router.post(
-    "/:id/rating",
-    auth,
-    async (req, res) => {
-        const client = await db.connect();
-
-        try {
-            const audioId = Number(req.params.id);
-            const userId = Number(req.user.id);
-            const rating = Number(req.body.rating);
-
-            if (!Number.isInteger(audioId) || audioId <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid audio ID."
-                });
-            }
-
-            if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Rating must be between 1 and 5."
-                });
-            }
-
-            await client.query("BEGIN");
-
-            const novel = await client.query(`
-                SELECT id
-                FROM audio_novels
-                WHERE
-                    id = $1
-                    AND publish_status = 'published'
-                    AND visibility = 'public'
-            `, [audioId]);
-
-            if (!novel.rows.length) {
-                await client.query("ROLLBACK");
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio novel not found."
-                });
-            }
-
-            await client.query(`
-                INSERT INTO audio_ratings
-                (
-                    audio_novel_id,
-                    user_id,
-                    rating,
-                    created_at,
-                    updated_at
-                )
-                VALUES ($1, $2, $3, NOW(), NOW())
-                ON CONFLICT (audio_novel_id, user_id)
-                DO UPDATE SET
-                    rating = EXCLUDED.rating,
-                    updated_at = NOW()
-            `, [audioId, userId, rating]);
-
-            const aggregate = await client.query(`
-                SELECT
-                    ROUND(COALESCE(AVG(rating), 0), 2) AS average_rating,
-                    COUNT(*)::int AS rating_count
-                FROM audio_ratings
-                WHERE audio_novel_id = $1
-            `, [audioId]);
-
-            await client.query(`
-                UPDATE audio_novels
-                SET
-                    rating = $1,
-                    rating_count = $2,
-                    updated_at = NOW()
-                WHERE id = $3
-            `, [
-                Number(aggregate.rows[0].average_rating || 0),
-                Number(aggregate.rows[0].rating_count || 0),
-                audioId
+        const [novelResponse, chaptersResponse] =
+            await Promise.all([
+                fetch(`${AUDIO_API_BASE}/${novelId}`),
+                fetch(`${AUDIO_API_BASE}/${novelId}/chapters`)
             ]);
 
-            await client.query("COMMIT");
+        const novelData = await novelResponse.json();
+        const chaptersData = await chaptersResponse.json();
 
-            return res.json({
-                success: true,
-                rating,
-                average_rating: Number(aggregate.rows[0].average_rating || 0),
-                rating_count: Number(aggregate.rows[0].rating_count || 0)
-            });
-        } catch (error) {
-            await client.query("ROLLBACK");
-            console.error("POST audio novel rating error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Failed to save audio novel rating."
-            });
-        } finally {
-            client.release();
-        }
-    }
-);
-
-/*
-=========================================================
-AUDIO NOVEL COMMENTS
-GET /api/audio/:id/comments
-POST /api/audio/:id/comments
-DELETE /api/audio/:id/comments/:commentId
-=========================================================
-*/
-
-router.get(
-    "/:id/comments",
-    async (req, res) => {
-        try {
-            const audioId = Number(req.params.id);
-
-            if (!Number.isInteger(audioId) || audioId <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid audio ID."
-                });
-            }
-
-            const result = await db.query(`
-                SELECT
-                    c.id,
-                    c.audio_novel_id,
-                    c.user_id,
-                    c.comment,
-                    c.created_at,
-                    c.updated_at,
-                    u.name,
-                    u.profile_image
-                FROM audio_comments c
-                LEFT JOIN users u
-                    ON u.id = c.user_id
-                JOIN audio_novels an
-                    ON an.id = c.audio_novel_id
-                WHERE
-                    c.audio_novel_id = $1
-                    AND an.publish_status = 'published'
-                    AND an.visibility = 'public'
-                ORDER BY c.created_at DESC
-            `, [audioId]);
-
-            return res.json({
-                success: true,
-                comments: result.rows
-            });
-        } catch (error) {
-            console.error("GET audio novel comments error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Failed to load audio novel comments."
-            });
-        }
-    }
-);
-
-router.post(
-    "/:id/comments",
-    auth,
-    async (req, res) => {
-        try {
-            const audioId = Number(req.params.id);
-            const userId = Number(req.user.id);
-            const comment = String(req.body.comment || "").trim();
-
-            if (!Number.isInteger(audioId) || audioId <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid audio ID."
-                });
-            }
-
-            if (!comment) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Comment cannot be empty."
-                });
-            }
-
-            if (comment.length > 2000) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Comment cannot exceed 2000 characters."
-                });
-            }
-
-            const novel = await db.query(`
-                SELECT id
-                FROM audio_novels
-                WHERE
-                    id = $1
-                    AND publish_status = 'published'
-                    AND visibility = 'public'
-            `, [audioId]);
-
-            if (!novel.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio novel not found."
-                });
-            }
-
-            const result = await db.query(`
-                INSERT INTO audio_comments
-                (
-                    audio_novel_id,
-                    user_id,
-                    comment,
-                    created_at,
-                    updated_at
-                )
-                VALUES ($1, $2, $3, NOW(), NOW())
-                RETURNING
-                    id,
-                    audio_novel_id,
-                    user_id,
-                    comment,
-                    created_at,
-                    updated_at
-            `, [audioId, userId, comment]);
-
-            const user = await db.query(`
-                SELECT name, profile_image
-                FROM users
-                WHERE id = $1
-            `, [userId]);
-
-            return res.status(201).json({
-                success: true,
-                comment: {
-                    ...result.rows[0],
-                    name: user.rows[0]?.name || null,
-                    profile_image: user.rows[0]?.profile_image || null
-                }
-            });
-        } catch (error) {
-            console.error("POST audio novel comment error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Failed to add audio novel comment."
-            });
-        }
-    }
-);
-
-router.delete(
-    "/:id/comments/:commentId",
-    auth,
-    async (req, res) => {
-        try {
-            const audioId = Number(req.params.id);
-            const commentId = Number(req.params.commentId);
-            const userId = Number(req.user.id);
-
-            if (
-                !Number.isInteger(audioId) ||
-                audioId <= 0 ||
-                !Number.isInteger(commentId) ||
-                commentId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid comment ID."
-                });
-            }
-
-            const result = await db.query(`
-                DELETE FROM audio_comments
-                WHERE
-                    id = $1
-                    AND audio_novel_id = $2
-                    AND user_id = $3
-                RETURNING id
-            `, [commentId, audioId, userId]);
-
-            if (!result.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Comment not found or you cannot delete it."
-                });
-            }
-
-            return res.json({
-                success: true,
-                message: "Comment deleted successfully."
-            });
-        } catch (error) {
-            console.error("DELETE audio novel comment error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Failed to delete audio novel comment."
-            });
-        }
-    }
-);
-
-/*
-=========================================================
-REPORT AUDIO NOVEL COMMENT
-POST /api/audio/novel-comments/:commentId/report
-=========================================================
-*/
-
-router.post(
-    "/novel-comments/:commentId/report",
-    auth,
-    async (req, res) => {
-        try {
-            const commentId = Number(req.params.commentId);
-            const reporterUserId = Number(req.user.id);
-            const reason = String(req.body.reason || "").trim();
-
-            if (!Number.isInteger(commentId) || commentId <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid comment ID."
-                });
-            }
-
-            if (!reason) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Please provide a report reason."
-                });
-            }
-
-            if (reason.length > 1000) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Report reason cannot exceed 1000 characters."
-                });
-            }
-
-            const comment = await db.query(`
-                SELECT id, user_id
-                FROM audio_comments
-                WHERE id = $1
-                LIMIT 1
-            `, [commentId]);
-
-            if (!comment.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Comment not found."
-                });
-            }
-
-            if (Number(comment.rows[0].user_id) === reporterUserId) {
-                return res.status(400).json({
-                    success: false,
-                    message: "You cannot report your own comment."
-                });
-            }
-
-            const existing = await db.query(`
-                SELECT id
-                FROM audio_comment_reports
-                WHERE
-                    comment_id = $1
-                    AND reporter_user_id = $2
-                LIMIT 1
-            `, [commentId, reporterUserId]);
-
-            if (existing.rows.length) {
-                return res.status(409).json({
-                    success: false,
-                    message: "You have already reported this comment."
-                });
-            }
-
-            const result = await db.query(`
-                INSERT INTO audio_comment_reports
-                (
-                    comment_id,
-                    reporter_user_id,
-                    reason,
-                    status,
-                    created_at
-                )
-                VALUES ($1, $2, $3, 'pending', NOW())
-                RETURNING
-                    id,
-                    comment_id,
-                    reporter_user_id,
-                    reason,
-                    status,
-                    created_at
-            `, [commentId, reporterUserId, reason]);
-
-            return res.status(201).json({
-                success: true,
-                report: result.rows[0]
-            });
-        } catch (error) {
-            console.error("POST audio novel comment report error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Failed to report audio novel comment."
-            });
-        }
-    }
-);
-
-/*
-=========================================================
-GET AUDIO CHAPTER PROGRESS
-GET /api/audio/chapters/:chapterId/progress
-=========================================================
-*/
-
-router.get(
-    "/chapters/:chapterId/progress",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            const chapterId =
-                Number(req.params.chapterId);
-
-            const userId =
-                Number(req.user.id);
-
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid chapter ID."
-                });
-            }
-
-            const result =
-                await db.query(`
-                    SELECT
-                        id,
-                        user_id,
-                        chapter_id,
-                        position_seconds,
-                        duration_seconds,
-                        progress_percent,
-                        completed,
-                        updated_at
-
-                    FROM audio_chapter_progress
-
-                    WHERE
-                        user_id = $1
-                        AND chapter_id = $2
-
-                    LIMIT 1
-                `, [
-                    userId,
-                    chapterId
-                ]);
-
-            if (!result.rows.length) {
-
-                return res.json({
-                    success: true,
-                    progress: null
-                });
-
-            }
-
-            return res.json({
-                success: true,
-                progress: result.rows[0]
-            });
-
-        } catch (error) {
-
-            console.error(
-                "GET audio progress error:",
-                error
+        if (
+            !novelResponse.ok ||
+            !novelData.success
+        ) {
+            throw new Error(
+                novelData.message || "Audio novel not found."
             );
-
-            return res.status(500).json({
-                success: false,
-                message:
-                    "Failed to load audio progress."
-            });
-
         }
 
+        currentAudioNovelId = Number(novelId);
+        currentAudioNovel = novelData.audio || null;
+
+        renderNovelDetails(novelData.audio);
+
+        if (
+            chaptersResponse.ok &&
+            chaptersData.success
+        ) {
+            renderChapters(
+                Array.isArray(chaptersData.chapters)
+                    ? chaptersData.chapters
+                    : []
+            );
+        } else {
+            renderChapters([]);
+        }
+
+        await loadNovelEngagement(currentAudioNovelId);
+
+        window.scrollTo({
+            top: section.offsetTop - 90,
+            behavior: "smooth"
+        });
+
+    } catch (error) {
+        console.error("Audio novel details error:", error);
+
+        section.innerHTML = `
+            <div class="audio-empty">
+                <div>⚠️</div>
+                <h3>Unable to load this audio novel</h3>
+                <p>${audioEscape(error.message || "Please try again.")}</p>
+            </div>
+        `;
     }
-);
+}
 
+function renderNovelDetails(novel) {
+    const cover = audio$("novelDetailCover");
+    const fallback = audio$("novelDetailCoverFallback");
+    const title = audio$("novelDetailTitle");
+    const description = audio$("novelDetailDescription");
+    const meta = audio$("novelDetailMeta");
 
-/*
-=========================================================
-SAVE AUDIO CHAPTER PROGRESS
-POST /api/audio/chapters/:chapterId/progress
-=========================================================
-*/
-
-router.post(
-    "/chapters/:chapterId/progress",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            const chapterId =
-                Number(req.params.chapterId);
-
-            const userId =
-                Number(req.user.id);
-
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid chapter ID."
-                });
-            }
-
-            let position =
-                Number(
-                    req.body.position_seconds
+    if (cover && fallback) {
+        if (novel.cover_url) {
+            cover.src =
+                audioNovelCoverUrl(
+                    novel.cover_url,
+                    currentAudioNovelId
                 );
+            cover.alt = novel.title || "Audio novel cover";
+            cover.hidden = false;
+            fallback.hidden = true;
 
-            let duration =
-                Number(
-                    req.body.duration_seconds
-                );
+            cover.onerror = () => {
+                cover.hidden = true;
+                fallback.hidden = false;
+            };
+        } else {
+            cover.hidden = true;
+            fallback.hidden = false;
+        }
+    }
 
-            if (
-                !Number.isFinite(position) ||
-                position < 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Invalid position."
-                });
-            }
+    if (title) {
+        title.textContent = novel.title || "Audio Novel";
+    }
 
-            if (
-                !Number.isFinite(duration) ||
-                duration <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Invalid duration."
-                });
-            }
+    if (description) {
+        description.textContent =
+            novel.description || "Listen to this story on MyLikith Audio.";
+    }
 
-            /*
-            =================================================
-            CLAMP POSITION
-            =================================================
-            */
+    if (meta) {
+        meta.innerHTML = `
+            <span>${audioEscape(novel.language || "Unknown")}</span>
+            <span>${audioEscape(novel.category || "Story")}</span>
+            <span>⭐ ${Number(novel.rating || 0) > 0 ? Number(novel.rating).toFixed(1) : "New"}</span>
+            <span>♥ ${audioFormatNumber(novel.likes)}</span>
+            <span>👁 ${audioFormatNumber(novel.views)}</span>
+        `;
+    }
 
-            position =
-                Math.min(
-                    position,
-                    duration
-                );
+    const button = audio$("novelFirstChapterButton");
 
-            /*
-            =================================================
-            ROUND VALUES
-            =================================================
-            */
+    if (button) {
+        button.hidden = true;
+        button.href = "#";
+    }
+}
 
-position = Math.round(position);
-duration = Math.round(duration);
+function renderChapters(chapters) {
+    const container = audio$("audioChapters");
 
-            let progressPercent =
-                (position / duration) * 100;
+    if (!container) {
+        return;
+    }
 
-            progressPercent =
-                Math.min(
-                    Math.max(
-                        progressPercent,
-                        0
+    if (!chapters.length) {
+        container.innerHTML = `
+            <div class="audio-empty compact">
+                <div>🎧</div>
+                <h3>No published chapters yet</h3>
+                <p>Audio episodes will appear here when published.</p>
+            </div>
+        `;
+        return;
+    }
+
+    const first = chapters[0];
+    const firstButton = audio$("novelFirstChapterButton");
+
+    if (firstButton) {
+        firstButton.hidden = false;
+        firstButton.href =
+            `audio-chapter.html?id=${encodeURIComponent(first.id)}`;
+    }
+
+    container.innerHTML = chapters.map((chapter, index) => {
+        const duration = audioFormatTime(
+            chapter.audio_duration_seconds
+        );
+
+        const locked =
+            Boolean(chapter.is_premium) ||
+            Number(chapter.coins_required || 0) > 0;
+
+        return `
+            <a
+                class="audio-chapter-row"
+                href="audio-chapter.html?id=${encodeURIComponent(chapter.id)}"
+            >
+                <div class="chapter-number">
+                    ${String(chapter.chapter_no ?? index + 1).padStart(2, "0")}
+                </div>
+
+                <div class="chapter-main">
+                    <h3>${audioEscape(chapter.title || "Untitled Chapter")}</h3>
+
+                    <div class="chapter-meta">
+                        <span>${duration}</span>
+                        ${locked
+                            ? `<span class="chapter-lock">🔒 ${chapter.coins_required ? `${audioEscape(chapter.coins_required)} coins` : "Premium"}</span>`
+                            : `<span class="chapter-free">FREE</span>`
+                        }
+                    </div>
+                </div>
+
+                <span class="chapter-play">▶</span>
+            </a>
+        `;
+    }).join("");
+}
+
+
+async function loadNovelEngagement(novelId) {
+
+    const section = audio$("novelEngagement");
+
+    if(!section || !novelId){
+        return;
+    }
+
+    section.hidden = false;
+
+    try{
+
+        if(audioToken()){
+
+            const [likeResponse, ratingResponse] =
+                await Promise.all([
+                    fetch(
+                        `${AUDIO_API_BASE}/${novelId}/like`,
+                        { headers: audioHeaders() }
                     ),
-                    100
-                );
-
-            progressPercent =
-                Math.round(
-                    progressPercent * 100
-                ) / 100;
-
-            /*
-            =================================================
-            COMPLETION
-            =================================================
-            */
-
-            const completed =
-                progressPercent >= 98;
-
-            if (completed) {
-
-                position =
-                    duration;
-
-                progressPercent = 100;
-            }
-
-            /*
-            =================================================
-            UPSERT
-            =================================================
-            */
-
-            const result =
-                await db.query(`
-                    INSERT INTO audio_chapter_progress
-                    (
-                        user_id,
-                        chapter_id,
-                        position_seconds,
-                        duration_seconds,
-                        progress_percent,
-                        completed,
-                        updated_at
+                    fetch(
+                        `${AUDIO_API_BASE}/${novelId}/rating`,
+                        { headers: audioHeaders() }
                     )
-
-                    VALUES
-                    (
-                        $1,
-                        $2,
-                        $3,
-                        $4,
-                        $5,
-                        $6,
-                        NOW()
-                    )
-
-                    ON CONFLICT
-                        (user_id, chapter_id)
-
-                    DO UPDATE SET
-                        position_seconds =
-                            EXCLUDED.position_seconds,
-
-                        duration_seconds =
-                            EXCLUDED.duration_seconds,
-
-                        progress_percent =
-                            EXCLUDED.progress_percent,
-
-                        completed =
-                            EXCLUDED.completed,
-
-                        updated_at =
-                            NOW()
-
-                    RETURNING
-                        id,
-                        user_id,
-                        chapter_id,
-                        position_seconds,
-                        duration_seconds,
-                        progress_percent,
-                        completed,
-                        updated_at
-                `, [
-                    userId,
-                    chapterId,
-                    position,
-                    duration,
-                    progressPercent,
-                    completed
                 ]);
 
-            return res.json({
-                success: true,
-                progress: result.rows[0]
-            });
+            const likeData = await likeResponse.json();
+            const ratingData = await ratingResponse.json();
 
-        } catch (error) {
-
-            console.error(
-                "POST audio progress error:",
-                error
+            updateNovelLikeUI(
+                likeResponse.ok && likeData.success
+                    ? Boolean(likeData.liked)
+                    : false,
+                likeResponse.ok && likeData.success
+                    ? Number(likeData.likes || 0)
+                    : Number(currentAudioNovel?.likes || 0)
             );
 
-            return res.status(500).json({
-                success: false,
-                message:
-                    "Failed to save audio progress."
-            });
-
-        }
-
-    }
-);
-
-/*
-=========================================================
-AUDIO CHAPTER LIKE STATUS
-GET /api/audio/chapters/:chapterId/like
-=========================================================
-*/
-
-router.get(
-    "/chapters/:chapterId/like",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            const chapterId =
-                Number(req.params.chapterId);
-
-            const userId =
-                Number(req.user.id);
-
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid chapter ID."
-                });
-            }
-
-            const chapter =
-                await db.query(`
-                    SELECT id
-                    FROM audio_chapters
-                    WHERE
-                        id = $1
-                        AND is_published = TRUE
-                        AND is_draft = FALSE
-                `, [chapterId]);
-
-            if (!chapter.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio chapter not found."
-                });
-            }
-
-            const result =
-                await db.query(`
-                    SELECT id
-                    FROM audio_chapter_likes
-                    WHERE
-                        user_id = $1
-                        AND chapter_id = $2
-                    LIMIT 1
-                `, [
-                    userId,
-                    chapterId
-                ]);
-
-            const count =
-                await db.query(`
-                    SELECT COUNT(*)::int AS likes
-                    FROM audio_chapter_likes
-                    WHERE chapter_id = $1
-                `, [chapterId]);
-
-            return res.json({
-                success: true,
-                liked: result.rows.length > 0,
-                likes: count.rows[0].likes
-            });
-
-        } catch (error) {
-
-            console.error(
-                "GET audio chapter like error:",
-                error
+            updateNovelRatingUI(
+                ratingResponse.ok && ratingData.success
+                    ? Number(ratingData.average_rating || 0)
+                    : Number(currentAudioNovel?.rating || 0),
+                ratingResponse.ok && ratingData.success
+                    ? Number(ratingData.rating_count || 0)
+                    : Number(currentAudioNovel?.rating_count || 0),
+                ratingResponse.ok && ratingData.success && ratingData.rating != null
+                    ? Number(ratingData.rating)
+                    : null
             );
 
-            return res.status(500).json({
-                success: false,
-                message: "Failed to load audio like status."
-            });
-        }
-    }
-);
+        }else{
 
-
-/*
-=========================================================
-TOGGLE AUDIO CHAPTER LIKE
-POST /api/audio/chapters/:chapterId/like
-=========================================================
-*/
-
-router.post(
-    "/chapters/:chapterId/like",
-    auth,
-    async (req, res) => {
-
-        const client =
-            await db.connect();
-
-        try {
-
-            const chapterId =
-                Number(req.params.chapterId);
-
-            const userId =
-                Number(req.user.id);
-
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid chapter ID."
-                });
-            }
-
-            await client.query("BEGIN");
-
-            const chapter =
-                await client.query(`
-                    SELECT id
-                    FROM audio_chapters
-                    WHERE
-                        id = $1
-                        AND is_published = TRUE
-                        AND is_draft = FALSE
-                `, [chapterId]);
-
-            if (!chapter.rows.length) {
-
-                await client.query("ROLLBACK");
-
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio chapter not found."
-                });
-            }
-
-            const existing =
-                await client.query(`
-                    SELECT id
-                    FROM audio_chapter_likes
-                    WHERE
-                        user_id = $1
-                        AND chapter_id = $2
-                    LIMIT 1
-                `, [
-                    userId,
-                    chapterId
-                ]);
-
-            let liked;
-
-            if (existing.rows.length) {
-
-                await client.query(`
-                    DELETE FROM audio_chapter_likes
-                    WHERE
-                        user_id = $1
-                        AND chapter_id = $2
-                `, [
-                    userId,
-                    chapterId
-                ]);
-
-                liked = false;
-
-            } else {
-
-                await client.query(`
-                    INSERT INTO audio_chapter_likes
-                    (
-                        user_id,
-                        chapter_id,
-                        created_at
-                    )
-                    VALUES
-                    (
-                        $1,
-                        $2,
-                        NOW()
-                    )
-                    ON CONFLICT (
-                        user_id,
-                        chapter_id
-                    )
-                    DO NOTHING
-                `, [
-                    userId,
-                    chapterId
-                ]);
-
-                liked = true;
-            }
-
-            const count =
-                await client.query(`
-                    SELECT COUNT(*)::int AS likes
-                    FROM audio_chapter_likes
-                    WHERE chapter_id = $1
-                `, [chapterId]);
-
-            await client.query("COMMIT");
-
-            return res.json({
-                success: true,
-                liked,
-                likes: count.rows[0].likes
-            });
-
-        } catch (error) {
-
-            await client.query("ROLLBACK");
-
-            console.error(
-                "POST audio chapter like error:",
-                error
+            updateNovelLikeUI(
+                false,
+                Number(currentAudioNovel?.likes || 0)
             );
 
-            return res.status(500).json({
-                success: false,
-                message: "Failed to update audio like."
-            });
-
-        } finally {
-
-            client.release();
-        }
-    }
-);
-
-/*
-=========================================================
-GET AUDIO CHAPTER RATING
-GET /api/audio/chapters/:chapterId/rating
-=========================================================
-*/
-
-router.get(
-    "/chapters/:chapterId/rating",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            const chapterId =
-                Number(req.params.chapterId);
-
-            const userId =
-                Number(req.user.id);
-
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid chapter ID."
-                });
-            }
-
-            const chapter =
-                await db.query(`
-                    SELECT id
-                    FROM audio_chapters
-                    WHERE
-                        id = $1
-                        AND is_published = TRUE
-                        AND is_draft = FALSE
-                `, [chapterId]);
-
-            if (!chapter.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio chapter not found."
-                });
-            }
-
-            const userRating =
-                await db.query(`
-                    SELECT
-                        rating
-                    FROM audio_chapter_ratings
-                    WHERE
-                        user_id = $1
-                        AND chapter_id = $2
-                    LIMIT 1
-                `, [
-                    userId,
-                    chapterId
-                ]);
-
-            const aggregate =
-                await db.query(`
-                    SELECT
-                        ROUND(
-                            COALESCE(
-                                AVG(rating),
-                                0
-                            ),
-                            2
-                        ) AS average_rating,
-                        COUNT(*)::int AS rating_count
-                    FROM audio_chapter_ratings
-                    WHERE chapter_id = $1
-                `, [chapterId]);
-
-            return res.json({
-                success: true,
-
-                rating:
-                    userRating.rows.length
-                        ? Number(
-                            userRating.rows[0].rating
-                        )
-                        : null,
-
-                average_rating:
-                    Number(
-                        aggregate.rows[0].average_rating || 0
-                    ),
-
-                rating_count:
-                    Number(
-                        aggregate.rows[0].rating_count || 0
-                    )
-            });
-
-        } catch (error) {
-
-            console.error(
-                "GET audio chapter rating error:",
-                error
+            updateNovelRatingUI(
+                Number(currentAudioNovel?.rating || 0),
+                Number(currentAudioNovel?.rating_count || 0),
+                null
             );
-
-            return res.status(500).json({
-                success: false,
-                message: "Failed to load audio rating."
-            });
         }
+
+    }catch(error){
+
+        console.error(
+            "Audio Novel engagement load error:",
+            error
+        );
+
     }
-);
+
+    await loadNovelComments(novelId);
+}
 
 
-/*
-=========================================================
-SUBMIT / UPDATE AUDIO CHAPTER RATING
-POST /api/audio/chapters/:chapterId/rating
-=========================================================
-*/
+function updateNovelLikeUI(liked, likes){
 
-router.post(
-    "/chapters/:chapterId/rating",
-    auth,
-    async (req, res) => {
+    const icon = audio$("novelLikeIcon");
+    const label = audio$("novelLikeLabel");
+    const count = audio$("novelLikeCount");
+    const button = audio$("novelLikeButton");
 
-        const client =
-            await db.connect();
+    if(icon) icon.textContent = liked ? "♥" : "♡";
+    if(label) label.textContent = liked ? "Liked" : "Like";
+    if(count) count.textContent = audioFormatNumber(likes);
 
-        try {
+    if(button){
+        button.classList.toggle(
+            "is-active",
+            Boolean(liked)
+        );
+    }
+}
 
-            const chapterId =
-                Number(req.params.chapterId);
 
-            const userId =
-                Number(req.user.id);
+function updateNovelRatingUI(average, count, userRating){
+
+    const averageElement = audio$("novelRatingAverage");
+    const countElement = audio$("novelRatingCount");
+
+    if(averageElement){
+        averageElement.textContent =
+            Number(average || 0).toFixed(1);
+    }
+
+    if(countElement){
+        countElement.textContent =
+            `${audioFormatNumber(count || 0)} ${
+                Number(count || 0) === 1
+                    ? "rating"
+                    : "ratings"
+            }`;
+    }
+
+    document
+        .querySelectorAll("#novelRatingStars button")
+        .forEach(button => {
 
             const rating =
-                Number(req.body.rating);
+                Number(button.dataset.rating);
 
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid chapter ID."
-                });
-            }
+            const active =
+                userRating != null &&
+                rating <= Number(userRating);
 
-            if (
-                !Number.isInteger(rating) ||
-                rating < 1 ||
-                rating > 5
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Rating must be between 1 and 5."
-                });
-            }
+            button.textContent =
+                active ? "★" : "☆";
 
-            await client.query("BEGIN");
+            button.classList.toggle(
+                "is-active",
+                active
+            );
+        });
+}
 
-            const chapter =
-                await client.query(`
-                    SELECT id
-                    FROM audio_chapters
-                    WHERE
-                        id = $1
-                        AND is_published = TRUE
-                        AND is_draft = FALSE
-                `, [chapterId]);
 
-            if (!chapter.rows.length) {
+async function toggleNovelLike(){
 
-                await client.query("ROLLBACK");
+    if(!currentAudioNovelId){
+        return;
+    }
 
-                return res.status(404).json({
-                    success: false,
-                    message: "Audio chapter not found."
-                });
-            }
+    if(!audioToken()){
+        alert(
+            "Please login to like this Audio Novel."
+        );
+        return;
+    }
 
-            await client.query(`
-                INSERT INTO audio_chapter_ratings
-                (
-                    user_id,
-                    chapter_id,
-                    rating,
-                    created_at,
-                    updated_at
-                )
-                VALUES
-                (
-                    $1,
-                    $2,
-                    $3,
-                    NOW(),
-                    NOW()
-                )
-                ON CONFLICT (
-                    user_id,
-                    chapter_id
-                )
-                DO UPDATE SET
-                    rating = EXCLUDED.rating,
-                    updated_at = NOW()
-            `, [
-                userId,
-                chapterId,
-                rating
-            ]);
+    const button = audio$("novelLikeButton");
 
-            const aggregate =
-                await client.query(`
-                    SELECT
-                        ROUND(
-                            COALESCE(
-                                AVG(rating),
-                                0
-                            ),
-                            2
-                        ) AS average_rating,
-                        COUNT(*)::int AS rating_count
-                    FROM audio_chapter_ratings
-                    WHERE chapter_id = $1
-                `, [chapterId]);
+    if(button) button.disabled = true;
 
-            await client.query("COMMIT");
+    try{
 
-            return res.json({
-                success: true,
-                rating,
-                average_rating:
-                    Number(
-                        aggregate.rows[0].average_rating || 0
-                    ),
-                rating_count:
-                    Number(
-                        aggregate.rows[0].rating_count || 0
-                    )
-            });
-
-        } catch (error) {
-
-            await client.query("ROLLBACK");
-
-            console.error(
-                "POST audio chapter rating error:",
-                error
+        const response =
+            await fetch(
+                `${AUDIO_API_BASE}/${currentAudioNovelId}/like`,
+                {
+                    method: "POST",
+                    headers: {
+                        ...audioHeaders(),
+                        "Content-Type": "application/json"
+                    }
+                }
             );
 
-            return res.status(500).json({
-                success: false,
-                message: "Failed to save audio rating."
-            });
+        const data = await response.json();
 
-        } finally {
-
-            client.release();
+        if(!response.ok || !data.success){
+            throw new Error(
+                data.message ||
+                "Failed to update like."
+            );
         }
+
+        updateNovelLikeUI(
+            Boolean(data.liked),
+            Number(data.likes || 0)
+        );
+
+        if(currentAudioNovel){
+            currentAudioNovel.likes =
+                Number(data.likes || 0);
+        }
+
+    }catch(error){
+
+        console.error(
+            "Audio Novel like error:",
+            error
+        );
+
+        alert(
+            error.message ||
+            "Failed to update like."
+        );
+
+    }finally{
+
+        if(button) button.disabled = false;
     }
-);
+}
 
-/*
-=========================================================
-GET AUDIO CHAPTER COMMENTS
-GET /api/audio/chapters/:chapterId/comments
-=========================================================
-*/
 
-router.get(
-    "/chapters/:chapterId/comments",
-    async (req, res) => {
+async function submitNovelRating(rating){
 
-        try {
+    if(!currentAudioNovelId){
+        return;
+    }
 
-            const chapterId =
-                Number(req.params.chapterId);
+    if(!audioToken()){
+        alert(
+            "Please login to rate this Audio Novel."
+        );
+        return;
+    }
 
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid chapter ID."
-                });
-            }
+    try{
 
-            const result =
-                await db.query(`
-                    SELECT
-                        c.id,
-                        c.chapter_id,
-                        c.user_id,
-                        c.comment,
-                        c.created_at,
-                        c.updated_at,
-                        u.name
-                    FROM audio_chapter_comments c
-                    LEFT JOIN users u
-                        ON u.id = c.user_id
-                    WHERE c.chapter_id = $1
-                    ORDER BY c.created_at DESC
-                `, [chapterId]);
-
-            return res.json({
-                success: true,
-                comments: result.rows
-            });
-
-        } catch (error) {
-
-            console.error(
-                "GET audio chapter comments error:",
-                error
+        const response =
+            await fetch(
+                `${AUDIO_API_BASE}/${currentAudioNovelId}/rating`,
+                {
+                    method: "POST",
+                    headers: {
+                        ...audioHeaders(),
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ rating })
+                }
             );
 
-            return res.status(500).json({
-                success: false,
-                message: "Failed to load audio comments."
+        const data = await response.json();
+
+        if(!response.ok || !data.success){
+            throw new Error(
+                data.message ||
+                "Failed to save rating."
+            );
+        }
+
+        updateNovelRatingUI(
+            Number(data.average_rating || 0),
+            Number(data.rating_count || 0),
+            Number(data.rating || rating)
+        );
+
+        if(currentAudioNovel){
+            currentAudioNovel.rating =
+                Number(data.average_rating || 0);
+
+            currentAudioNovel.rating_count =
+                Number(data.rating_count || 0);
+        }
+
+    }catch(error){
+
+        console.error(
+            "Audio Novel rating error:",
+            error
+        );
+
+        alert(
+            error.message ||
+            "Failed to save rating."
+        );
+    }
+}
+
+
+async function loadNovelComments(novelId){
+
+    const list = audio$("novelCommentsList");
+    const count = audio$("novelCommentCount");
+
+    if(!list){
+        return;
+    }
+
+    list.innerHTML =
+        `<div class="audio-comment-loading">Loading comments...</div>`;
+
+    try{
+
+        const response =
+            await fetch(
+                `${AUDIO_API_BASE}/${novelId}/comments`
+            );
+
+        const data = await response.json();
+
+        if(!response.ok || !data.success){
+            throw new Error(
+                data.message ||
+                "Failed to load comments."
+            );
+        }
+
+        const comments =
+            Array.isArray(data.comments)
+                ? data.comments
+                : [];
+
+        if(count){
+            count.textContent =
+                `${audioFormatNumber(comments.length)} ${
+                    comments.length === 1
+                        ? "comment"
+                        : "comments"
+                }`;
+        }
+
+        if(!comments.length){
+
+            list.innerHTML =
+                `<div class="audio-comment-empty">No comments yet. Be the first to share your thoughts.</div>`;
+
+            return;
+        }
+
+        list.innerHTML =
+            comments.map(comment => `
+
+                <article
+                    class="audio-novel-comment"
+                    data-comment-id="${Number(comment.id)}"
+                >
+                    <div class="audio-novel-comment-head">
+                        <strong>
+                            ${audioEscape(
+                                comment.name ||
+                                "MyLikith User"
+                            )}
+                        </strong>
+
+                        <time>
+                            ${audioEscape(
+                                audioFormatCommentDate(
+                                    comment.created_at
+                                )
+                            )}
+                        </time>
+                    </div>
+
+                    <p>
+                        ${audioEscape(
+                            comment.comment
+                        )}
+                    </p>
+
+                    <div class="audio-novel-comment-actions">
+
+                        ${
+                            audioToken()
+                                ? `
+                                    <button
+                                        type="button"
+                                        class="novel-comment-delete"
+                                        data-comment-id="${Number(comment.id)}"
+                                    >
+                                        Delete
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        class="novel-comment-report"
+                                        data-comment-id="${Number(comment.id)}"
+                                    >
+                                        Report
+                                    </button>
+                                `
+                                : ""
+                        }
+
+                    </div>
+                </article>
+
+            `).join("");
+
+    }catch(error){
+
+        console.error(
+            "Audio Novel comments load error:",
+            error
+        );
+
+        list.innerHTML =
+            `<div class="audio-comment-empty">Unable to load comments.</div>`;
+    }
+}
+
+
+function audioFormatCommentDate(value){
+
+    const date = new Date(value);
+
+    if(Number.isNaN(date.getTime())){
+        return "";
+    }
+
+    return date.toLocaleString(
+        undefined,
+        {
+            dateStyle: "medium",
+            timeStyle: "short"
+        }
+    );
+}
+
+
+async function submitNovelComment(event){
+
+    event.preventDefault();
+
+    if(!currentAudioNovelId){
+        return;
+    }
+
+    if(!audioToken()){
+        alert(
+            "Please login to comment on this Audio Novel."
+        );
+        return;
+    }
+
+    const input = audio$("novelCommentInput");
+    const button =
+        event.currentTarget.querySelector(
+            'button[type="submit"]'
+        );
+
+    const comment =
+        String(input?.value || "").trim();
+
+    if(!comment){
+        alert("Comment cannot be empty.");
+        return;
+    }
+
+    if(button) button.disabled = true;
+
+    try{
+
+        const response =
+            await fetch(
+                `${AUDIO_API_BASE}/${currentAudioNovelId}/comments`,
+                {
+                    method: "POST",
+                    headers: {
+                        ...audioHeaders(),
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ comment })
+                }
+            );
+
+        const data = await response.json();
+
+        if(!response.ok || !data.success){
+            throw new Error(
+                data.message ||
+                "Failed to add comment."
+            );
+        }
+
+        input.value = "";
+
+        await loadNovelComments(
+            currentAudioNovelId
+        );
+
+    }catch(error){
+
+        console.error(
+            "Audio Novel comment error:",
+            error
+        );
+
+        alert(
+            error.message ||
+            "Failed to add comment."
+        );
+
+    }finally{
+
+        if(button) button.disabled = false;
+    }
+}
+
+
+async function deleteNovelComment(commentId){
+
+    if(!audioToken()){
+        return;
+    }
+
+    if(!confirm("Delete this comment?")){
+        return;
+    }
+
+    try{
+
+        const response =
+            await fetch(
+                `${AUDIO_API_BASE}/${currentAudioNovelId}/comments/${commentId}`,
+                {
+                    method: "DELETE",
+                    headers: audioHeaders()
+                }
+            );
+
+        const data = await response.json();
+
+        if(!response.ok || !data.success){
+            throw new Error(
+                data.message ||
+                "Failed to delete comment."
+            );
+        }
+
+        await loadNovelComments(
+            currentAudioNovelId
+        );
+
+    }catch(error){
+
+        console.error(
+            "Audio Novel comment delete error:",
+            error
+        );
+
+        alert(
+            error.message ||
+            "Failed to delete comment."
+        );
+    }
+}
+
+
+async function reportNovelComment(commentId){
+
+    if(!audioToken()){
+        alert(
+            "Please login to report a comment."
+        );
+        return;
+    }
+
+    const reason =
+        prompt(
+            "Why are you reporting this comment?"
+        );
+
+    if(!reason || !reason.trim()){
+        return;
+    }
+
+    try{
+
+        const response =
+            await fetch(
+                `${AUDIO_API_BASE}/novel-comments/${commentId}/report`,
+                {
+                    method: "POST",
+                    headers: {
+                        ...audioHeaders(),
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        reason: reason.trim()
+                    })
+                }
+            );
+
+        const data = await response.json();
+
+        if(!response.ok || !data.success){
+            throw new Error(
+                data.message ||
+                "Failed to report comment."
+            );
+        }
+
+        alert(
+            "Comment reported successfully."
+        );
+
+    }catch(error){
+
+        console.error(
+            "Audio Novel comment report error:",
+            error
+        );
+
+        alert(
+            error.message ||
+            "Failed to report comment."
+        );
+    }
+}
+
+
+async function shareAudioNovel(){
+
+    if(!currentAudioNovelId){
+        return;
+    }
+
+    const title =
+        currentAudioNovel?.title ||
+        "MyLikith Audio Novel";
+
+    const url =
+        `${window.location.origin}${window.location.pathname}?id=${encodeURIComponent(currentAudioNovelId)}`;
+
+    try{
+
+        if(navigator.share){
+
+            await navigator.share({
+                title,
+                text:
+                    `Listen to ${title} on MyLikith Audio.`,
+                url
             });
+
+        }else if(navigator.clipboard){
+
+            await navigator.clipboard.writeText(url);
+
+            alert(
+                "Audio Novel link copied."
+            );
+
+        }else{
+
+            window.prompt(
+                "Copy this Audio Novel link:",
+                url
+            );
+        }
+
+    }catch(error){
+
+        if(error?.name !== "AbortError"){
+
+            console.error(
+                "Audio Novel share error:",
+                error
+            );
         }
     }
-);
+}
 
-/*
-=========================================================
-POST AUDIO CHAPTER COMMENT
-POST /api/audio/chapters/:chapterId/comments
-=========================================================
-*/
 
-router.post(
-    "/chapters/:chapterId/comments",
-    auth,
-    async (req, res) => {
+function bindNovelEngagement(){
 
-        try {
+    const likeButton =
+        audio$("novelLikeButton");
 
-            const chapterId =
-                Number(req.params.chapterId);
+    if(likeButton){
+        likeButton.addEventListener(
+            "click",
+            toggleNovelLike
+        );
+    }
 
-            const userId =
-                Number(req.user.id);
+    document
+        .querySelectorAll(
+            "#novelRatingStars button"
+        )
+        .forEach(button => {
 
-            const comment =
-                String(
-                    req.body.comment || ""
-                ).trim();
-
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid chapter ID."
-                });
-            }
-
-            if (!comment) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Comment cannot be empty."
-                });
-            }
-
-            if (comment.length > 2000) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Comment cannot exceed 2000 characters."
-                });
-            }
-
-            const chapter =
-                await db.query(`
-                    SELECT id
-                    FROM audio_chapters
-                    WHERE
-                        id = $1
-                        AND is_published = TRUE
-                        AND is_draft = FALSE
-                `, [chapterId]);
-
-            if (!chapter.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message:
-                        "Audio chapter not found."
-                });
-            }
-
-            const result =
-                await db.query(`
-                    INSERT INTO audio_chapter_comments
-                    (
-                        chapter_id,
-                        user_id,
-                        comment,
-                        created_at,
-                        updated_at
+            button.addEventListener(
+                "click",
+                () => submitNovelRating(
+                    Number(
+                        button.dataset.rating
                     )
-                    VALUES
-                    (
-                        $1,
-                        $2,
-                        $3,
-                        NOW(),
-                        NOW()
-                    )
-                    RETURNING
-                        id,
-                        chapter_id,
-                        user_id,
-                        comment,
-                        created_at,
-                        updated_at
-                `, [
-                    chapterId,
-                    userId,
-                    comment
-                ]);
+                )
+            );
+        });
 
-            const user =
-                await db.query(`
-                    SELECT
-                        name
-                    FROM users
-                    WHERE id = $1
-                `, [userId]);
+    const commentForm =
+        audio$("novelCommentForm");
 
-            return res.status(201).json({
+    if(commentForm){
+        commentForm.addEventListener(
+            "submit",
+            submitNovelComment
+        );
+    }
 
-                success: true,
+    const shareButton =
+        audio$("novelShareButton");
 
-                comment: {
-                    ...result.rows[0],
+    if(shareButton){
+        shareButton.addEventListener(
+            "click",
+            shareAudioNovel
+        );
+    }
 
-                    name:
-                        user.rows[0]?.name || null
+    const commentsList =
+        audio$("novelCommentsList");
+
+    if(commentsList){
+
+        commentsList.addEventListener(
+            "click",
+            event => {
+
+                const deleteButton =
+                    event.target.closest(
+                        ".novel-comment-delete"
+                    );
+
+                if(deleteButton){
+
+                    deleteNovelComment(
+                        Number(
+                            deleteButton.dataset.commentId
+                        )
+                    );
+
+                    return;
                 }
 
-            });
+                const reportButton =
+                    event.target.closest(
+                        ".novel-comment-report"
+                    );
 
-        } catch (error) {
+                if(reportButton){
 
-            console.error(
-                "POST audio chapter comment error:",
-                error
-            );
-
-            return res.status(500).json({
-                success: false,
-                message:
-                    "Failed to add audio comment."
-            });
-        }
+                    reportNovelComment(
+                        Number(
+                            reportButton.dataset.commentId
+                        )
+                    );
+                }
+            }
+        );
     }
-);
+}
 
-/*
-=========================================================
-DELETE AUDIO CHAPTER COMMENT
-DELETE /api/audio/chapters/:chapterId/comments/:commentId
-=========================================================
-*/
-
-router.delete(
-    "/chapters/:chapterId/comments/:commentId",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            const chapterId =
-                Number(req.params.chapterId);
-
-            const commentId =
-                Number(req.params.commentId);
-
-            const userId =
-                Number(req.user.id);
-
-            if (
-                !Number.isInteger(chapterId) ||
-                chapterId <= 0 ||
-                !Number.isInteger(commentId) ||
-                commentId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid comment ID."
-                });
-            }
-
-            const result =
-                await db.query(`
-                    DELETE FROM audio_chapter_comments
-                    WHERE
-                        id = $1
-                        AND chapter_id = $2
-                        AND user_id = $3
-                    RETURNING id
-                `, [
-                    commentId,
-                    chapterId,
-                    userId
-                ]);
-
-            if (!result.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    message:
-                        "Comment not found or you cannot delete it."
-                });
-            }
-
-            return res.json({
-                success: true,
-                message:
-                    "Comment deleted successfully."
-            });
-
-        } catch (error) {
-
-            console.error(
-                "DELETE audio chapter comment error:",
-                error
-            );
-
-            return res.status(500).json({
-                success: false,
-                message:
-                    "Failed to delete audio comment."
-            });
-        }
+function clearAudioFilters() {
+    if (audio$("audioSearch")) {
+        audio$("audioSearch").value = "";
     }
-);
 
-/*
-=========================================================
-REPORT AUDIO CHAPTER COMMENT
-POST /api/audio/comments/:commentId/report
-=========================================================
-*/
-
-router.post(
-    "/comments/:commentId/report",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            const commentId =
-                Number(req.params.commentId);
-
-            const reporterUserId =
-                Number(req.user.id);
-
-            const reason =
-                String(
-                    req.body.reason || ""
-                ).trim();
-
-            if (
-                !Number.isInteger(commentId) ||
-                commentId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid comment ID."
-                });
-            }
-
-            if (!reason) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Please provide a report reason."
-                });
-            }
-
-            if (reason.length > 1000) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Report reason cannot exceed 1000 characters."
-                });
-            }
-
-
-            /*
-            ---------------------------------------------
-            VERIFY COMMENT
-            ---------------------------------------------
-            */
-
-            const comment =
-                await db.query(`
-                    SELECT
-                        id,
-                        chapter_id,
-                        user_id
-                    FROM audio_chapter_comments
-                    WHERE id = $1
-                    LIMIT 1
-                `, [commentId]);
-
-
-            if (!comment.rows.length) {
-
-                return res.status(404).json({
-                    success: false,
-                    message: "Comment not found."
-                });
-
-            }
-
-
-            /*
-            ---------------------------------------------
-            PREVENT REPORTING OWN COMMENT
-            ---------------------------------------------
-            */
-
-            if (
-                Number(
-                    comment.rows[0].user_id
-                ) === reporterUserId
-            ) {
-
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "You cannot report your own comment."
-                });
-
-            }
-
-
-            /*
-            ---------------------------------------------
-            PREVENT DUPLICATE REPORT
-            ---------------------------------------------
-            */
-
-            const existing =
-                await db.query(`
-                    SELECT id
-                    FROM audio_chapter_comment_reports
-                    WHERE
-                        comment_id = $1
-                        AND reporter_user_id = $2
-                    LIMIT 1
-                `, [
-                    commentId,
-                    reporterUserId
-                ]);
-
-
-            if (existing.rows.length) {
-
-                return res.status(409).json({
-                    success: false,
-                    message:
-                        "You have already reported this comment."
-                });
-
-            }
-
-
-            /*
-            ---------------------------------------------
-            CREATE REPORT
-            ---------------------------------------------
-            */
-
-            const result =
-                await db.query(`
-                    INSERT INTO audio_chapter_comment_reports
-                    (
-                        comment_id,
-                        reporter_user_id,
-                        reason,
-                        status,
-                        created_at
-                    )
-                    VALUES
-                    (
-                        $1,
-                        $2,
-                        $3,
-                        'pending',
-                        NOW()
-                    )
-                    RETURNING
-                        id,
-                        comment_id,
-                        reporter_user_id,
-                        reason,
-                        status,
-                        created_at
-                `, [
-                    commentId,
-                    reporterUserId,
-                    reason
-                ]);
-
-
-            return res.status(201).json({
-
-                success: true,
-
-                message:
-                    "Comment reported successfully.",
-
-                report:
-                    result.rows[0]
-
-            });
-
-
-        } catch (error) {
-
-            console.error(
-                "POST audio comment report error:",
-                error
-            );
-
-            return res.status(500).json({
-                success: false,
-                message:
-                    "Failed to report audio comment."
-            });
-
-        }
-
+    if (audio$("languageFilter")) {
+        audio$("languageFilter").value = "";
     }
+
+    if (audio$("categoryFilter")) {
+        audio$("categoryFilter").value = "";
+    }
+
+    if (audio$("sortFilter")) {
+        audio$("sortFilter").value = "latest";
+    }
+    loadAudioResults();
+}
+
+function bindAudioEvents() {
+    audio$("searchButton")?.addEventListener(
+        "click",
+        () => {
+            loadAudioResults();
+        }
+    );
+
+    audio$("audioSearch")?.addEventListener(
+        "keydown",
+        event => {
+            if (event.key === "Enter") {
+                loadAudioResults();
+            }
+        }
+    );
+
+    audio$("audioSearch")?.addEventListener(
+        "input",
+        () => {
+            clearTimeout(audioSearchTimer);
+
+            audioSearchTimer = setTimeout(() => {
+                loadAudioResults();
+            }, 500);
+        }
+    );
+
+    audio$("languageFilter")?.addEventListener(
+        "change",
+        () => {
+            loadAudioResults();
+        }
+    );
+
+    audio$("categoryFilter")?.addEventListener(
+        "change",
+        () => {
+            loadAudioResults();
+        }
+    );
+
+    audio$("sortFilter")?.addEventListener(
+        "change",
+        () => {
+            loadAudioResults();
+        }
+    );
+
+    audio$("clearFiltersButton")?.addEventListener(
+        "click",
+        clearAudioFilters
+    );
+}
+
+async function initAudioPage() {
+    bindAudioEvents();
+
+    await Promise.all([
+        loadFeaturedAudio(),
+        loadLanguages(),
+        loadCategories(),
+        loadContinueListening(),
+        loadAudioResults()
+    ]);
+
+    const params = new URLSearchParams(
+        window.location.search
+    );
+
+    const novelId = Number(
+        params.get("id") || 0
+    );
+
+    if (
+        Number.isInteger(novelId) &&
+        novelId > 0
+    ) {
+        await loadNovelDetails(novelId);
+
+        await recordAudioNovelView(
+            novelId
+        );
+    }
+}
+
+document.addEventListener(
+    "DOMContentLoaded",
+    initAudioPage
 );
 
 
-module.exports = router;
+if(document.readyState === "loading"){
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        bindNovelEngagement,
+        { once: true }
+    );
+
+}else{
+
+    bindNovelEngagement();
+
+}
+
+async function recordAudioNovelView(novelId){
+
+    if(!novelId){
+        return;
+    }
+
+    try{
+
+        const response =
+            await fetch(
+                `${AUDIO_API_BASE}/${novelId}/view`,
+                {
+                    method: "POST"
+                }
+            );
+
+        const data =
+            await response.json();
+
+        if(
+            !response.ok ||
+            !data.success
+        ){
+
+            console.warn(
+                "Audio Novel view update failed:",
+                data.message ||
+                response.status
+            );
+
+            return;
+        }
+
+        // Update the currently displayed view count
+        const viewElements =
+            document.querySelectorAll(
+                "[data-audio-novel-views]"
+            );
+
+        viewElements.forEach(
+            element => {
+
+                element.textContent =
+                    Number(
+                        data.views || 0
+                    ).toLocaleString();
+
+            }
+        );
+
+    }catch(error){
+
+        console.warn(
+            "Audio Novel view update error:",
+            error
+        );
+
+    }
+
+}
