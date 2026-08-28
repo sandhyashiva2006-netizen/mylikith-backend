@@ -1789,14 +1789,18 @@ router.post(
 
             const novelId = Number(req.params.id);
             const objectKey = String(req.body?.object_key || "").trim();
-            const publicUrl = String(req.body?.public_url || "").trim();
+            const suppliedPublicUrl = String(req.body?.public_url || "").trim();
 
-            if (!Number.isInteger(novelId) || novelId <= 0 || !objectKey || !publicUrl) {
+            if (!Number.isInteger(novelId) || novelId <= 0 || !objectKey) {
                 return res.status(400).json({
                     success:false,
                     message:"Invalid cover upload data."
                 });
             }
+
+            const publicUrl =
+                `${process.env.PUBLIC_API_BASE_URL ||
+                  "https://mylikith-backend.onrender.com"}/api/audio/media/novels/${novelId}/cover`;
 
             const expectedPrefix = `audio/${novelId}/cover/`;
 
@@ -1873,6 +1877,56 @@ router.post(
                     } catch (deleteError) {
                         console.warn("Old Audio Novel cover cleanup failed:", deleteError);
                     }
+                }
+            }
+
+            /*
+            ---------------------------------------------------------
+            DELETE PREVIOUS COVER OBJECT
+            ---------------------------------------------------------
+            */
+            if (oldCover && oldCover !== publicUrl) {
+                try {
+                    const oldUrl = new URL(oldCover);
+                    const bucketName =
+                        String(process.env.B2_BUCKET_NAME || "");
+
+                    let oldKey =
+                        decodeURIComponent(
+                            oldUrl.pathname.replace(/^\/+/, "")
+                        );
+
+                    if (
+                        bucketName &&
+                        oldKey.startsWith(bucketName + "/")
+                    ) {
+                        oldKey =
+                            oldKey.slice(
+                                bucketName.length + 1
+                            );
+                    }
+
+                    if (
+                        oldKey &&
+                        oldKey.startsWith(
+                            `audio/${novelId}/cover/`
+                        ) &&
+                        oldKey !== objectKey
+                    ) {
+                        await b2S3.send(
+                            new DeleteObjectCommand({
+                                Bucket:
+                                    process.env.B2_BUCKET_NAME,
+                                Key:
+                                    oldKey
+                            })
+                        );
+                    }
+                } catch (deleteError) {
+                    console.warn(
+                        "Old Audio Novel cover cleanup failed:",
+                        deleteError
+                    );
                 }
             }
 

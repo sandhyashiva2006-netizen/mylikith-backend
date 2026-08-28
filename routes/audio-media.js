@@ -1041,6 +1041,150 @@ auth,
     }
 );
 
+
+/*
+=========================================================
+AUDIO NOVEL COVER IMAGE
+GET /api/audio/media/novels/:novelId/cover
+
+B2 remains private. This endpoint generates a short-lived
+signed GET URL and redirects the browser to the image.
+=========================================================
+*/
+
+router.get(
+    "/novels/:novelId/cover",
+    async (req, res) => {
+
+        try {
+
+            const novelId =
+                Number(req.params.novelId);
+
+            if (
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ) {
+                return res.status(400).send(
+                    "Invalid Audio Novel ID."
+                );
+            }
+
+            const result =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        cover_url,
+                        publish_status,
+                        visibility
+                    FROM audio_novels
+                    WHERE id = $1
+                    LIMIT 1
+                    `,
+                    [novelId]
+                );
+
+            if (!result.rows.length) {
+                return res.status(404).send(
+                    "Audio Novel not found."
+                );
+            }
+
+            const novel =
+                result.rows[0];
+
+            if (!novel.cover_url) {
+                return res.status(404).send(
+                    "Cover image not found."
+                );
+            }
+
+            /*
+            Allow public delivery only for published/public
+            novels. This keeps draft/private novel covers from
+            being exposed through the public endpoint.
+            */
+            if (
+                novel.publish_status !== "published" ||
+                novel.visibility !== "public"
+            ) {
+                return res.status(404).send(
+                    "Cover image not available."
+                );
+            }
+
+            const coverUrl =
+                new URL(
+                    String(novel.cover_url)
+                );
+
+            const bucketName =
+                String(
+                    process.env.B2_BUCKET_NAME || ""
+                );
+
+            let objectKey =
+                decodeURIComponent(
+                    coverUrl.pathname
+                        .replace(/^\/+/, "")
+                );
+
+            if (
+                bucketName &&
+                objectKey.startsWith(
+                    bucketName + "/"
+                )
+            ) {
+                objectKey =
+                    objectKey.slice(
+                        bucketName.length + 1
+                    );
+            }
+
+            if (
+                !objectKey.startsWith(
+                    `audio/${novelId}/cover/`
+                )
+            ) {
+                return res.status(404).send(
+                    "Invalid cover object."
+                );
+            }
+
+            const command =
+                new GetObjectCommand({
+                    Bucket:
+                        process.env.B2_BUCKET_NAME,
+                    Key:
+                        objectKey
+                });
+
+            const signedUrl =
+                await getSignedUrl(
+                    b2S3,
+                    command,
+                    {
+                        expiresIn: 900
+                    }
+                );
+
+            return res.redirect(302, signedUrl);
+
+        } catch (error) {
+
+            console.error(
+                "Audio Novel cover proxy error:",
+                error
+            );
+
+            return res.status(500).send(
+                "Unable to load cover image."
+            );
+        }
+    }
+);
+
 /* =========================================================
    SECURE AUDIO PLAYBACK
 
