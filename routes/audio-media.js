@@ -9,7 +9,8 @@ const {
     CompleteMultipartUploadCommand,
     AbortMultipartUploadCommand,
     HeadObjectCommand,
-    GetObjectCommand
+    GetObjectCommand,
+    ListObjectsV2Command
 } = require("@aws-sdk/client-s3");
 
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -1114,32 +1115,85 @@ router.get(
                 );
             }
 
-            const coverUrl =
-                new URL(
-                    String(novel.cover_url)
-                );
+            let objectKey = "";
 
-            const bucketName =
-                String(
-                    process.env.B2_BUCKET_NAME || ""
-                );
+            /*
+            Existing covers may use a direct B2 URL.
+            */
+            try {
 
-            let objectKey =
-                decodeURIComponent(
-                    coverUrl.pathname
-                        .replace(/^\/+/, "")
-                );
-
-            if (
-                bucketName &&
-                objectKey.startsWith(
-                    bucketName + "/"
-                )
-            ) {
-                objectKey =
-                    objectKey.slice(
-                        bucketName.length + 1
+                const coverUrl =
+                    new URL(
+                        String(novel.cover_url)
                     );
+
+                if (
+                    coverUrl.hostname.includes(
+                        "backblazeb2.com"
+                    )
+                ) {
+
+                    objectKey =
+                        decodeURIComponent(
+                            coverUrl.pathname
+                                .replace(/^\/+/, "")
+                        );
+
+                    const bucketName =
+                        String(
+                            process.env.B2_BUCKET_NAME || ""
+                        );
+
+                    if (
+                        bucketName &&
+                        objectKey.startsWith(
+                            bucketName + "/"
+                        )
+                    ) {
+                        objectKey =
+                            objectKey.slice(
+                                bucketName.length + 1
+                            );
+                    }
+                }
+
+            } catch (_) {}
+
+            /*
+            New covers use the stable MyLikith URL.
+            Resolve the newest B2 cover object by novel ID.
+            */
+            if (!objectKey) {
+
+                const listed =
+                    await b2S3.send(
+                        new ListObjectsV2Command({
+                            Bucket:
+                                process.env.B2_BUCKET_NAME,
+                            Prefix:
+                                `audio/${novelId}/cover/`
+                        })
+                    );
+
+                const objects =
+                    Array.isArray(
+                        listed.Contents
+                    )
+                        ? listed.Contents
+                        : [];
+
+                objects.sort(
+                    (a,b) =>
+                        new Date(
+                            b.LastModified || 0
+                        ) -
+                        new Date(
+                            a.LastModified || 0
+                        )
+                );
+
+                objectKey =
+                    objects[0]?.Key || "";
             }
 
             if (
