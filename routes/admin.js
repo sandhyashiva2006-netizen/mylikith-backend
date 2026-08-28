@@ -6,11 +6,13 @@ const db = require("../db");
 
 const {
     S3Client,
+    PutObjectCommand,
     CreateMultipartUploadCommand,
     UploadPartCommand,
     CompleteMultipartUploadCommand,
     AbortMultipartUploadCommand,
-    DeleteObjectCommand
+    DeleteObjectCommand,
+    HeadObjectCommand
 } = require("@aws-sdk/client-s3");
 
 const {
@@ -1663,6 +1665,235 @@ router.patch(
 
     }
 );
+
+/*
+=========================================================
+ADMIN AUDIO NOVEL COVER UPLOAD - START
+POST /api/admin/audio/novels/:id/cover/start
+=========================================================
+*/
+
+router.post(
+    "/audio/novels/:id/cover/start",
+    async (req, res) => {
+
+        try {
+
+            const novelId = Number(req.params.id);
+            const fileName = String(req.body?.file_name || "").trim();
+            const mimeType = String(req.body?.mime_type || "").toLowerCase().trim();
+            const fileSize = Number(req.body?.file_size);
+
+            const allowedTypes = new Set([
+                "image/jpeg",
+                "image/png",
+                "image/webp"
+            ]);
+
+            if (!Number.isInteger(novelId) || novelId <= 0) {
+                return res.status(400).json({ success:false, message:"Invalid Audio Novel ID." });
+            }
+
+            if (!fileName || !allowedTypes.has(mimeType) || !Number.isFinite(fileSize) || fileSize <= 0) {
+                return res.status(400).json({
+                    success:false,
+                    message:"Please select a valid JPG, PNG or WebP cover image."
+                });
+            }
+
+            const MAX_COVER_SIZE = 5 * 1024 * 1024;
+
+            if (fileSize > MAX_COVER_SIZE) {
+                return res.status(400).json({
+                    success:false,
+                    message:"Cover image is too large. Maximum size is 5 MB."
+                });
+            }
+
+            const extensionMap = {
+                "image/jpeg": "jpg",
+                "image/png": "png",
+                "image/webp": "webp"
+            };
+
+            const safeName = fileName
+                .replace(/[^a-zA-Z0-9._-]/g, "_")
+                .replace(/\.[^.]+$/, "")
+                .slice(0, 120) || "cover";
+
+            const objectKey =
+                `audio/${novelId}/cover/${Date.now()}-${safeName}.${extensionMap[mimeType]}`;
+
+            const novel = await db.query(
+                `SELECT id FROM audio_novels WHERE id = $1`,
+                [novelId]
+            );
+
+            if (!novel.rows.length) {
+                return res.status(404).json({
+                    success:false,
+                    message:"Audio Novel not found."
+                });
+            }
+
+            const signedUrl = await getSignedUrl(
+                b2S3,
+                new PutObjectCommand({
+                    Bucket: process.env.B2_BUCKET_NAME,
+                    Key: objectKey,
+                    ContentType: mimeType
+                }),
+                { expiresIn: 900 }
+            );
+
+            const publicBase = String(
+                process.env.B2_PUBLIC_URL ||
+                `${process.env.B2_ENDPOINT}/${process.env.B2_BUCKET_NAME}`
+            ).replace(/\/$/, "");
+
+            const publicUrl = `${publicBase}/${objectKey}`;
+
+            return res.json({
+                success:true,
+                upload_url:signedUrl,
+                object_key:objectKey,
+                public_url:publicUrl,
+                expires_in:900
+            });
+
+        } catch (error) {
+
+            console.error("Audio Novel cover upload start error:", error);
+
+            return res.status(500).json({
+                success:false,
+                message:"Unable to prepare cover image upload."
+            });
+        }
+    }
+);
+
+
+/*
+=========================================================
+ADMIN AUDIO NOVEL COVER UPLOAD - COMPLETE
+POST /api/admin/audio/novels/:id/cover/complete
+=========================================================
+*/
+
+router.post(
+    "/audio/novels/:id/cover/complete",
+    async (req, res) => {
+
+        try {
+
+            const novelId = Number(req.params.id);
+            const objectKey = String(req.body?.object_key || "").trim();
+            const publicUrl = String(req.body?.public_url || "").trim();
+
+            if (!Number.isInteger(novelId) || novelId <= 0 || !objectKey || !publicUrl) {
+                return res.status(400).json({
+                    success:false,
+                    message:"Invalid cover upload data."
+                });
+            }
+
+            const expectedPrefix = `audio/${novelId}/cover/`;
+
+            if (!objectKey.startsWith(expectedPrefix)) {
+                return res.status(400).json({
+                    success:false,
+                    message:"Invalid cover object key."
+                });
+            }
+
+            const head = await b2S3.send(
+                new HeadObjectCommand({
+                    Bucket: process.env.B2_BUCKET_NAME,
+                    Key: objectKey
+                })
+            );
+
+            const size = Number(head.ContentLength || 0);
+            const type = String(head.ContentType || "").toLowerCase();
+            const allowedTypes = new Set([
+                "image/jpeg",
+                "image/png",
+                "image/webp"
+            ]);
+
+            if (!size || size > 5 * 1024 * 1024 || !allowedTypes.has(type)) {
+                try {
+                    await b2S3.send(new DeleteObjectCommand({
+                        Bucket: process.env.B2_BUCKET_NAME,
+                        Key: objectKey
+                    }));
+                } catch (_) {}
+
+                return res.status(400).json({
+                    success:false,
+                    message:"Uploaded cover failed image validation."
+                });
+            }
+
+            const current = await db.query(
+                `SELECT cover_url FROM audio_novels WHERE id = $1`,
+                [novelId]
+            );
+
+            if (!current.rows.length) {
+                return res.status(404).json({
+                    success:false,
+                    message:"Audio Novel not found."
+                });
+            }
+
+            const oldCover = current.rows[0].cover_url;
+
+            await db.query(
+                `UPDATE audio_novels
+                 SET cover_url = $1, updated_at = NOW()
+                 WHERE id = $2`,
+                [publicUrl, novelId]
+            );
+
+            const publicBase = String(
+                process.env.B2_PUBLIC_URL ||
+                `${process.env.B2_ENDPOINT}/${process.env.B2_BUCKET_NAME}`
+            ).replace(/\/$/, "");
+
+            if (oldCover && oldCover.startsWith(publicBase + "/")) {
+                const oldKey = oldCover.slice((publicBase + "/").length);
+                if (oldKey && oldKey !== objectKey) {
+                    try {
+                        await b2S3.send(new DeleteObjectCommand({
+                            Bucket: process.env.B2_BUCKET_NAME,
+                            Key: oldKey
+                        }));
+                    } catch (deleteError) {
+                        console.warn("Old Audio Novel cover cleanup failed:", deleteError);
+                    }
+                }
+            }
+
+            return res.json({
+                success:true,
+                cover_url:publicUrl,
+                message:"Audio Novel cover uploaded successfully."
+            });
+
+        } catch (error) {
+
+            console.error("Audio Novel cover upload complete error:", error);
+
+            return res.status(500).json({
+                success:false,
+                message:"Unable to save Audio Novel cover."
+            });
+        }
+    }
+);
+
 
 /*
 =========================================================
