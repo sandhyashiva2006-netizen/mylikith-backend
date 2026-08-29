@@ -9,7 +9,8 @@ const {
     CompleteMultipartUploadCommand,
     AbortMultipartUploadCommand,
     HeadObjectCommand,
-    GetObjectCommand
+    GetObjectCommand,
+    PutObjectCommand
 } = require("@aws-sdk/client-s3");
 
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -949,6 +950,758 @@ auth,
 );
 
 /* =========================================================
+   ADMIN AUDIO NOVEL COVER UPLOAD + PRIVATE COVER PROXY
+
+   Routes are mounted under:
+   /api/audio/media
+
+   POST /novels/:novelId/cover/start
+   POST /novels/:novelId/cover/complete
+   GET  /novels/:novelId/cover
+
+   Covers are uploaded directly from the admin browser to B2 using
+   a short-lived signed PUT URL. The database stores the canonical
+   B2 object URL. The GET route signs/fetches the private object
+   server-side so the admin browser never needs B2 CORS access.
+   ========================================================= */
+
+function getAudioNovelCoverPublicUrl(
+    bucket,
+    objectKey
+){
+
+    const endpoint =
+        String(
+            process.env.B2_ENDPOINT || ""
+        ).trim()
+        .replace(/\/+$/, "");
+
+    if(!endpoint){
+        throw new Error(
+            "B2_ENDPOINT is not configured."
+        );
+    }
+
+    return (
+        endpoint +
+        "/" +
+        encodeURIComponent(bucket) +
+        "/" +
+        objectKey
+            .split("/")
+            .map(
+                part =>
+                    encodeURIComponent(part)
+            )
+            .join("/")
+    );
+}
+
+
+/* ---------------------------------------------------------
+   START COVER UPLOAD
+   --------------------------------------------------------- */
+
+router.post(
+    "/novels/:novelId/cover/start",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            if(
+                !req.user ||
+                req.user.role !== "admin"
+            ){
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "Admin access required."
+                });
+            }
+
+            const novelId =
+                Number(
+                    req.params.novelId
+                );
+
+            if(
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Audio Novel ID."
+                });
+            }
+
+            const {
+                file_name,
+                mime_type,
+                file_size
+            } = req.body;
+
+            const fileName =
+                String(
+                    file_name || ""
+                ).trim();
+
+            const mime =
+                String(
+                    mime_type || ""
+                ).toLowerCase();
+
+            const size =
+                Number(file_size);
+
+            const allowedTypes = new Set([
+                "image/jpeg",
+                "image/png",
+                "image/webp"
+            ]);
+
+            if(
+                !fileName ||
+                !allowedTypes.has(mime) ||
+                !Number.isFinite(size) ||
+                size <= 0
+            ){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "A valid JPG, PNG or WebP cover image is required."
+                });
+            }
+
+            const MAX_COVER_SIZE =
+                5 * 1024 * 1024;
+
+            if(size > MAX_COVER_SIZE){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Cover image must be 5 MB or smaller."
+                });
+            }
+
+            const novel =
+                await db.query(
+                    `
+                    SELECT
+                        id
+                    FROM audio_novels
+                    WHERE id = $1
+                    LIMIT 1
+                    `,
+                    [novelId]
+                );
+
+            if(!novel.rows.length){
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio Novel not found."
+                });
+            }
+
+            const safeName =
+                fileName.replace(
+                    /[^a-zA-Z0-9._-]/g,
+                    "_"
+                );
+
+            const objectKey =
+                `audio/${novelId}/cover/${Date.now()}-${safeName}`;
+
+            const bucket =
+                String(
+                    process.env.B2_BUCKET_NAME || ""
+                ).trim();
+
+            if(!bucket){
+                throw new Error(
+                    "B2_BUCKET_NAME is not configured."
+                );
+            }
+
+            const uploadUrl =
+                await getSignedUrl(
+                    b2S3,
+                    new PutObjectCommand({
+                        Bucket:
+                            bucket,
+                        Key:
+                            objectKey,
+                        ContentType:
+                            mime
+                    }),
+                    {
+                        expiresIn: 900
+                    }
+                );
+
+            const publicUrl =
+                getAudioNovelCoverPublicUrl(
+                    bucket,
+                    objectKey
+                );
+
+            return res.json({
+                success: true,
+                upload_url:
+                    uploadUrl,
+                object_key:
+                    objectKey,
+                public_url:
+                    publicUrl,
+                expires_in:
+                    900,
+                max_size:
+                    MAX_COVER_SIZE
+            });
+
+        } catch(error) {
+
+            console.error(
+                "Audio Novel cover upload START error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to prepare cover upload."
+            });
+        }
+    }
+);
+
+
+/* ---------------------------------------------------------
+   COMPLETE COVER UPLOAD
+   --------------------------------------------------------- */
+
+router.post(
+    "/novels/:novelId/cover/complete",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            if(
+                !req.user ||
+                req.user.role !== "admin"
+            ){
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "Admin access required."
+                });
+            }
+
+            const novelId =
+                Number(
+                    req.params.novelId
+                );
+
+            if(
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Audio Novel ID."
+                });
+            }
+
+            const {
+                object_key
+            } = req.body;
+
+            const objectKey =
+                String(
+                    object_key || ""
+                ).trim();
+
+            const expectedPrefix =
+                `audio/${novelId}/cover/`;
+
+            if(
+                !objectKey ||
+                !objectKey.startsWith(
+                    expectedPrefix
+                )
+            ){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid cover object key."
+                });
+            }
+
+            const bucket =
+                String(
+                    process.env.B2_BUCKET_NAME || ""
+                ).trim();
+
+            if(!bucket){
+                throw new Error(
+                    "B2_BUCKET_NAME is not configured."
+                );
+            }
+
+            const head =
+                await b2S3.send(
+                    new HeadObjectCommand({
+                        Bucket:
+                            bucket,
+                        Key:
+                            objectKey
+                    })
+                );
+
+            const actualSize =
+                Number(
+                    head.ContentLength || 0
+                );
+
+            const contentType =
+                String(
+                    head.ContentType || ""
+                ).toLowerCase();
+
+            const MAX_COVER_SIZE =
+                5 * 1024 * 1024;
+
+            if(
+                !actualSize ||
+                actualSize > MAX_COVER_SIZE
+            ){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Uploaded cover failed size validation."
+                });
+            }
+
+            if(
+                ![
+                    "image/jpeg",
+                    "image/png",
+                    "image/webp"
+                ].includes(
+                    contentType
+                )
+            ){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Uploaded object is not a supported cover image."
+                });
+            }
+
+            const coverUrl =
+                getAudioNovelCoverPublicUrl(
+                    bucket,
+                    objectKey
+                );
+
+            const updated =
+                await db.query(
+                    `
+                    UPDATE audio_novels
+                    SET
+                        cover_url = $1,
+                        updated_at = NOW()
+                    WHERE id = $2
+                    RETURNING
+                        id,
+                        title,
+                        cover_url,
+                        updated_at
+                    `,
+                    [
+                        coverUrl,
+                        novelId
+                    ]
+                );
+
+            if(!updated.rows.length){
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio Novel not found."
+                });
+            }
+
+            return res.json({
+                success: true,
+                message:
+                    "Audio Novel cover uploaded successfully.",
+                cover_url:
+                    coverUrl,
+                audio:
+                    updated.rows[0]
+            });
+
+        } catch(error) {
+
+            console.error(
+                "Audio Novel cover upload COMPLETE error:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to complete cover upload."
+            });
+        }
+    }
+);
+
+
+/* ---------------------------------------------------------
+   ADMIN COVER READ PROXY
+   --------------------------------------------------------- */
+
+router.get(
+    "/novels/:novelId/cover",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            if(
+                !req.user ||
+                req.user.role !== "admin"
+            ){
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "Admin access required."
+                });
+            }
+
+            const novelId =
+                Number(
+                    req.params.novelId
+                );
+
+            if(
+                !Number.isInteger(novelId) ||
+                novelId <= 0
+            ){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid Audio Novel ID."
+                });
+            }
+
+            const result =
+                await db.query(
+                    `
+                    SELECT
+                        cover_url
+                    FROM audio_novels
+                    WHERE id = $1
+                    LIMIT 1
+                    `,
+                    [novelId]
+                );
+
+            if(!result.rows.length){
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio Novel not found."
+                });
+            }
+
+            const coverUrl =
+                String(
+                    result.rows[0].cover_url || ""
+                ).trim();
+
+            if(!coverUrl){
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Audio Novel cover not found."
+                });
+            }
+
+            let parsed;
+
+            try{
+                parsed =
+                    new URL(coverUrl);
+            }catch(error){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid stored cover URL."
+                });
+            }
+
+            /*
+             * Do not recursively proxy our own endpoint.
+             * This is important because an earlier frontend version
+             * accidentally stored the proxy URL in cover_url.
+             */
+            if(
+                parsed.pathname
+                    .toLowerCase()
+                    .match(
+                        /^\/api\/(?:audio\/media|admin\/audio)\/novels\/\d+\/cover\/?$/
+                    )
+            ){
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "Stored cover URL is a legacy proxy URL. Please upload a new cover image."
+                });
+            }
+
+            const bucket =
+                String(
+                    process.env.B2_BUCKET_NAME || ""
+                ).trim();
+
+            if(!bucket){
+                throw new Error(
+                    "B2_BUCKET_NAME is not configured."
+                );
+            }
+
+            const b2Endpoint =
+                String(
+                    process.env.B2_ENDPOINT || ""
+                ).trim();
+
+            let b2Host = "";
+
+            try{
+                b2Host =
+                    b2Endpoint
+                        ? new URL(
+                            b2Endpoint
+                        ).hostname
+                        : "";
+            }catch(error){
+                b2Host = "";
+            }
+
+            const isB2Url =
+                Boolean(b2Host) &&
+                parsed.hostname === b2Host;
+
+            if(!isB2Url){
+                /*
+                 * Public external URL: fetch it server-side as well.
+                 * This keeps the admin browser on the authenticated
+                 * endpoint and avoids CORS dependency.
+                 */
+                const external =
+                    await fetch(
+                        coverUrl
+                    );
+
+                if(!external.ok){
+                    return res.status(404).json({
+                        success: false,
+                        message:
+                            "Stored cover image could not be fetched."
+                    });
+                }
+
+                const externalType =
+                    String(
+                        external.headers.get(
+                            "content-type"
+                        ) || ""
+                    ).toLowerCase();
+
+                if(
+                    !externalType.startsWith(
+                        "image/"
+                    )
+                ){
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "Stored cover URL does not point to an image."
+                    });
+                }
+
+                res.setHeader(
+                    "Content-Type",
+                    externalType
+                );
+
+                const length =
+                    external.headers.get(
+                        "content-length"
+                    );
+
+                if(length){
+                    res.setHeader(
+                        "Content-Length",
+                        length
+                    );
+                }
+
+                if(!external.body){
+                    throw new Error(
+                        "External cover response has no body."
+                    );
+                }
+
+                const {
+                    Readable
+                } =
+                    require("stream");
+
+                return Readable
+                    .fromWeb(
+                        external.body
+                    )
+                    .pipe(res);
+            }
+
+            const pathParts =
+                parsed.pathname
+                    .split("/")
+                    .filter(Boolean)
+                    .map(
+                        part =>
+                            decodeURIComponent(
+                                part
+                            )
+                    );
+
+            if(
+                pathParts[0] !== bucket ||
+                pathParts.length < 2
+            ){
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Unable to resolve B2 cover object."
+                });
+            }
+
+            const objectKey =
+                pathParts
+                    .slice(1)
+                    .join("/");
+
+            const signedUrl =
+                await getSignedUrl(
+                    b2S3,
+                    new GetObjectCommand({
+                        Bucket:
+                            bucket,
+                        Key:
+                            objectKey
+                    }),
+                    {
+                        expiresIn: 900
+                    }
+                );
+
+            const b2Response =
+                await fetch(
+                    signedUrl
+                );
+
+            if(!b2Response.ok){
+                throw new Error(
+                    `B2 cover fetch failed: ${b2Response.status} ${b2Response.statusText}`
+                );
+            }
+
+            const contentType =
+                String(
+                    b2Response.headers.get(
+                        "content-type"
+                    ) || ""
+                ).trim();
+
+            if(
+                !contentType
+                    .toLowerCase()
+                    .startsWith("image/")
+            ){
+                throw new Error(
+                    `B2 returned non-image content type: ${contentType || "unknown"}`
+                );
+            }
+
+            res.setHeader(
+                "Content-Type",
+                contentType
+            );
+
+            const contentLength =
+                b2Response.headers.get(
+                    "content-length"
+                );
+
+            if(contentLength){
+                res.setHeader(
+                    "Content-Length",
+                    contentLength
+                );
+            }
+
+            res.setHeader(
+                "Cache-Control",
+                "private, max-age=300"
+            );
+
+            if(!b2Response.body){
+                throw new Error(
+                    "B2 cover response has no body."
+                );
+            }
+
+            const {
+                Readable
+            } =
+                require("stream");
+
+            return Readable
+                .fromWeb(
+                    b2Response.body
+                )
+                .pipe(res);
+
+        } catch(error) {
+
+            console.error(
+                "Admin Audio Novel cover proxy error:",
+                error
+            );
+
+            if(!res.headersSent){
+                return res.status(500).json({
+                    success: false,
+                    message:
+                        "Unable to load Audio Novel cover."
+                });
+            }
+
+            res.destroy(error);
+        }
+    }
+);
+
+
+/* =========================================================
    AUDIO MEDIA STATUS
 
    GET /api/audio/media/chapters/:chapterId/status
@@ -1040,251 +1793,6 @@ auth,
 
     }
 );
-
-/* =========================================================
-   ADMIN AUDIO NOVEL COVER PROXY
-   GET /api/audio/media/novels/:novelId/cover
-
-   Audio Novel covers are private Backblaze B2 objects.
-   Generate a short-lived signed URL on the server, fetch that
-   URL server-side, and stream the image to the admin browser.
-
-   IMPORTANT:
-   We intentionally do NOT redirect the browser to B2.
-   ========================================================= */
-
-router.get(
-    "/novels/:novelId/cover",
-    auth,
-    async (req, res) => {
-
-        try {
-
-            if (
-                !req.user ||
-                req.user.role !== "admin"
-            ) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "Admin access required."
-                });
-            }
-
-            const novelId =
-                Number(req.params.novelId);
-
-            if (
-                !Number.isInteger(novelId) ||
-                novelId <= 0
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Invalid Audio Novel ID."
-                });
-            }
-
-            const result =
-                await db.query(
-                    `
-                    SELECT
-                        cover_url
-                    FROM audio_novels
-                    WHERE id = $1
-                    LIMIT 1
-                    `,
-                    [novelId]
-                );
-
-            if(!result.rows.length){
-                return res.status(404).json({
-                    success: false,
-                    message:
-                        "Audio Novel not found."
-                });
-            }
-
-            const coverUrl =
-                String(
-                    result.rows[0].cover_url || ""
-                ).trim();
-
-            if(!coverUrl){
-                return res.status(404).json({
-                    success: false,
-                    message:
-                        "Audio Novel cover not found."
-                });
-            }
-
-            /*
-             * The database stores a B2 URL such as:
-             * https://s3.us-east-005.backblazeb2.com/
-             * mylikith-originals/audio/3/cover/file.png
-             *
-             * The first path component is the bucket.
-             * Use B2_BUCKET_NAME for the actual signing bucket and
-             * remove it from the object key if it is present.
-             */
-            const parsed =
-                new URL(coverUrl);
-
-            const pathname =
-                decodeURIComponent(
-                    parsed.pathname
-                ).replace(/^\/+/, "");
-
-            const bucket =
-                String(
-                    process.env.B2_BUCKET_NAME || ""
-                ).trim();
-
-            if(!bucket){
-                throw new Error(
-                    "B2_BUCKET_NAME is not configured."
-                );
-            }
-
-            let objectKey =
-                pathname;
-
-            if(
-                pathname === bucket
-            ){
-                objectKey = "";
-            }else if(
-                pathname.startsWith(
-                    bucket + "/"
-                )
-            ){
-                objectKey =
-                    pathname.slice(
-                        bucket.length + 1
-                    );
-            }
-
-            if(!objectKey){
-                return res.status(404).json({
-                    success: false,
-                    message:
-                        "Audio Novel cover object not found."
-                });
-            }
-
-            /*
-             * First create the signed URL using the exact same
-             * GetObject + getSignedUrl mechanism already used by
-             * the working Audio Chapter playback routes.
-             */
-            const signedUrl =
-                await getSignedUrl(
-                    b2S3,
-                    new GetObjectCommand({
-                        Bucket:
-                            bucket,
-                        Key:
-                            objectKey
-                    }),
-                    {
-                        expiresIn: 900
-                    }
-                );
-
-            /*
-             * Server-side fetch: no browser CORS restriction.
-             */
-            const b2Response =
-                await fetch(
-                    signedUrl
-                );
-
-            if(!b2Response.ok){
-                throw new Error(
-                    `Signed B2 cover request failed: ${b2Response.status} ${b2Response.statusText}`
-                );
-            }
-
-            const contentType =
-                String(
-                    b2Response.headers.get(
-                        "content-type"
-                    ) || ""
-                ).trim();
-
-            if(
-                !contentType ||
-                !contentType
-                    .toLowerCase()
-                    .startsWith("image/")
-            ){
-                throw new Error(
-                    `B2 cover response is not an image: ${contentType || "unknown"}`
-                );
-            }
-
-            res.setHeader(
-                "Content-Type",
-                contentType
-            );
-
-            const contentLength =
-                b2Response.headers.get(
-                    "content-length"
-                );
-
-            if(contentLength){
-                res.setHeader(
-                    "Content-Length",
-                    contentLength
-                );
-            }
-
-            res.setHeader(
-                "Cache-Control",
-                "private, max-age=300"
-            );
-
-            if(!b2Response.body){
-                throw new Error(
-                    "B2 cover response has no body."
-                );
-            }
-
-            /*
-             * Node 24 provides Readable.fromWeb().
-             */
-            const {
-                Readable
-            } =
-                require("stream");
-
-            Readable
-                .fromWeb(
-                    b2Response.body
-                )
-                .pipe(res);
-
-        } catch(error) {
-
-            console.error(
-                "Admin Audio Novel cover proxy error:",
-                error
-            );
-
-            if(!res.headersSent){
-                return res.status(500).json({
-                    success: false,
-                    message:
-                        "Unable to load Audio Novel cover."
-                });
-            }
-
-            res.destroy(error);
-        }
-    }
-);
-
 
 /* =========================================================
    SECURE AUDIO PLAYBACK
