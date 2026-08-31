@@ -3,6 +3,9 @@ const router = express.Router();
 const db = require("../db");
 
 const auth = require("../middleware/auth");
+const {
+    normalizeAudioCoverUrl
+} = require("../utils/audio-cover");
 
 /*
 =========================================================
@@ -187,9 +190,19 @@ u.profile_image AS writer_profile_image
             queryValues
         );
 
+        const audio =
+            result.rows.map(row => ({
+                ...row,
+                cover_url:
+                    normalizeAudioCoverUrl(
+                        row.id,
+                        row.cover_url
+                    )
+            }));
+
         return res.json({
             success: true,
-            audio: result.rows,
+            audio,
             pagination: {
                 page: pageNumber,
                 limit: limitNumber,
@@ -263,9 +276,19 @@ u.profile_image AS writer_profile_image
             LIMIT 20
         `);
 
+        const audio =
+            result.rows.map(row => ({
+                ...row,
+                cover_url:
+                    normalizeAudioCoverUrl(
+                        row.id,
+                        row.cover_url
+                    )
+            }));
+
         return res.json({
             success: true,
-            audio: result.rows
+            audio
         });
 
     } catch (error) {
@@ -436,9 +459,19 @@ router.get(
                     userId
                 ]);
 
+            const listening =
+                result.rows.map(row => ({
+                    ...row,
+                    cover_url:
+                        normalizeAudioCoverUrl(
+                            row.audio_novel_id,
+                            row.cover_url
+                        )
+                }));
+
             return res.json({
                 success: true,
-                listening: result.rows
+                listening
             });
 
         } catch (error) {
@@ -527,9 +560,18 @@ u.profile_image AS writer_profile_image
             });
         }
 
+        const audio =
+            result.rows[0];
+
+        audio.cover_url =
+            normalizeAudioCoverUrl(
+                audio.id,
+                audio.cover_url
+            );
+
         return res.json({
             success: true,
-            audio: result.rows[0]
+            audio
         });
 
     } catch (error) {
@@ -716,9 +758,18 @@ AND an.visibility = 'public'
             });
         }
 
+        const chapter =
+            result.rows[0];
+
+        chapter.audio_novel_cover_url =
+            normalizeAudioCoverUrl(
+                chapter.audio_novel_id,
+                chapter.audio_novel_cover_url
+            );
+
         return res.json({
             success: true,
-            chapter: result.rows[0]
+            chapter
         });
 
     } catch (error) {

@@ -1,6 +1,10 @@
 const express = require("express");
 const db = require("../db");
 const auth = require("../middleware/auth");
+const {
+    getAudioCoverProxyUrl,
+    isAudioCoverProxyUrl
+} = require("../utils/audio-cover");
 
 const {
     S3Client,
@@ -10,7 +14,8 @@ const {
     AbortMultipartUploadCommand,
     HeadObjectCommand,
     GetObjectCommand,
-    PutObjectCommand
+    PutObjectCommand,
+    ListObjectsV2Command
 } = require("@aws-sdk/client-s3");
 
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -965,39 +970,6 @@ auth,
    server-side so the admin browser never needs B2 CORS access.
    ========================================================= */
 
-function getAudioNovelCoverPublicUrl(
-    bucket,
-    objectKey
-){
-
-    const endpoint =
-        String(
-            process.env.B2_ENDPOINT || ""
-        ).trim()
-        .replace(/\/+$/, "");
-
-    if(!endpoint){
-        throw new Error(
-            "B2_ENDPOINT is not configured."
-        );
-    }
-
-    return (
-        endpoint +
-        "/" +
-        encodeURIComponent(bucket) +
-        "/" +
-        objectKey
-            .split("/")
-            .map(
-                part =>
-                    encodeURIComponent(part)
-            )
-            .join("/")
-    );
-}
-
-
 /* ---------------------------------------------------------
    START COVER UPLOAD
    --------------------------------------------------------- */
@@ -1008,17 +980,6 @@ router.post(
     async (req, res) => {
 
         try {
-
-            if(
-                !req.user ||
-                req.user.role !== "admin"
-            ){
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "Admin access required."
-                });
-            }
 
             const novelId =
                 Number(
@@ -1142,9 +1103,8 @@ router.post(
                 );
 
             const publicUrl =
-                getAudioNovelCoverPublicUrl(
-                    bucket,
-                    objectKey
+                getAudioCoverProxyUrl(
+                    novelId
                 );
 
             return res.json({
@@ -1303,9 +1263,8 @@ router.post(
             }
 
             const coverUrl =
-                getAudioNovelCoverPublicUrl(
-                    bucket,
-                    objectKey
+                getAudioCoverProxyUrl(
+                    novelId
                 );
 
             const updated =
@@ -1369,7 +1328,6 @@ router.post(
 
 router.get(
     "/novels/:novelId/cover",
-    auth,
     async (req, res) => {
 
         try {
@@ -1448,23 +1406,18 @@ router.get(
             }
 
             /*
-             * Do not recursively proxy our own endpoint.
-             * This is important because an earlier frontend version
-             * accidentally stored the proxy URL in cover_url.
+             * A stable MyLikith proxy URL is the preferred value for
+             * audio novel covers. Resolve the current B2 object by
+             * novel prefix so the browser never depends on an
+             * expired B2 GET signature.
+             *
+             * Legacy direct B2 URLs are also supported below.
              */
-            if(
-                parsed.pathname
-                    .toLowerCase()
-                    .match(
-                        /^\/api\/(?:audio\/media|admin\/audio)\/novels\/\d+\/cover\/?$/
-                    )
-            ){
-                return res.status(409).json({
-                    success: false,
-                    message:
-                        "Stored cover URL is a legacy proxy URL. Please upload a new cover image."
-                });
-            }
+            const storedProxyUrl =
+                isAudioCoverProxyUrl(
+                    coverUrl,
+                    novelId
+                );
 
             const bucket =
                 String(
@@ -1498,6 +1451,120 @@ router.get(
             const isB2Url =
                 Boolean(b2Host) &&
                 parsed.hostname === b2Host;
+
+            if(storedProxyUrl){
+                const listed =
+                    await b2S3.send(
+                        new ListObjectsV2Command({
+                            Bucket:
+                                bucket,
+                            Prefix:
+                                `audio/${novelId}/cover/`
+                        })
+                    );
+
+                const objects =
+                    Array.isArray(
+                        listed.Contents
+                    )
+                        ? listed.Contents
+                        : [];
+
+                objects.sort(
+                    (a, b) =>
+                        new Date(
+                            b.LastModified || 0
+                        ) -
+                        new Date(
+                            a.LastModified || 0
+                        )
+                );
+
+                const objectKey =
+                    objects[0]?.Key || "";
+
+                if(
+                    !objectKey ||
+                    !objectKey.startsWith(
+                        `audio/${novelId}/cover/`
+                    )
+                ){
+                    return res.status(404).json({
+                        success: false,
+                        message:
+                            "Audio Novel cover not found."
+                    });
+                }
+
+                const signedUrl =
+                    await getSignedUrl(
+                        b2S3,
+                        new GetObjectCommand({
+                            Bucket:
+                                bucket,
+                            Key:
+                                objectKey
+                        }),
+                        {
+                            expiresIn: 900
+                        }
+                    );
+
+                const b2Response =
+                    await fetch(
+                        signedUrl
+                    );
+
+                if(!b2Response.ok){
+                    throw new Error(
+                        `B2 cover fetch failed: ${b2Response.status} ${b2Response.statusText}`
+                    );
+                }
+
+                const contentType =
+                    String(
+                        b2Response.headers.get(
+                            "content-type"
+                        ) || ""
+                    ).trim();
+
+                if(
+                    !contentType
+                        .toLowerCase()
+                        .startsWith("image/")
+                ){
+                    throw new Error(
+                        `B2 returned non-image content type: ${contentType || "unknown"}`
+                    );
+                }
+
+                res.setHeader(
+                    "Content-Type",
+                    contentType
+                );
+
+                res.setHeader(
+                    "Cache-Control",
+                    "public, max-age=300"
+                );
+
+                if(!b2Response.body){
+                    throw new Error(
+                        "B2 cover response has no body."
+                    );
+                }
+
+                const {
+                    Readable
+                } =
+                    require("stream");
+
+                return Readable
+                    .fromWeb(
+                        b2Response.body
+                    )
+                    .pipe(res);
+            }
 
             if(!isB2Url){
                 /*
@@ -1660,7 +1727,7 @@ router.get(
 
             res.setHeader(
                 "Cache-Control",
-                "private, max-age=300"
+                "public, max-age=300"
             );
 
             if(!b2Response.body){
