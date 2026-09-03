@@ -1389,15 +1389,9 @@ async function inspectFileForWikisourceCover(apiUrl, fileTitle) {
             `${fileTitle} ${description} ${objectName}`;
 
         if (
-            /title\s*page|title-page|front\s*cover|
-             book\s*cover|cover\s*page|frontispiece|
-             ശീർഷക\s*താൾ|ശീർഷക\s*പേജ്|മുഖപ്പുറം|
-             मुखपृष्ठ|शीर्षक\s*पृष्ठ|आवरण|
-             தலைப்பு\s*பக்கம்|முகப்பு|
-             ముఖచిత్రం|శీర్షిక\s*పేజీ|
-             പ്രഥമ\s*പതിപ്പ്|ആദ്യ\s*പതിപ്പ്/iu
-                .test(searchable)
-        ) {
+    /title\s*page|title-page|front\s*cover|book\s*cover|cover\s*page|frontispiece|first\s*edition|first\s*published/iu
+        .test(searchable)
+) {
             return (
                 info.thumburl ||
                 info.url ||
