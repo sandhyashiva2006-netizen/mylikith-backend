@@ -1337,154 +1337,158 @@ async function fetchWikisourceFilePagePreview(apiUrl, fileTitle) {
     }
 }
 
+async function inspectFileForWikisourceCover(apiUrl, fileTitle) {
+    try {
+        const data = await wikisourceApi(apiUrl, {
+            action: "query",
+            prop: "imageinfo",
+            titles: fileTitle,
+            iiprop: "url|mime|extmetadata",
+            iiextmetadatafilter:
+                "ImageDescription|ObjectName|Categories",
+            iiurlwidth: 1400
+        });
+
+        const pages = data.query?.pages || {};
+
+        const page = Array.isArray(pages)
+            ? pages[0]
+            : Object.values(pages)[0];
+
+        const info = page?.imageinfo?.[0];
+
+        if (!info) return null;
+
+        const mime =
+            String(info.mime || "").toLowerCase();
+
+        if (!mime.startsWith("image/")) {
+            return null;
+        }
+
+        const meta =
+            info.extmetadata || {};
+
+        const description =
+            String(
+                meta.ImageDescription?.value || ""
+            )
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+
+        const objectName =
+            String(
+                meta.ObjectName?.value || ""
+            )
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+
+        const searchable =
+            `${fileTitle} ${description} ${objectName}`;
+
+        if (
+            /title\s*page|title-page|front\s*cover|
+             book\s*cover|cover\s*page|frontispiece|
+             ശീർഷക\s*താൾ|ശീർഷക\s*പേജ്|മുഖപ്പുറം|
+             मुखपृष्ठ|शीर्षक\s*पृष्ठ|आवरण|
+             தலைப்பு\s*பக்கம்|முகப்பு|
+             ముఖచిత్రం|శీర్షిక\s*పేజీ|
+             പ്രഥമ\s*പതിപ്പ്|ആദ്യ\s*പതിപ്പ്/iu
+                .test(searchable)
+        ) {
+            return (
+                info.thumburl ||
+                info.url ||
+                null
+            );
+        }
+
+        return null;
+
+    } catch (error) {
+        console.warn(
+            `Wikisource cover file inspection failed for ${fileTitle}:`,
+            error.message
+        );
+
+        return null;
+    }
+}
+
 async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) {
-    const pageStem = normalizeWikisourceFileStem(pageTitle);
     let coverImage = null;
     let author = "";
 
-    // IMPORTANT: Do not take author metadata from arbitrary images on a Wikisource
-    // page. Illustrations are often uploaded by Wikimedia contributors, whose
-    // names can otherwise be mistaken for the book author. First inspect the
-    // likely edition file itself (e.g. गो-दान -> File:गोदान.pdf).
-    const titleVariants = [...new Set([
-        decodeWikisourceTitle(pageTitle),
-        decodeWikisourceTitle(pageTitle).replace(/[\s\-_–—]+/gu, ""),
-        decodeWikisourceTitle(pageTitle).replace(/[\s\-_–—]+/gu, " ").trim()
-    ].filter(Boolean))];
-
-    const exactFileCandidates = [];
-    for (const variant of titleVariants) {
-        for (const ext of ["pdf", "djvu", "jpg", "jpeg", "png", "webp"]) {
-            exactFileCandidates.push(`File:${variant}.${ext}`);
-            exactFileCandidates.push(`चित्र:${variant}.${ext}`);
-        }
-    }
-
     const checked = new Set();
 
-    async function inspectFile(fileTitle, score = 0) {
-        const key = String(fileTitle || "").toLowerCase();
-        if (!fileTitle || checked.has(key)) return false;
+    /*
+     * Wikimedia/Wikisource can use a completely different filename from the
+     * actual Wikisource work title.
+     *
+     * Example:
+     *
+     *   Work:  മാർത്താണ്ഡവർമ്മ
+     *   File:  MARTANDA VARMA 1891.jpeg
+     *
+     * Therefore filename similarity must NEVER be the primary requirement.
+     */
+
+    async function inspectImageFile(fileTitle) {
+        const cleanTitle = decodeWikisourceTitle(fileTitle);
+
+        if (!cleanTitle) return null;
+
+        const key = cleanTitle.toLowerCase();
+
+        if (checked.has(key)) return null;
+
         checked.add(key);
 
         try {
+            const normalizedFileTitle =
+                /^(?:file|image|चित्र|फाइल|പ്രമാണം)\s*:/iu.test(cleanTitle)
+                    ? cleanTitle
+                    : `File:${cleanTitle}`;
+
             const data = await wikisourceApi(apiUrl, {
                 action: "query",
                 prop: "imageinfo",
-                titles: fileTitle,
-                iiprop: "url|mime|size|extmetadata",
-                iiextmetadatafilter: "Artist|Author|Creator|ImageDescription|DateTimeOriginal",
-                iiurlwidth: 1400
-            });
-            const pages = data.query?.pages || {};
-            const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
-            const info = page?.imageinfo?.[0];
-            if (!info) return false;
-
-            // Only accept author metadata from the edition/cover file we
-            // intentionally selected, never from unrelated page images.
-            if (!author) author = extractAuthorFromWikisourceImageInfo(info);
-
-            const mime = String(info.mime || "").toLowerCase();
-            const candidateUrl = info.thumburl || null;
-            if (!coverImage && candidateUrl && !isBadWikisourceCoverUrl(candidateUrl)
-                && mime.startsWith("image/")) {
-                coverImage = candidateUrl;
-            }
-
-            // MediaWiki may return only the raw PDF URL for a PDF file.
-            // Resolve the file description page to obtain its first-page
-            // thumbnail, which is a real image URL suitable for MyLikith.
-            if (!coverImage && mime === "application/pdf") {
-                // A PDF's first page is often a library/scan identification sheet,
-                // not the book cover. Proofread Wikisource editions may expose a
-                // dedicated "आवरण-पृष्ठ" or "मुखपृष्ठ" page. Prefer that named
-                // cover page, then fall back to the PDF preview only if no named
-                // cover page exists.
-                const indexCover = await resolveWikisourceIndexCoverPage(apiUrl, fileTitle);
-                if (indexCover) coverImage = indexCover;
-                if (!coverImage) {
-                    const namedCover = await resolveWikisourceNamedCoverPage(apiUrl, fileTitle);
-                    if (namedCover) coverImage = namedCover;
-                }
-                if (!coverImage) {
-                    const preview = await fetchWikisourceFilePagePreview(apiUrl, fileTitle);
-                    if (preview) coverImage = preview;
-                }
-            }
-            return Boolean(coverImage || author);
-        } catch (error) {
-            console.warn(`Wikisource exact file metadata detection failed for ${fileTitle}:`, error.message);
-            return false;
-        }
-    }
-
-    // First pass: exact edition-file candidates. This is what fixes sources
-    // whose cover/author live on a File:<book>.pdf page rather than directly on
-    // the work page.
-    for (const fileTitle of exactFileCandidates) {
-        await inspectFile(fileTitle, 200);
-        if (coverImage && author) break;
-    }
-
-    // Second pass: inspect images actually embedded on the work page, but only
-    // use them for the cover when their filename strongly matches the book.
-    // Never use these arbitrary image metadata values as the author.
-        /*
-     * Third pass: inspect images actually used by the Wikisource work page.
-     *
-     * IMPORTANT:
-     * The filename does not always match the Wikisource work title.
-     *
-     * Example:
-     *   Work title: മാർത്താണ്ഡവർമ്മ
-     *   Image:      MARTANDA VARMA 1891.jpeg
-     *
-     * The image metadata explicitly describes it as the title page of the
-     * first edition, so metadata must be considered more important than
-     * filename similarity.
-     */
-    const imageTitles = await getWikisourcePageImageTitles(apiUrl, pageTitle);
-
-    const imageCandidates = [];
-
-    for (let index = 0; index < imageTitles.length; index++) {
-        const imageTitle = imageTitles[index];
-
-        if (isBadWikisourceImageTitle(imageTitle)) {
-            continue;
-        }
-
-        try {
-            const data = await wikisourceApi(apiUrl, {
-                action: "query",
-                prop: "imageinfo",
-                titles: imageTitle,
+                titles: normalizedFileTitle,
                 iiprop: "url|mime|size|extmetadata",
                 iiextmetadatafilter:
-                    "Artist|Author|Creator|ImageDescription|DateTimeOriginal|Categories",
+                    "Artist|Author|Creator|ImageDescription|DateTimeOriginal|ObjectName|Categories",
                 iiurlwidth: 1400
             });
 
             const pages = data.query?.pages || {};
+
             const page = Array.isArray(pages)
                 ? pages[0]
                 : Object.values(pages)[0];
 
             const info = page?.imageinfo?.[0];
 
-            if (!info) continue;
+            if (!info) return null;
 
             const mime = String(info.mime || "").toLowerCase();
 
             if (!mime.startsWith("image/")) {
-                continue;
+                return null;
             }
 
             const meta = info.extmetadata || {};
 
             const description = String(
                 meta.ImageDescription?.value || ""
+            )
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+
+            const objectName = String(
+                meta.ObjectName?.value || ""
             )
                 .replace(/<[^>]+>/g, " ")
                 .replace(/\s+/g, " ")
@@ -1497,181 +1501,372 @@ async function resolveWikisourceCoverAndAuthorFromPageImages(apiUrl, pageTitle) 
                 .replace(/\s+/g, " ")
                 .trim();
 
-            const combinedMetadata =
-                `${imageTitle} ${description} ${categories}`.toLowerCase();
+            const searchable = [
+                cleanTitle,
+                description,
+                objectName,
+                categories
+            ].join(" ");
 
-            const stem = normalizeWikisourceFileStem(imageTitle);
+            const lower = searchable.toLowerCase();
 
             let score = 0;
 
             /*
-             * Filename similarity.
+             * VERY strong evidence.
+             *
+             * This is the important part for:
+             *
+             * MARTANDA VARMA 1891.jpeg
              */
-            if (stem === pageStem) {
-                score += 100;
-            } else if (
-                stem.includes(pageStem) ||
-                pageStem.includes(stem)
+            if (
+                /\btitle\s*page\b/i.test(lower) ||
+                /\btitle-page\b/i.test(lower)
             ) {
-                score += 60;
+                score += 1000;
+            }
+
+            if (
+                /\bfront\s*cover\b/i.test(lower) ||
+                /\bbook\s*cover\b/i.test(lower) ||
+                /\bcover\s*page\b/i.test(lower) ||
+                /\bfrontispiece\b/i.test(lower)
+            ) {
+                score += 1000;
             }
 
             /*
-             * Strong semantic evidence that this is actually a book cover,
-             * title page, front cover, or frontispiece.
+             * Localized title-page / cover terminology.
              */
             if (
-                /\btitle\s*page\b/i.test(combinedMetadata) ||
-                /\btitle-page\b/i.test(combinedMetadata)
+                /ശീർഷക\s*താൾ|ശീർഷക\s*പേജ്|മുഖപ്പുറം|മുഖചിത്രം|ആദ്യ\s*പതിപ്പ്/iu
+                    .test(searchable)
             ) {
-                score += 180;
+                score += 1000;
             }
 
             if (
-                /\bfirst\s+edition\b/i.test(combinedMetadata) ||
-                /\bfirst\s+published\b/i.test(combinedMetadata)
+                /मुखपृष्ठ|शीर्षक\s*पृष्ठ|आवरण|प्रथम\s*संस्करण/iu
+                    .test(searchable)
             ) {
-                score += 100;
-            }
-
-            if (
-                /\bfront\s+cover\b/i.test(combinedMetadata) ||
-                /\bbook\s+cover\b/i.test(combinedMetadata) ||
-                /\bcover\s+page\b/i.test(combinedMetadata) ||
-                /\bfrontispiece\b/i.test(combinedMetadata)
-            ) {
-                score += 180;
-            }
-
-            /*
-             * Localized cover/title-page terminology.
-             */
-            if (
-                /मुखपृष्ठ|आवरण|शीर्षक\s*पृष्ठ|प्रथम\s*संस्करण/iu
-                    .test(combinedMetadata)
-            ) {
-                score += 180;
-            }
-
-            if (
-                /മുഖചിത്രം|മുഖപ്പുറം|ശീർഷക\s*താൾ|ആദ്യ\s*പതിപ്പ്/iu
-                    .test(combinedMetadata)
-            ) {
-                score += 180;
+                score += 1000;
             }
 
             if (
                 /தலைப்பு\s*பக்கம்|முகப்பு|முதல்\s*பதிப்பு/iu
-                    .test(combinedMetadata)
+                    .test(searchable)
             ) {
-                score += 180;
+                score += 1000;
             }
 
             if (
                 /ముఖచిత్రం|శీర్షిక\s*పేజీ|మొదటి\s*ముద్రణ/iu
-                    .test(combinedMetadata)
+                    .test(searchable)
             ) {
-                score += 180;
+                score += 1000;
             }
 
             if (
                 /প্রচ্ছদ|শিরোনাম\s*পৃষ্ঠা|প্রথম\s*সংস্করণ/iu
-                    .test(combinedMetadata)
+                    .test(searchable)
             ) {
-                score += 180;
+                score += 1000;
             }
 
             /*
-             * Filename itself may contain useful English terminology even
-             * when the work title is in another script.
+             * First-edition evidence.
              */
             if (
-                /cover|frontispiece|title.?page|first.?edition/i
-                    .test(imageTitle)
+                /\bfirst\s+edition\b/i.test(lower) ||
+                /\bfirst\s+published\b/i.test(lower)
             ) {
-                score += 100;
+                score += 250;
             }
 
             /*
-             * Portrait-oriented images are more likely to be book covers or
-             * title pages than landscape illustrations.
+             * Filename/title relationship is only secondary evidence.
+             */
+            const pageStem =
+                normalizeWikisourceFileStem(pageTitle);
+
+            const imageStem =
+                normalizeWikisourceFileStem(cleanTitle);
+
+            if (pageStem && imageStem === pageStem) {
+                score += 150;
+            } else if (
+                pageStem &&
+                (
+                    imageStem.includes(pageStem) ||
+                    pageStem.includes(imageStem)
+                )
+            ) {
+                score += 80;
+            }
+
+            /*
+             * Portrait orientation is useful supporting evidence.
              */
             const width = Number(info.width || 0);
             const height = Number(info.height || 0);
 
-            if (width > 0 && height > 0) {
-                if (height >= width * 1.15) {
-                    score += 20;
-                }
-
-                if (height >= width * 1.35) {
-                    score += 15;
-                }
+            if (
+                width > 0 &&
+                height > 0 &&
+                height > width * 1.15
+            ) {
+                score += 30;
             }
 
             /*
-             * Penalize obvious non-cover material.
+             * Reject obvious Wikimedia UI assets.
              */
-            if (
-                /pd[-_]?icon|public[_-]?domain|commons-logo|wikimedia-logo|
-                 edit-clear|no[_-]?image|placeholder/i.test(combinedMetadata)
-            ) {
-                score -= 500;
+            if (isBadWikisourceImageTitle(cleanTitle)) {
+                score -= 2000;
             }
 
-            /*
-             * Scan-page filenames are generally not covers unless their
-             * metadata explicitly says title page/cover.
-             */
             if (
-                /page|página|seite|पृष्ठ|പേജ്/i.test(imageTitle) &&
-                !/title\s*page|cover|frontispiece/i.test(combinedMetadata)
-            ) {
-                score -= 50;
-            }
+    /pd[-_]?icon|public[_-]?domain|commons-logo|wikimedia-logo|edit-clear|no[_-]?image|placeholder/iu
+        .test(searchable)
+) {
+    score -= 2000;
+}
 
-            imageCandidates.push({
-                title: imageTitle,
+            const candidateUrl =
+                info.thumburl ||
+                info.url ||
+                null;
+
+            if (!candidateUrl) return null;
+
+            return {
+                title: cleanTitle,
+                url: candidateUrl,
                 score,
-                index,
                 description
-            });
+            };
 
         } catch (error) {
             console.warn(
-                `Wikisource work-image metadata detection failed for ${imageTitle}:`,
+                `Wikisource image inspection failed for ${cleanTitle}:`,
+                error.message
+            );
+
+            return null;
+        }
+    }
+
+    /*
+     * ============================================================
+     * 1. FIRST PRIORITY:
+     *    Images explicitly embedded on the actual work page.
+     * ============================================================
+     *
+     * This is the critical path.
+     */
+    const imageTitles =
+        await getWikisourcePageImageTitles(
+            apiUrl,
+            pageTitle
+        );
+
+    const candidates = [];
+
+    for (const imageTitle of imageTitles) {
+        const candidate =
+            await inspectImageFile(imageTitle);
+
+        if (candidate) {
+            candidates.push(candidate);
+        }
+    }
+
+    /*
+     * Pick the strongest semantic candidate.
+     */
+    candidates.sort(
+        (a, b) => b.score - a.score
+    );
+
+    const strongest = candidates[0];
+
+    if (
+        strongest &&
+        strongest.score >= 500
+    ) {
+        coverImage = strongest.url;
+
+        console.log(
+            `[Classics Cover] Selected Wikisource work-page image: ` +
+            `${strongest.title} ` +
+            `(score=${strongest.score})`
+        );
+    }
+
+    /*
+     * Get author only from the strongest relevant image metadata.
+     */
+    if (strongest) {
+        try {
+            const authorData =
+                await wikisourceApi(apiUrl, {
+                    action: "query",
+                    prop: "imageinfo",
+                    titles: strongest.title,
+                    iiprop: "extmetadata",
+                    iiextmetadatafilter:
+                        "Artist|Author|Creator"
+                });
+
+            const pages =
+                authorData.query?.pages || {};
+
+            const page =
+                Array.isArray(pages)
+                    ? pages[0]
+                    : Object.values(pages)[0];
+
+            const info =
+                page?.imageinfo?.[0];
+
+            if (info) {
+                author =
+                    extractAuthorFromWikisourceImageInfo(info);
+            }
+
+        } catch (error) {
+            console.warn(
+                "Wikisource cover author metadata failed:",
                 error.message
             );
         }
     }
 
-    imageCandidates.sort(
-        (a, b) =>
-            b.score - a.score ||
-            a.index - b.index
-    );
-
     /*
-     * Only consider reasonably strong candidates.
+     * ============================================================
+     * 2. SECOND PRIORITY:
+     *    Exact edition files.
+     * ============================================================
      *
-     * A title-page/cover description normally gives 180+ points, so
-     * MARTANDA VARMA 1891.jpeg will pass even though its filename is in
-     * Latin script while the Wikisource work title is Malayalam.
+     * Only use this if the work page did not provide a strong cover.
      */
-    for (const candidate of imageCandidates) {
-        if (coverImage) break;
+    if (!coverImage) {
 
-        if (candidate.score < 80) {
-            continue;
+        const titleVariants = [
+            decodeWikisourceTitle(pageTitle),
+            decodeWikisourceTitle(pageTitle)
+                .replace(/[\s\-_–—]+/gu, ""),
+            decodeWikisourceTitle(pageTitle)
+                .replace(/[\s\-_–—]+/gu, " ")
+                .trim()
+        ];
+
+        const exactFiles = [];
+
+        for (const variant of [
+            ...new Set(titleVariants)
+        ]) {
+
+            for (const ext of [
+                "jpg",
+                "jpeg",
+                "png",
+                "webp"
+            ]) {
+
+                exactFiles.push(
+                    `File:${variant}.${ext}`
+                );
+
+                exactFiles.push(
+                    `चित्र:${variant}.${ext}`
+                );
+            }
         }
 
-        await inspectFile(
-            candidate.title,
-            candidate.score
-        );
+        for (const fileTitle of exactFiles) {
+
+            const candidate =
+                await inspectImageFile(fileTitle);
+
+            if (
+                candidate &&
+                candidate.score >= 500
+            ) {
+
+                coverImage =
+                    candidate.url;
+
+                console.log(
+                    `[Classics Cover] Selected exact edition image: ` +
+                    `${candidate.title} ` +
+                    `(score=${candidate.score})`
+                );
+
+                break;
+            }
+        }
     }
 
-    return { coverImage, author };
+    /*
+     * ============================================================
+     * 3. THIRD PRIORITY:
+     *    Proofread Index / named cover page.
+     * ============================================================
+     */
+    if (!coverImage) {
+
+        const exactPdfCandidates = [];
+
+        const variants = [
+            decodeWikisourceTitle(pageTitle),
+            decodeWikisourceTitle(pageTitle)
+                .replace(/[\s\-_–—]+/gu, ""),
+            decodeWikisourceTitle(pageTitle)
+                .replace(/[\s\-_–—]+/gu, " ")
+                .trim()
+        ];
+
+        for (const variant of [
+            ...new Set(variants)
+        ]) {
+
+            exactPdfCandidates.push(
+                `File:${variant}.pdf`
+            );
+
+            exactPdfCandidates.push(
+                `File:${variant}.djvu`
+            );
+
+            exactPdfCandidates.push(
+                `चित्र:${variant}.pdf`
+            );
+
+            exactPdfCandidates.push(
+                `चित्र:${variant}.djvu`
+            );
+        }
+
+        for (const fileTitle of exactPdfCandidates) {
+
+            const candidate =
+                await inspectFileForWikisourceCover(
+                    apiUrl,
+                    fileTitle
+                );
+
+            if (candidate) {
+                coverImage = candidate;
+                break;
+            }
+        }
+    }
+
+    return {
+        coverImage,
+        author
+    };
 }
 
 function extractWikisourceAuthorFromWikitext(wikitext) {
@@ -2691,13 +2886,17 @@ async function fetchWikisourceSource(sourceUrl, info) {
     // cover (for example "गोदान.pdf") from ever being selected.
     mainPage.coverImage = null;
 
-    // Use the work page's actual edition file. This avoids selecting the generic
-    // Public Domain icon or Wikimedia contributor images and lets us read the
-    // author from the edition file metadata (e.g. Artist).
-    const fileMetadata = await resolveWikisourceCoverAndAuthorFromPageImages(info.apiUrl, title);
-    if (!author && fileMetadata.author) author = fileMetadata.author;
-    if (fileMetadata.coverImage) mainPage.coverImage = fileMetadata.coverImage;
+   const fileMetadata = await resolveWikisourceCoverAndAuthorFromPageImages(info.apiUrl, title);
 
+if (!author && fileMetadata.author) {
+    author = fileMetadata.author;
+}
+
+if (fileMetadata.coverImage) {
+    mainPage.coverImage = fileMetadata.coverImage;
+}
+   
+   
     // These are secondary fallbacks only. They are used after the exact edition
     // file resolver has had a chance to find the real cover.
     if (!mainPage.coverImage) {
