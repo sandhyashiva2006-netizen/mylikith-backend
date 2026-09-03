@@ -863,18 +863,68 @@ function extractAuthorFromWikisourceImageInfo(imageInfo) {
     return "";
 }
 
+async function getWikisourceProofreadNamespaces(apiUrl) {
+    try {
+        const data = await wikisourceApi(apiUrl, {
+            action: "query",
+            meta: "siteinfo",
+            siprop: "namespaces|namespacealiases"
+        });
 
+        const namespaces = data.query?.namespaces || {};
+        const aliases = data.query?.namespacealiases || [];
+
+        const findNamespace = canonical => {
+            const ns = Object.values(namespaces).find(item =>
+                String(item?.canonical || "").toLowerCase() === canonical.toLowerCase()
+            );
+
+            if (ns) {
+                return ns['*'] || ns.canonical || canonical;
+            }
+
+            const alias = aliases.find(item =>
+                String(item?.alias || "").toLowerCase() === canonical.toLowerCase()
+            );
+
+            return alias?.alias || canonical;
+        };
+
+        return {
+            page: findNamespace("Page"),
+            index: findNamespace("Index")
+        };
+    } catch (error) {
+        console.warn(
+            "Wikisource ProofreadPage namespace detection failed:",
+            error.message
+        );
+
+        return {
+            page: "Page",
+            index: "Index"
+        };
+    }
+}
 
 async function resolveWikisourceIndexCoverPage(apiUrl, fileTitle) {
     try {
         const cleanFile = String(fileTitle || "")
             .replace(/^(?:File|Image|चित्र|फाइल)\s*:/iu, "")
             .trim();
+
         if (!cleanFile) return null;
 
-        // ProofreadPage stores the index metadata as JSON. Its Image field is
-        // the page number used by Wikisource itself for the book preview/cover.
-        const indexTitle = `विषयसूची:${cleanFile}`;
+        const namespaces =
+    await getWikisourceProofreadNamespaces(apiUrl);
+
+const namespacePrefixes = [
+    namespaces.page,
+    "Page"
+];
+
+        const indexTitle = `${namespaces.index}:${cleanFile}`;
+
         const data = await wikisourceApi(apiUrl, {
             action: "parse",
             page: indexTitle,
@@ -882,80 +932,219 @@ async function resolveWikisourceIndexCoverPage(apiUrl, fileTitle) {
             contentformat: "application/json",
             redirects: 1
         });
+
         const raw = String(data.parse?.wikitext || "").trim();
+
         if (!raw) return null;
 
-        let fields = null;
+        let fields;
+
         try {
             const parsed = JSON.parse(raw);
             fields = parsed?.fields || null;
         } catch {
             return null;
         }
+
         if (!fields) return null;
 
-        const imageField = String(fields.Image ?? fields.image ?? "").trim();
+        const imageField = String(
+            fields.Image ??
+            fields.image ??
+            ""
+        ).trim();
+
         if (!imageField) return null;
 
-        // Image can be a filename for image-based indexes, or a numeric page
-        // number for PDF/DjVu-backed indexes.
+        /*
+         * Image can be:
+         *
+         * 1. A filename:
+         *    File:cover.jpg
+         *
+         * 2. A full image specification
+         *
+         * 3. A physical page number in a PDF/DjVu.
+         */
+
         if (!/^\d+$/u.test(imageField)) {
-            const fileName = imageField.replace(/^\[\[\s*(?:File|चित्र)\s*:/iu, "").replace(/\]\].*$/u, "").trim();
-            if (fileName) {
-                const imageTitle = /^(?:File|चित्र)\s*:/iu.test(imageField)
+
+            const fileName = imageField
+                .replace(
+                    /^\[\[\s*(?:File|Image|चित्र|फाइल)\s*:/iu,
+                    ""
+                )
+                .replace(/\]\].*$/u, "")
+                .trim();
+
+            if (!fileName) return null;
+
+            const imageTitle =
+                /^(?:File|Image|चित्र|फाइल)\s*:/iu.test(imageField)
                     ? imageField
                     : `File:${fileName}`;
-                const info = await wikisourceApi(apiUrl, {
-                    action: "query",
-                    prop: "imageinfo",
-                    titles: imageTitle,
-                    iiprop: "url|mime",
-                    iiurlwidth: 1400
-                });
-                const pages = info.query?.pages || {};
-                const page = Array.isArray(pages) ? pages[0] : Object.values(pages)[0];
-                const ii = page?.imageinfo?.[0];
-                const candidate = ii?.thumburl || ii?.url || null;
-                if (candidate && !isBadWikisourceCoverUrl(candidate)) return candidate;
+
+            try {
+
+                const info = await wikisourceApi(
+                    apiUrl,
+                    {
+                        action: "query",
+                        prop: "imageinfo",
+                        titles: imageTitle,
+                        iiprop: "url|mime",
+                        iiurlwidth: 1400
+                    }
+                );
+
+                const pages =
+                    info.query?.pages || {};
+
+                const page =
+                    Array.isArray(pages)
+                        ? pages[0]
+                        : Object.values(pages)[0];
+
+                const ii =
+                    page?.imageinfo?.[0];
+
+                const candidate =
+                    ii?.thumburl ||
+                    ii?.url ||
+                    null;
+
+                if (
+                    candidate &&
+                    !isBadWikisourceCoverUrl(candidate)
+                ) {
+                    return candidate;
+                }
+
+            } catch (error) {
+                console.warn(
+                    `Wikisource Index image lookup failed for ${imageTitle}:`,
+                    error.message
+                );
             }
+
             return null;
         }
 
-        const preferredNumber = Number(imageField);
-        const pageNamespace = "पृष्ठ";
-        const candidates = [preferredNumber];
+        /*
+         * Numeric Image field.
+         *
+         * ProofreadPage defines Image as the page number
+         * to use for the Index cover. This is an official
+         * ProofreadPage feature.
+         */
 
-        // If the configured cover page is a scan-library sheet (a common DLI
-        // artifact), inspect the next few physical pages and choose the first
-        // real book page instead of saving the scan sheet as the cover.
-        for (let n = preferredNumber + 1; n <= preferredNumber + 4; n++) candidates.push(n);
+        const pageNumber = Number(imageField);
 
-        for (const pageNumber of candidates) {
-            const pageTitle = `${pageNamespace}:${cleanFile}/${pageNumber}`;
-            try {
-                const pageData = await wikisourceApi(apiUrl, {
-                    action: "parse",
-                    page: pageTitle,
-                    prop: "text",
-                    redirects: 1
-                });
-                const html = String(pageData.parse?.text || "");
-                const text = cleanWikisourceHtml(html).replace(/\s+/gu, " ").trim();
-
-                // Reject common Digital Library / scanner identification sheets.
-                if (/UNIVERSAL\s+LIBRARY|DIGITAL\s+LIBRARY\s+OF\s+INDIA|\bOU[_-]?\d+\b|barcode|scanning\s+centre|scanning\s+center/iu.test(text)) {
-                    continue;
-                }
-
-                const image = extractWikisourceCoverFromHtml(html);
-                if (image && !isBadWikisourceCoverUrl(image)) return image;
-            } catch (error) {
-                // Continue to the next physical page.
-            }
+        if (!Number.isFinite(pageNumber)) {
+            return null;
         }
+
+        const pageTitle =
+            `${namespaces.page}:${cleanFile}/${pageNumber}`;
+
+        try {
+
+            const imageData = await wikisourceApi(
+                apiUrl,
+                {
+                    action: "query",
+                    prop: "imageforpage",
+                    titles: pageTitle
+                }
+            );
+
+            const pages =
+                imageData.query?.pages || {};
+
+            const page =
+                Array.isArray(pages)
+                    ? pages[0]
+                    : Object.values(pages)[0];
+
+            const image =
+                page?.imageforpage?.thumbnail ||
+                page?.imageforpage?.source ||
+                null;
+
+            if (
+                image &&
+                !isBadWikisourceCoverUrl(image)
+            ) {
+                return image.startsWith("//")
+                    ? `https:${image}`
+                    : image;
+            }
+
+        } catch (error) {
+
+            console.warn(
+                `Wikisource imageforpage failed for ${pageTitle}:`,
+                error.message
+            );
+
+        }
+
+        /*
+         * Fallback: use pageimages on the actual Page:
+         * page, not the Index page.
+         */
+
+        try {
+
+            const pageData = await wikisourceApi(
+                apiUrl,
+                {
+                    action: "query",
+                    prop: "pageimages",
+                    piprop: "thumbnail|original",
+                    pithumbsize: 1400,
+                    titles: pageTitle
+                }
+            );
+
+            const pages =
+                pageData.query?.pages || {};
+
+            const page =
+                Array.isArray(pages)
+                    ? pages[0]
+                    : Object.values(pages)[0];
+
+            const image =
+                page?.original?.source ||
+                page?.thumbnail?.source ||
+                null;
+
+            if (
+                image &&
+                !isBadWikisourceCoverUrl(image)
+            ) {
+                return image;
+            }
+
+        } catch (error) {
+
+            console.warn(
+                `Wikisource PageImages cover fallback failed for ${pageTitle}:`,
+                error.message
+            );
+
+        }
+
     } catch (error) {
-        console.warn(`Wikisource Index cover resolution failed for ${fileTitle}:`, error.message);
+
+        console.warn(
+            `Wikisource Index cover resolution failed for ${fileTitle}:`,
+            error.message
+        );
+
     }
+
     return null;
 }
 
@@ -989,11 +1178,12 @@ async function resolveWikisourceNamedCoverPage(apiUrl, fileTitle) {
         // Also inspect the book's Index/TOC. The Hindi Go-daan index, for
         // example, explicitly contains an "आवरण-पृष्ठ" entry.
         const tocCandidates = [
-            `Index:${cleanFile}`,
-            `अनुक्रमणिका:${cleanFile}`,
-            `विषयसूची:${cleanFile}`,
-            `विषयसूची:${baseName}.pdf`
-        ];
+    `${namespaces.index}:${cleanFile}`,
+    `Index:${cleanFile}`,
+    `अनुक्रमणिका:${cleanFile}`,
+    `विषयसूची:${cleanFile}`,
+    `विषयसूची:${baseName}.pdf`
+];
 
         async function getPageImage(title) {
             const variants = [title, title.replace(/^पृष्ठ:/u, "Page:")];
