@@ -971,7 +971,6 @@ router.post(
                 ]
             );
 
-
             await recordMonetisedUnlock(client, {
                 userId,
                 authorId: chapter.author_id,
@@ -979,6 +978,9 @@ router.post(
                 sourceType: "original_chapter",
                 sourceReference: `original_chapter:${userId}:${chapterId}`
             });
+
+
+
 
             await client.query(
                 "COMMIT"

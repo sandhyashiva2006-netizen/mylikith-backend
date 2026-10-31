@@ -15,7 +15,7 @@ createNotification
 const crypto = require("crypto");
 
 const axios = require("axios");
-const { recordPaidCoinLot, recordNonPaidCoinLot } = require("./magp-commission-engine");
+const { recordNonPaidCoinLot } = require("./magp-commission-engine");
 
 
 
@@ -610,142 +610,282 @@ const { user_id, package_id } = req.body;
 =========================== */
 
 router.post("/verify-payment", async (req, res) => {
-    let client;
-    let transactionStarted = false;
 
     try {
+
         const { order_id } = req.body;
-        if (!order_id || typeof order_id !== "string") {
-            return res.status(400).json({ success: false, message: "Invalid order ID." });
-        }
 
         const response = await axios.get(
-            `https://sandbox.cashfree.com/pg/orders/${encodeURIComponent(order_id)}`,
+
+            `https://sandbox.cashfree.com/pg/orders/${order_id}`,
+
             {
+
                 headers: {
-                    "x-client-id": process.env.CASHFREE_APP_ID,
-                    "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-                    "x-api-version": "2025-01-01"
+
+                    "x-client-id":
+                        process.env.CASHFREE_APP_ID,
+
+                    "x-client-secret":
+                        process.env.CASHFREE_SECRET_KEY,
+
+                    "x-api-version":
+                        "2025-01-01"
+
                 }
+
             }
+
         );
 
         const order = response.data;
+
+console.log(order);
+
         if (order.order_status !== "PAID") {
-            return res.json({ success: false, message: "Payment Pending" });
+
+            return res.json({
+
+                success: false,
+
+                message: "Payment Pending"
+
+            });
+
         }
 
-        const customerId = Number(order.customer_details?.customer_id);
-        const paidAmount = Number(order.order_amount);
-        if (!Number.isSafeInteger(customerId) || customerId <= 0 || !Number.isFinite(paidAmount) || paidAmount <= 0) {
-            return res.status(400).json({ success: false, message: "Invalid paid order details." });
-        }
+        const customerId =
+            Number(order.customer_details.customer_id);
 
-        client = await db.connect();
-        await client.query("BEGIN");
-        transactionStarted = true;
+        const transactionExists =
+            await db.query(
 
-        // Prevent two concurrent verification requests for the same Cashfree order.
-        await client.query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)", [`cashfree-wallet:${order_id}`]);
+                `
+                SELECT id
 
-        const transactionExists = await client.query(
-            `SELECT id FROM wallet_transactions WHERE reference_id=$1 LIMIT 1 FOR UPDATE`,
-            [order_id]
-        );
+                FROM wallet_transactions
+
+                WHERE reference_id=$1
+                `,
+
+                [
+                    order_id
+                ]
+
+            );
 
         if (transactionExists.rows.length > 0) {
-            await client.query("COMMIT");
-            transactionStarted = false;
-            return res.json({ success: true, message: "Already Credited" });
+
+            return res.json({
+
+                success: true,
+
+                message: "Already Credited"
+
+            });
+
         }
 
-        const packageResult = await client.query(
-            `SELECT id, coins, bonus_coins, price FROM coin_packages WHERE price=$1 LIMIT 1`,
-            [paidAmount]
-        );
+        const packageResult =
+            await db.query(
+
+                `
+                SELECT *
+
+                FROM coin_packages
+
+                WHERE price=$1
+
+                LIMIT 1
+                `,
+
+                [
+                    order.order_amount
+                ]
+
+            );
 
         if (packageResult.rows.length === 0) {
-            await client.query("ROLLBACK");
-            transactionStarted = false;
-            return res.status(404).json({ success: false, message: "Package not found" });
+
+            return res.status(404).json({
+
+                success: false,
+
+                message: "Package not found"
+
+            });
+
         }
 
         const pkg = packageResult.rows[0];
-        const paidCoins = Math.floor(Number(pkg.coins) || 0);
-        const bonusCoins = Math.floor(Number(pkg.bonus_coins) || 0);
-        const totalCoins = paidCoins + bonusCoins;
-        if (paidCoins <= 0 || totalCoins <= 0 || Math.abs(Number(pkg.price) - paidAmount) > 0.01) {
-            await client.query("ROLLBACK");
-            transactionStarted = false;
-            return res.status(400).json({ success: false, message: "Invalid coin package amount." });
-        }
 
-        await client.query(
-            `INSERT INTO wallets (user_id, coins, earned_coins, spent_coins, balance)
-             VALUES ($1,0,0,0,0) ON CONFLICT DO NOTHING`,
-            [customerId]
+        const totalCoins =
+            Number(pkg.coins) +
+            Number(pkg.bonus_coins);
+
+console.log("TOTAL COINS:", totalCoins);
+console.log("CUSTOMER ID:", customerId);
+
+        await db.query(
+
+            `
+            UPDATE wallets
+
+SET
+
+coins = coins + $1,
+
+earned_coins = earned_coins + $1
+
+WHERE user_id=$2
+            `,
+
+            [
+
+               totalCoins,
+
+                customerId
+
+            ]
+
         );
 
-        const wallet = await client.query(
-            `SELECT id FROM wallets WHERE user_id=$1 FOR UPDATE`,
-            [customerId]
-        );
-        if (!wallet.rows.length) throw new Error("Wallet could not be created for this payment.");
+const checkWallet = await db.query(
+`
+SELECT
+coins,
+earned_coins,
+spent_coins
+FROM wallets
+WHERE user_id=$1
+`,
+[customerId]
+);
 
-        await client.query(
-            `UPDATE wallets SET coins=coins+$1, earned_coins=earned_coins+$1 WHERE user_id=$2`,
-            [totalCoins, customerId]
+console.log(checkWallet.rows[0]);
+
+        const wallet =
+            await db.query(
+
+                `
+                SELECT id
+
+                FROM wallets
+
+                WHERE user_id=$1
+                `,
+
+                [
+
+                    customerId
+
+                ]
+
+            );
+
+        await db.query(
+
+            `
+            INSERT INTO wallet_transactions
+            (
+
+                wallet_id,
+
+                user_id,
+
+                type,
+
+                coins,
+
+                amount,
+
+                description,
+
+                reference_id
+
+            )
+
+            VALUES
+            (
+
+                $1,
+
+                $2,
+
+                'Credit',
+
+                $3,
+
+                $4,
+
+                $5,
+
+                $6
+
+            )
+            `,
+
+            [
+
+                wallet.rows[0].id,
+
+                customerId,
+
+                totalCoins,
+
+                order.order_amount,
+
+                "Coin Purchase",
+
+                order_id
+
+            ]
+
         );
 
-        const walletTransaction = await client.query(
-            `INSERT INTO wallet_transactions
-                (wallet_id, user_id, type, coins, amount, description, reference_id)
-             VALUES ($1,$2,'Credit',$3,$4,'Coin Purchase',$5)
-             RETURNING id`,
-            [wallet.rows[0].id, customerId, totalCoins, paidAmount, order_id]
-        );
+        res.json({
 
-        const walletTransactionId = walletTransaction.rows[0].id;
-        await recordPaidCoinLot(client, {
-            userId: customerId,
-            walletTransactionId,
-            sourceReference: `cashfree:${order_id}`,
-            paidAmount,
-            paidCoins
+            success: true
+
         });
-        if (bonusCoins > 0) {
-            await recordNonPaidCoinLot(client, {
-                userId: customerId,
-                walletTransactionId,
-                sourceReference: `cashfree:${order_id}:bonus`,
-                coins: bonusCoins
-            });
-        }
 
-        await client.query("COMMIT");
-        transactionStarted = false;
-        return res.json({ success: true });
-
-    } catch (err) {
-        if (client && transactionStarted) {
-            try { await client.query("ROLLBACK"); } catch (_) {}
-        }
-        console.error("Cashfree wallet verification error:", err.response?.data || err);
-        return res.status(500).json({
-            success: false,
-            message: err.response?.data || err.message
-        });
-    } finally {
-        if (client) client.release();
     }
+
+ catch (err) {
+
+    console.log("=========== VERIFY ERROR ===========");
+
+    console.log(err.response?.data);
+
+    console.log(err.response?.status);
+
+    console.log(err.response?.headers);
+
+    console.log(err.message);
+
+    console.error(err);
+
+    console.log("====================================");
+
+    res.status(500).json({
+
+        success:false,
+
+        message:err.response?.data || err.message
+
+    });
+
+}
+
 });
 
 async function rewardCoins(userId, coins, description) {
     const client = await db.connect();
     let transactionStarted = false;
+    const uid = Number(userId);
+    const count = Math.floor(Number(coins));
+
     try {
-        const uid = Number(userId);
-        const count = Math.floor(Number(coins));
         if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(count) || count <= 0) {
             throw new Error("Invalid reward coin credit.");
         }
@@ -754,23 +894,31 @@ async function rewardCoins(userId, coins, description) {
         transactionStarted = true;
         await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [uid]);
 
-        await client.query(
-            `INSERT INTO wallets (user_id, coins, earned_coins, spent_coins, balance)
-             VALUES ($1,0,0,0,0) ON CONFLICT DO NOTHING`,
+        await client.query(`
+            INSERT INTO wallets (user_id, coins, earned_coins, spent_coins, balance)
+            VALUES ($1, 0, 0, 0, 0)
+            ON CONFLICT DO NOTHING
+        `, [uid]);
+
+        const wallet = await client.query(
+            `SELECT id FROM wallets WHERE user_id=$1 FOR UPDATE`,
             [uid]
         );
-        const wallet = await client.query(`SELECT id FROM wallets WHERE user_id=$1 FOR UPDATE`, [uid]);
         if (!wallet.rows.length) throw new Error("Wallet not found for reward credit.");
 
-        await client.query(
-            `UPDATE wallets SET coins=coins+$1, earned_coins=earned_coins+$1 WHERE user_id=$2`,
-            [count, uid]
-        );
-        const transaction = await client.query(
-            `INSERT INTO wallet_transactions (wallet_id,user_id,type,coins,amount,description)
-             VALUES ($1,$2,'Credit',$3,0,$4) RETURNING id`,
-            [wallet.rows[0].id, uid, count, description]
-        );
+        await client.query(`
+            UPDATE wallets
+            SET coins=coins+$1, earned_coins=earned_coins+$1
+            WHERE user_id=$2
+        `, [count, uid]);
+
+        const transaction = await client.query(`
+            INSERT INTO wallet_transactions
+                (wallet_id, user_id, type, coins, amount, description)
+            VALUES ($1, $2, 'Credit', $3, 0, $4)
+            RETURNING id
+        `, [wallet.rows[0].id, uid, count, description]);
+
         await recordNonPaidCoinLot(client, {
             userId: uid,
             walletTransactionId: transaction.rows[0].id,
@@ -781,7 +929,7 @@ async function rewardCoins(userId, coins, description) {
         await client.query("COMMIT");
         transactionStarted = false;
     } catch (err) {
-        if (transactionStarted) {
+        if (client && transactionStarted) {
             try { await client.query("ROLLBACK"); } catch (_) {}
         }
         throw err;
@@ -790,9 +938,9 @@ async function rewardCoins(userId, coins, description) {
     }
 
     await createNotification(
-        Number(userId),
+        uid,
         "🪙 Coins Credited",
-        `${coins} coins have been added to your wallet.\n\nReason: ${description}`,
+        `${count} coins have been added to your wallet.\n\nReason: ${description}`,
         "wallet"
     );
 }

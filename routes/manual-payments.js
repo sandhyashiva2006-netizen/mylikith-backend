@@ -376,7 +376,7 @@ router.get("/admin/list", async (req, res) => {
 
 router.put("/admin/:id/approve", async (req,res)=>{
 
-const client = await db.connect();
+let client;
 let transactionStarted = false;
 try{
 
@@ -391,6 +391,7 @@ success:false
 
 }
 
+client = await db.connect();
 await client.query("BEGIN");
 transactionStarted = true;
 
@@ -428,6 +429,8 @@ admin_note
 }=req.body;
 
 const p=payment.rows[0];
+
+await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [Number(p.user_id)]);
 
 let notificationMessage = "";
 
@@ -520,6 +523,7 @@ SELECT *
 FROM wallets
 
 WHERE user_id=$1
+FOR UPDATE
 `,
 
 [
@@ -544,6 +548,7 @@ spent_coins
 VALUES
 
 ($1,0,0,0)
+ON CONFLICT DO NOTHING
 `,
 
 [
@@ -654,6 +659,7 @@ await recordPaidCoinLot(client, {
     paidAmount: packageAmount,
     paidCoins: Number(pkg.rows[0].coins)
 });
+
 if (Number(pkg.rows[0].bonus_coins) > 0) {
     await recordNonPaidCoinLot(client, {
         userId: p.user_id,
@@ -918,7 +924,7 @@ message:"Payment approved."
 
 }catch(err){
 
-if (transactionStarted) { try { await client.query("ROLLBACK"); } catch (_) {} }
+if (client && transactionStarted) { try { await client.query("ROLLBACK"); } catch (_) {} }
 
 console.log(err);
 
@@ -932,7 +938,7 @@ message:err.message
 
 }
 finally {
-    client.release();
+    if (client) client.release();
 }
 
 });

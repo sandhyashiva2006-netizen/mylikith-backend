@@ -119,6 +119,7 @@ async function recordMonetisedUnlock(client, {
         FROM magp_paid_coin_lots
         WHERE user_id = $1
           AND remaining_coins > 0
+          AND (expires_at IS NULL OR expires_at > NOW())
         ORDER BY created_at ASC, id ASC
         FOR UPDATE
     `, [uid]);
@@ -239,12 +240,21 @@ async function recordMonetisedUnlock(client, {
     const commission = money(platformShareAmount * MAGP_COMMISSION_RATE / 100);
 
     if (commission > 0) {
+        // Tax treatment is deliberately unconfirmed by default. Keep the
+        // calculated amount visible for reconciliation but block admin approval
+        // and payouts until an accountant confirms the tax-exclusive basis.
+        const taxReviewComplete = process.env.MAGP_TAX_REVIEW_COMPLETED === 'true';
+        const ledgerStatus = taxReviewComplete ? 'pending' : 'pending_tax_review';
+        const ledgerNote = taxReviewComplete
+            ? 'Automatically calculated from verified paid-coin value consumed on referred-author content.'
+            : 'Calculated provisionally on the recorded package amount. Awaiting GST/tax-basis review; do not approve or pay until reconciled.';
+
         await client.query(`
             INSERT INTO partner_commission_ledger
                 (partner_id, referral_id, source_type, source_reference,
                  gross_eligible_amount, platform_share_amount, commission_rate,
                  commission_amount, status, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (source_type, source_reference) DO NOTHING
         `, [
             referral.rows[0].partner_id,
@@ -255,7 +265,8 @@ async function recordMonetisedUnlock(client, {
             platformShareAmount,
             MAGP_COMMISSION_RATE,
             commission,
-            'Automatically calculated from verified paid-coin value consumed on referred-author content.'
+            ledgerStatus,
+            ledgerNote
         ]);
     }
 

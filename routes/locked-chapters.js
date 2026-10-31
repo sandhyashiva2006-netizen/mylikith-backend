@@ -343,8 +343,6 @@ premium.rows.length>0;
                 FROM wallets
 
                 WHERE user_id=$1
-
-                FOR UPDATE
                 `,
 
                 [
