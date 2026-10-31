@@ -15,6 +15,7 @@ createNotification
 const crypto = require("crypto");
 
 const axios = require("axios");
+const { recordPaidCoinLot, recordNonPaidCoinLot } = require("./magp-commission-engine");
 
 
 
@@ -653,200 +654,70 @@ console.log(order);
 
         }
 
-        const customerId =
-            Number(order.customer_details.customer_id);
-
-        const transactionExists =
-            await db.query(
-
-                `
-                SELECT id
-
-                FROM wallet_transactions
-
-                WHERE reference_id=$1
-                `,
-
-                [
-                    order_id
-                ]
-
+        const customerId = Number(order.customer_details.customer_id);
+        const client = await db.connect();
+        try {
+            await client.query("BEGIN");
+            await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [String(order_id)]);
+            const existing = await client.query(
+                `SELECT id FROM wallet_transactions WHERE reference_id=$1 AND type='Credit' FOR UPDATE`,
+                [order_id]
             );
+            if (existing.rows.length) {
+                await client.query("COMMIT");
+                return res.json({ success: true, message: "Already Credited" });
+            }
+            const packageResult = await client.query(
+                `SELECT id, coins, bonus_coins, price FROM coin_packages WHERE price=$1 LIMIT 1 FOR SHARE`,
+                [order.order_amount]
+            );
+            if (!packageResult.rows.length) {
+                await client.query("ROLLBACK");
+                return res.status(404).json({ success: false, message: "Package not found" });
+            }
+            const pkg = packageResult.rows[0];
+            const paidCoins = Number(pkg.coins) || 0;
+            const bonusCoins = Number(pkg.bonus_coins) || 0;
+            const totalCoins = paidCoins + bonusCoins;
+            if (totalCoins <= 0 || paidCoins <= 0) throw new Error("Invalid coin package configuration");
 
-        if (transactionExists.rows.length > 0) {
-
-            return res.json({
-
-                success: true,
-
-                message: "Already Credited"
-
+            await client.query(
+                `INSERT INTO wallets (user_id, coins, earned_coins, spent_coins)
+                 VALUES ($1,0,0,0) ON CONFLICT (user_id) DO NOTHING`, [customerId]
+            );
+            const wallet = await client.query(`SELECT id FROM wallets WHERE user_id=$1 FOR UPDATE`, [customerId]);
+            if (!wallet.rows.length) throw new Error("Wallet could not be created");
+            await client.query(
+                `UPDATE wallets SET coins=coins+$1, earned_coins=earned_coins+$1 WHERE user_id=$2`,
+                [totalCoins, customerId]
+            );
+            const tx = await client.query(
+                `INSERT INTO wallet_transactions
+                 (wallet_id,user_id,type,coins,amount,description,reference_id)
+                 VALUES ($1,$2,'Credit',$3,$4,'Coin Purchase',$5) RETURNING id`,
+                [wallet.rows[0].id, customerId, totalCoins, order.order_amount, order_id]
+            );
+            await recordPaidCoinLot(client, {
+                userId: customerId,
+                walletTransactionId: tx.rows[0].id,
+                sourceReference: `cashfree:${order_id}`,
+                paidAmount: order.order_amount,
+                paidCoins
             });
-
-        }
-
-        const packageResult =
-            await db.query(
-
-                `
-                SELECT *
-
-                FROM coin_packages
-
-                WHERE price=$1
-
-                LIMIT 1
-                `,
-
-                [
-                    order.order_amount
-                ]
-
-            );
-
-        if (packageResult.rows.length === 0) {
-
-            return res.status(404).json({
-
-                success: false,
-
-                message: "Package not found"
-
+            await recordNonPaidCoinLot(client, {
+                userId: customerId,
+                walletTransactionId: tx.rows[0].id,
+                sourceReference: `cashfree-bonus:${order_id}`,
+                coins: bonusCoins
             });
-
+            await client.query("COMMIT");
+            return res.json({ success: true });
+        } catch (transactionError) {
+            await client.query("ROLLBACK");
+            throw transactionError;
+        } finally {
+            client.release();
         }
-
-        const pkg = packageResult.rows[0];
-
-        const totalCoins =
-            Number(pkg.coins) +
-            Number(pkg.bonus_coins);
-
-console.log("TOTAL COINS:", totalCoins);
-console.log("CUSTOMER ID:", customerId);
-
-        await db.query(
-
-            `
-            UPDATE wallets
-
-SET
-
-coins = coins + $1,
-
-earned_coins = earned_coins + $1
-
-WHERE user_id=$2
-            `,
-
-            [
-
-               totalCoins,
-
-                customerId
-
-            ]
-
-        );
-
-const checkWallet = await db.query(
-`
-SELECT
-coins,
-earned_coins,
-spent_coins
-FROM wallets
-WHERE user_id=$1
-`,
-[customerId]
-);
-
-console.log(checkWallet.rows[0]);
-
-        const wallet =
-            await db.query(
-
-                `
-                SELECT id
-
-                FROM wallets
-
-                WHERE user_id=$1
-                `,
-
-                [
-
-                    customerId
-
-                ]
-
-            );
-
-        await db.query(
-
-            `
-            INSERT INTO wallet_transactions
-            (
-
-                wallet_id,
-
-                user_id,
-
-                type,
-
-                coins,
-
-                amount,
-
-                description,
-
-                reference_id
-
-            )
-
-            VALUES
-            (
-
-                $1,
-
-                $2,
-
-                'Credit',
-
-                $3,
-
-                $4,
-
-                $5,
-
-                $6
-
-            )
-            `,
-
-            [
-
-                wallet.rows[0].id,
-
-                customerId,
-
-                totalCoins,
-
-                order.order_amount,
-
-                "Coin Purchase",
-
-                order_id
-
-            ]
-
-        );
-
-        res.json({
-
-            success: true
-
-        });
 
     }
 
@@ -878,155 +749,38 @@ console.log(checkWallet.rows[0]);
 
 });
 
-async function rewardCoins(userId,coins,description){
-
-let wallet=await db.query(
-
-`
-SELECT *
-
-FROM wallets
-
-WHERE user_id=$1
-`,
-
-[
-userId
-]
-
-);
-
-if(wallet.rows.length===0){
-
-await db.query(
-
-`
-INSERT INTO wallets
-(
-user_id,
-coins,
-earned_coins,
-spent_coins,
-balance
-)
-
-VALUES
-(
-$1,
-0,
-0,
-0,
-0
-)
-`,
-
-[
-userId
-]
-
-);
-
-wallet=await db.query(
-
-`
-SELECT *
-
-FROM wallets
-
-WHERE user_id=$1
-`,
-
-[
-userId
-]
-
-);
-
-}
-
-await db.query(
-
-`
-UPDATE wallets
-
-SET
-
-coins=coins+$1,
-
-earned_coins=earned_coins+$1
-
-WHERE user_id=$2
-`,
-
-[
-coins,
-userId
-]
-
-);
-
-await db.query(
-
-`
-INSERT INTO wallet_transactions
-(
-
-wallet_id,
-
-user_id,
-
-type,
-
-coins,
-
-amount,
-
-description
-
-)
-
-VALUES
-(
-
-$1,
-
-$2,
-
-'Credit',
-
-$3,
-
-0,
-
-$4
-
-)
-`,
-
-[
-wallet.rows[0].id,
-
-userId,
-
-coins,
-
-description
-]
-
-);
-
-await createNotification(
-
-userId,
-
-"🪙 Coins Credited",
-
-`${coins} coins have been added to your wallet.\n\nReason: ${description}`,
-
-"wallet"
-
-);
-
+async function rewardCoins(userId, coins, description) {
+    const amount = Math.max(0, Math.floor(Number(coins) || 0));
+    if (!amount) return;
+    const client = await db.connect();
+    try {
+        await client.query("BEGIN");
+        await client.query(`
+            INSERT INTO wallets (user_id,coins,earned_coins,spent_coins,balance)
+            VALUES ($1,0,0,0,0)
+            ON CONFLICT (user_id) DO NOTHING
+        `, [userId]);
+        const wallet = await client.query(`SELECT id FROM wallets WHERE user_id=$1 FOR UPDATE`, [userId]);
+        if (!wallet.rows.length) throw new Error("Wallet not found for coin reward");
+        await client.query(`UPDATE wallets SET coins=coins+$1, earned_coins=earned_coins+$1 WHERE user_id=$2`, [amount, userId]);
+        const rewardTx = await client.query(`
+            INSERT INTO wallet_transactions (wallet_id,user_id,type,coins,amount,description)
+            VALUES ($1,$2,'Credit',$3,0,$4) RETURNING id
+        `, [wallet.rows[0].id, userId, amount, description]);
+        await recordNonPaidCoinLot(client, {
+            userId,
+            walletTransactionId: rewardTx.rows[0].id,
+            sourceReference: `reward:${rewardTx.rows[0].id}`,
+            coins: amount
+        });
+        await client.query("COMMIT");
+        await createNotification(userId, "🪙 Coins Credited", `${amount} coins have been added to your wallet.\n\nReason: ${description}`, "wallet");
+    } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 module.exports={

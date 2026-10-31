@@ -3,6 +3,7 @@ const router = express.Router();
 
 const db = require("../db");
 const auth = require("../middleware/auth");
+const { recordPaidCoinLot, recordNonPaidCoinLot } = require("./magp-commission-engine");
 
 router.use(auth);
 
@@ -375,6 +376,7 @@ router.get("/admin/list", async (req, res) => {
 
 router.put("/admin/:id/approve", async (req,res)=>{
 
+const client = await db.connect();
 try{
 
 if(req.user.role!=="admin"){
@@ -388,9 +390,9 @@ success:false
 
 }
 
-await db.query("BEGIN");
+await client.query("BEGIN");
 
-const payment=await db.query(
+const payment=await client.query(
 
 `
 SELECT *
@@ -407,7 +409,7 @@ req.params.id
 
 if(payment.rows.length===0){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 return res.status(404).json({
 
@@ -429,7 +431,7 @@ let notificationMessage = "";
 
 if(p.status!=="Pending"){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 return res.status(400).json({
 
@@ -451,7 +453,7 @@ message:"This payment has already been processed."
 
 if(p.payment_type==="coin"){
 
-const pkg = await db.query(
+const pkg = await client.query(
 
 `
 SELECT
@@ -470,7 +472,7 @@ p.package_id
 
 if(!pkg.rows.length){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 return res.status(400).json({
 
@@ -496,7 +498,7 @@ Number(pkg.rows[0].price);
 
 if(Number(p.amount)!==packageAmount){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 return res.status(400).json({
 
@@ -508,7 +510,7 @@ message:"Payment amount mismatch."
 
 }
 
-let wallet=await db.query(
+let wallet=await client.query(
 
 `
 SELECT *
@@ -526,7 +528,7 @@ p.user_id
 
 if(wallet.rows.length===0){
 
-await db.query(
+await client.query(
 
 `
 INSERT INTO wallets
@@ -548,7 +550,7 @@ p.user_id
 
 );
 
-wallet=await db.query(
+wallet=await client.query(
 
 `
 SELECT *
@@ -566,7 +568,7 @@ p.user_id
 
 }
 
-await db.query(
+await client.query(
 
 `
 UPDATE wallets
@@ -587,7 +589,7 @@ p.user_id
 
 );
 
-await db.query(
+const paidCreditTx = await client.query(
 
 `
 INSERT INTO wallet_transactions
@@ -627,6 +629,7 @@ $4,
 $5
 
 )
+RETURNING id
 `,
 
 [
@@ -638,6 +641,21 @@ p.transaction_id
 ]
 
 );
+
+await recordPaidCoinLot(client, {
+userId: p.user_id,
+walletTransactionId: paidCreditTx.rows[0].id,
+sourceReference: `manual:${p.id}:${p.transaction_id}`,
+paidAmount: packageAmount,
+paidCoins: Number(pkg.rows[0].coins)
+});
+
+await recordNonPaidCoinLot(client, {
+userId: p.user_id,
+walletTransactionId: paidCreditTx.rows[0].id,
+sourceReference: `manual-bonus:${p.id}:${p.transaction_id}`,
+coins: Number(pkg.rows[0].bonus_coins)
+});
 
 notificationMessage =
 `Your payment has been verified. ${totalCoins} coins have been added to your wallet.`;
@@ -652,7 +670,7 @@ notificationMessage =
 
 if(p.payment_type==="premium"){
 
-const premium = await db.query(
+const premium = await client.query(
 
 `
 SELECT
@@ -670,7 +688,7 @@ p.plan_id
 
 if(!premium.rows.length){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 return res.status(400).json({
 
@@ -690,7 +708,7 @@ Number(premium.rows[0].price);
 
 if(Number(p.amount)!==premiumPrice){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 return res.status(400).json({
 
@@ -709,7 +727,7 @@ const durationDays =
 
 Number(premium.rows[0].duration_days);
 
-const activePremium=await db.query(
+const activePremium=await client.query(
 
 `
 SELECT id
@@ -739,7 +757,7 @@ p.user_id
 
 if(activePremium.rows.length){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 return res.json({
     success:true,
@@ -748,7 +766,7 @@ return res.json({
 
 }
 
-const plan=await db.query(
+const plan=await client.query(
 
 `
 SELECT *
@@ -766,7 +784,7 @@ p.plan_id
 
 const days = durationDays;
 
-await db.query(
+await client.query(
 
 `
 INSERT INTO user_premium
@@ -807,7 +825,7 @@ days
 
 }
 
-await db.query(
+await client.query(
 
 `
 INSERT INTO reader_notifications
@@ -855,7 +873,7 @@ notificationMessage,
 
 );
 
-await db.query(
+await client.query(
 
 `
 UPDATE manual_payments
@@ -881,7 +899,7 @@ admin_note||null
 
 );
 
-await db.query("COMMIT");
+await client.query("COMMIT");
 
 res.json({
 
@@ -893,7 +911,7 @@ message:"Payment approved."
 
 }catch(err){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 console.log(err);
 
@@ -905,6 +923,8 @@ message:err.message
 
 });
 
+} finally {
+client.release();
 }
 
 });
@@ -915,6 +935,7 @@ message:err.message
 
 router.put("/admin/:id/reject", async (req,res)=>{
 
+const client = await db.connect();
 try{
 
 if(req.user.role!=="admin"){
@@ -930,7 +951,7 @@ message:"Access denied."
 
 }
 
-await db.query("BEGIN");
+await client.query("BEGIN");
 
 const{
 
@@ -938,7 +959,7 @@ admin_note
 
 }=req.body;
 
-const payment=await db.query(
+const payment=await client.query(
 
 `
 SELECT *
@@ -956,7 +977,7 @@ req.params.id
 
 if(payment.rows.length===0){
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 return res.status(404).json({
 
@@ -968,7 +989,7 @@ message:"Payment not found."
 
 }
 
-await db.query(
+await client.query(
 
 `
 UPDATE manual_payments
@@ -991,7 +1012,7 @@ admin_note||null
 
 );
 
-await db.query(
+await client.query(
 
 `
 INSERT INTO reader_notifications
@@ -1043,7 +1064,7 @@ admin_note
 
 );
 
-await db.query("COMMIT");
+await client.query("COMMIT");
 
 res.json({
 
@@ -1057,7 +1078,7 @@ message:"Payment rejected."
 
 console.log(err);
 
-await db.query("ROLLBACK");
+await client.query("ROLLBACK");
 
 res.status(500).json({
 
@@ -1067,6 +1088,8 @@ message:"Unable to reject payment."
 
 });
 
+} finally {
+client.release();
 }
 
 });

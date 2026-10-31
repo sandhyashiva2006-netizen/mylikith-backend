@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
+const { recordMonetisedUnlock } = require("./magp-commission-engine");
 
 router.get("/:chapterId/:userId", async (req, res) => {
 
@@ -580,7 +581,7 @@ VALUES
 
 if(!isPremium){
 
-        await client.query(
+        const debitInsert = await client.query(
 
             `
             INSERT INTO wallet_transactions
@@ -621,6 +622,7 @@ if(!isPremium){
             FROM wallets
 
             WHERE user_id=$2
+            RETURNING id
             `,
 
             [
@@ -632,6 +634,8 @@ if(!isPremium){
             ]
 
         );
+
+        await recordMonetisedUnlock(client, { userId: user_id, authorId: writerId, coins: lock.coins_required, sourceType: 'novel_chapter', sourceReference: `wallet_tx:${debitInsert.rows[0].id}` });
 
 }
 

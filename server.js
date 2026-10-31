@@ -11,6 +11,7 @@ const compression = require("compression");
 const bcrypt = require("bcryptjs");
 
 const pool = require("./db");
+const { recordNonPaidCoinLot } = require("./routes/magp-commission-engine");
 
 const app = express();
 
@@ -4300,6 +4301,17 @@ WHERE user_id=$1
 
 );
 
+const firstRewardTx = await pool.query(`
+INSERT INTO wallet_transactions (wallet_id,user_id,type,coins,amount,description,expiry_date)
+SELECT id,user_id,'Credit',2,0,'Daily Reward',NOW()+INTERVAL '30 days'
+FROM wallets WHERE user_id=$1 RETURNING id
+`, [user_id]);
+await recordNonPaidCoinLot(pool, {
+userId: user_id, walletTransactionId: firstRewardTx.rows[0]?.id,
+sourceReference: `daily-reward:${firstRewardTx.rows[0]?.id}`, coins: 2,
+expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+});
+
 return res.json({
 
 success:true,
@@ -4397,7 +4409,7 @@ user_id
 
 );
 
-await pool.query(
+const dailyRewardTx = await pool.query(
 
 `
 INSERT INTO wallet_transactions
@@ -4430,6 +4442,7 @@ NOW()+INTERVAL '30 days'
 FROM wallets
 
 WHERE user_id=$2
+RETURNING id
 `,
 
 [
@@ -4438,6 +4451,12 @@ user_id
 ]
 
 );
+
+await recordNonPaidCoinLot(pool, {
+userId: user_id, walletTransactionId: dailyRewardTx.rows[0]?.id,
+sourceReference: `daily-reward:${dailyRewardTx.rows[0]?.id}`, coins,
+expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+});
 
 res.json({
 
