@@ -146,6 +146,8 @@ app.use(express.urlencoded({
 }));
 
 app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/partners", require("./routes/partners"));
+app.use("/api/admin/partners", require("./routes/admin-partners"));
 app.use(
 "/api/writers",
 writerRoutes
