@@ -427,7 +427,6 @@ router.get("/chapter/:chapterId", async (req, res) => {
                 oc.early_access,
 
                 o.title AS original_title,
-                        o.created_by AS author_id,
                 o.premium_only,
                 o.visibility,
                 o.publish_status
@@ -912,14 +911,37 @@ router.post(
                WALLET TRANSACTION
             ------------------------------------------------- */
 
-            const originalDebit = await client.query(
-                `INSERT INTO wallet_transactions
-                 (wallet_id,user_id,type,coins,amount,description,reference_id)
-                 VALUES ($1,$2,'Debit',$3,0,'Original Episode Unlock',$4)
-                 RETURNING id`,
-                [wallet.id, userId, coinsRequired, `original_chapter:${chapterId}`]
+            await client.query(
+                `
+                INSERT INTO wallet_transactions
+                (
+                    wallet_id,
+                    user_id,
+                    type,
+                    coins,
+                    amount,
+                    description,
+                    reference_id
+                )
+
+                VALUES
+                (
+                    $1,
+                    $2,
+                    'Debit',
+                    $3,
+                    0,
+                    'Original Episode Unlock',
+                    $4
+                )
+                `,
+                [
+                    wallet.id,
+                    userId,
+                    coinsRequired,
+                    `original_chapter:${chapterId}`
+                ]
             );
-            await recordMonetisedUnlock(client, { userId, authorId: chapter.author_id, coins: coinsRequired, sourceType: 'original_episode', sourceReference: `wallet_tx:${originalDebit.rows[0].id}` });
 
 
             /* -------------------------------------------------
@@ -949,6 +971,14 @@ router.post(
                 ]
             );
 
+
+            await recordMonetisedUnlock(client, {
+                userId,
+                authorId: chapter.author_id,
+                coins: coinsRequired,
+                sourceType: "original_chapter",
+                sourceReference: `original_chapter:${userId}:${chapterId}`
+            });
 
             await client.query(
                 "COMMIT"

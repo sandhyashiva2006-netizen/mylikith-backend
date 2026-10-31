@@ -3129,6 +3129,8 @@ SELECT
 
 c.id,
 
+c.novel_id,
+
 c.chapter_no,
 
 c.title,
@@ -4242,244 +4244,94 @@ best_streak:0
 });
 
 
-app.post("/api/daily-reward",async(req,res)=>{
-
-try{
-
-const{user_id}=req.body;
-
-const today=new Date().toISOString().split("T")[0];
-
-const existing=await pool.query(
-
-`
-SELECT *
-
-FROM daily_rewards
-
-WHERE user_id=$1
-`,
-
-[user_id]
-
-);
-
-if(existing.rows.length===0){
-
-await pool.query(
-
-`
-INSERT INTO daily_rewards
-
-(user_id,last_claim,claim_streak)
-
-VALUES($1,$2,1)
-`,
-
-[
-user_id,
-today
-]
-
-);
-
-await pool.query(
-
-`
-UPDATE wallets
-
-SET
-
-coins=coins+2,
-
-earned_coins=earned_coins+2
-
-WHERE user_id=$1
-`,
-
-[user_id]
-
-);
-
-const firstRewardTx = await pool.query(`
-INSERT INTO wallet_transactions (wallet_id,user_id,type,coins,amount,description,expiry_date)
-SELECT id,user_id,'Credit',2,0,'Daily Reward',NOW()+INTERVAL '30 days'
-FROM wallets WHERE user_id=$1 RETURNING id
-`, [user_id]);
-await recordNonPaidCoinLot(pool, {
-userId: user_id, walletTransactionId: firstRewardTx.rows[0]?.id,
-sourceReference: `daily-reward:${firstRewardTx.rows[0]?.id}`, coins: 2,
-expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-});
-
-return res.json({
-
-success:true,
-
-coins:2,
-
-streak:1
-
-});
-
-}
-
-const reward=existing.rows[0];
-
-const last=new Date(reward.last_claim);
-
-const now=new Date(today);
-
-const diff=Math.floor(
-
-(now-last)/(1000*60*60*24)
-
-);
-
-if(diff===0){
-
-return res.json({
-
-success:false,
-
-message:"Already claimed today."
-
-});
-
-}
-
-let streak=reward.claim_streak;
-
-if(diff===1){
-
-streak++;
-
-}else{
-
-streak=1;
-
-}
-
-let coins=2;
-
-if(streak===7) coins=10;
-
-if(streak===30) coins=50;
-
-await pool.query(
-
-`
-UPDATE daily_rewards
-
-SET
-
-last_claim=$1,
-
-claim_streak=$2
-
-WHERE user_id=$3
-`,
-
-[
-today,
-streak,
-user_id
-]
-
-);
-
-await pool.query(
-
-`
-UPDATE wallets
-
-SET
-
-coins=coins+$1,
-
-earned_coins=earned_coins+$1
-
-WHERE user_id=$2
-`,
-
-[
-coins,
-user_id
-]
-
-);
-
-const dailyRewardTx = await pool.query(
-
-`
-INSERT INTO wallet_transactions
-(
-wallet_id,
-user_id,
-type,
-coins,
-amount,
-description,
-expiry_date
-)
-
-SELECT
-
-id,
-
-user_id,
-
-'Credit',
-
-$1,
-
-0,
-
-'Daily Reward',
-
-NOW()+INTERVAL '30 days'
-
-FROM wallets
-
-WHERE user_id=$2
-RETURNING id
-`,
-
-[
-coins,
-user_id
-]
-
-);
-
-await recordNonPaidCoinLot(pool, {
-userId: user_id, walletTransactionId: dailyRewardTx.rows[0]?.id,
-sourceReference: `daily-reward:${dailyRewardTx.rows[0]?.id}`, coins,
-expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-});
-
-res.json({
-
-success:true,
-
-coins,
-
-streak
-
-});
-
-}catch(err){
-
-console.log(err);
-
-res.status(500).json({
-
-success:false
-
-});
-
-}
-
+app.post("/api/daily-reward", async (req, res) => {
+    const client = await pool.connect();
+    let transactionStarted = false;
+
+    try {
+        const userId = Number(req.body.user_id);
+        if (!Number.isSafeInteger(userId) || userId <= 0) {
+            return res.status(400).json({ success: false, message: "Invalid user ID." });
+        }
+
+        const today = new Date().toISOString().split("T")[0];
+        await client.query("BEGIN");
+        transactionStarted = true;
+        await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [userId]);
+
+        const existing = await client.query(
+            `SELECT * FROM daily_rewards WHERE user_id=$1 FOR UPDATE`,
+            [userId]
+        );
+
+        let streak = 1;
+        let coins = 2;
+        if (existing.rows.length > 0) {
+            const reward = existing.rows[0];
+            const last = new Date(reward.last_claim);
+            const now = new Date(today);
+            const diff = Math.floor((now - last) / (1000 * 60 * 60 * 24));
+
+            if (diff === 0) {
+                await client.query("ROLLBACK");
+                transactionStarted = false;
+                return res.json({ success: false, message: "Already claimed today." });
+            }
+
+            streak = diff === 1 ? Number(reward.claim_streak || 0) + 1 : 1;
+            if (streak === 7) coins = 10;
+            if (streak === 30) coins = 50;
+
+            await client.query(
+                `UPDATE daily_rewards SET last_claim=$1, claim_streak=$2 WHERE user_id=$3`,
+                [today, streak, userId]
+            );
+        } else {
+            await client.query(
+                `INSERT INTO daily_rewards (user_id,last_claim,claim_streak) VALUES ($1,$2,1)`,
+                [userId, today]
+            );
+        }
+
+        await client.query(
+            `INSERT INTO wallets (user_id,coins,earned_coins,spent_coins,balance)
+             VALUES ($1,0,0,0,0) ON CONFLICT DO NOTHING`,
+            [userId]
+        );
+        const wallet = await client.query(`SELECT id FROM wallets WHERE user_id=$1 FOR UPDATE`, [userId]);
+        if (!wallet.rows.length) throw new Error("Wallet not found for daily reward.");
+
+        await client.query(
+            `UPDATE wallets SET coins=coins+$1, earned_coins=earned_coins+$1 WHERE user_id=$2`,
+            [coins, userId]
+        );
+        const transaction = await client.query(
+            `INSERT INTO wallet_transactions
+                (wallet_id,user_id,type,coins,amount,description,expiry_date)
+             VALUES ($1,$2,'Credit',$3,0,'Daily Reward',NOW()+INTERVAL '30 days')
+             RETURNING id, expiry_date`,
+            [wallet.rows[0].id, userId, coins]
+        );
+        await recordNonPaidCoinLot(client, {
+            userId,
+            walletTransactionId: transaction.rows[0].id,
+            sourceReference: `daily-reward:${transaction.rows[0].id}`,
+            coins,
+            expiresAt: transaction.rows[0].expiry_date
+        });
+
+        await client.query("COMMIT");
+        transactionStarted = false;
+        return res.json({ success: true, coins, streak });
+    } catch (err) {
+        if (transactionStarted) {
+            try { await client.query("ROLLBACK"); } catch (_) {}
+        }
+        console.error("Daily reward error:", err);
+        return res.status(500).json({ success: false });
+    } finally {
+        client.release();
+    }
 });
 
 app.get("/api/daily-reward/:userId",async(req,res)=>{
@@ -4720,124 +4572,91 @@ progress:0
 
 });
 
-app.post("/api/rewards/expire",async(req,res)=>{
+app.post("/api/rewards/expire", async (req, res) => {
+    const client = await pool.connect();
+    let transactionStarted = false;
+    try {
+        await client.query("BEGIN");
+        transactionStarted = true;
 
-try{
+        const expired = await client.query(`
+            SELECT id, wallet_id, user_id, coins
+            FROM wallet_transactions
+            WHERE description='Daily Reward'
+              AND expired=false
+              AND expiry_date<=NOW()
+            ORDER BY user_id, id
+            FOR UPDATE
+        `);
 
-const expired=await pool.query(
+        for (const row of expired.rows) {
+            // Lock the wallet before reconciling its expired reward lot.
+            const wallet = await client.query(
+                `SELECT id, coins FROM wallets WHERE user_id=$1 FOR UPDATE`,
+                [row.user_id]
+            );
+            if (!wallet.rows.length) {
+                await client.query(`UPDATE wallet_transactions SET expired=true WHERE id=$1`, [row.id]);
+                continue;
+            }
 
-`
-SELECT
+            const linkedLot = await client.query(
+                `SELECT id, remaining_coins FROM magp_paid_coin_lots WHERE wallet_transaction_id=$1 FOR UPDATE`,
+                [row.id]
+            );
 
-wallet_id,
+            let deduction = 0;
+            if (linkedLot.rows.length) {
+                deduction = Math.max(0, Number(linkedLot.rows[0].remaining_coins) || 0);
+                await client.query(
+                    `UPDATE magp_paid_coin_lots SET remaining_coins=0, remaining_amount=0 WHERE id=$1`,
+                    [linkedLot.rows[0].id]
+                );
+            } else {
+                // Pre-MAGP daily rewards are part of the opening legacy lot.
+                const legacyLot = await client.query(
+                    `SELECT id, remaining_coins FROM magp_paid_coin_lots
+                     WHERE user_id=$1 AND source_reference=$2 FOR UPDATE`,
+                    [row.user_id, `legacy-opening:${row.user_id}`]
+                );
+                if (legacyLot.rows.length) {
+                    deduction = Math.min(
+                        Math.max(0, Number(row.coins) || 0),
+                        Math.max(0, Number(legacyLot.rows[0].remaining_coins) || 0)
+                    );
+                    await client.query(
+                        `UPDATE magp_paid_coin_lots SET remaining_coins=remaining_coins-$1 WHERE id=$2`,
+                        [deduction, legacyLot.rows[0].id]
+                    );
+                } else {
+                    // Preserve the pre-MAGP expiry behaviour if migration has not been run.
+                    deduction = Math.max(0, Number(row.coins) || 0);
+                }
+            }
 
-user_id,
+            if (deduction > 0) {
+                await client.query(
+                    `UPDATE wallets SET coins=GREATEST(coins-$1,0) WHERE user_id=$2`,
+                    [deduction, row.user_id]
+                );
+            }
 
-SUM(coins) coins
+            await client.query(`UPDATE wallet_transactions SET expired=true WHERE id=$1`, [row.id]);
+        }
 
-FROM wallet_transactions
-
-WHERE
-
-description='Daily Reward'
-
-AND expired=false
-
-AND expiry_date<=NOW()
-
-GROUP BY wallet_id,user_id
-`
-
-);
-
-for(const row of expired.rows){
-
-await pool.query(
-
-`
-UPDATE wallets
-
-SET
-
-coins=GREATEST(coins-$1,0)
-
-WHERE user_id=$2
-`,
-
-[
-row.coins,
-row.user_id
-]
-
-);
-
-await pool.query(
-
-`
-UPDATE wallet_transactions
-
-SET expired=true
-
-WHERE
-
-user_id=$1
-
-AND description='Daily Reward'
-
-AND expired=false
-
-AND expiry_date<=NOW()
-`,
-
-[
-row.user_id
-]
-
-);
-
-}
-
-res.json({
-
-success:true
-
+        await client.query("COMMIT");
+        transactionStarted = false;
+        return res.json({ success: true, expired_transactions: expired.rows.length });
+    } catch (err) {
+        if (transactionStarted) {
+            try { await client.query("ROLLBACK"); } catch (_) {}
+        }
+        console.error("Reward expiry error:", err);
+        return res.status(500).json({ success: false });
+    } finally {
+        client.release();
+    }
 });
-
-}catch(err){
-
-console.log(err);
-
-res.status(500).json({
-
-success:false
-
-});
-
-}
-
-});
-
-/*
-setInterval(async()=>{
-
-try{
-
-await fetch(
-
-`${process.env.APP_URL}/api/rewards/expire`,
-
-{
-
-method:"POST"
-
-}
-
-);
-
-}catch(e){}
-
-},3600000);
-*/
 
 app.get("/api/recommendations/:userId", async (req, res) => {
 

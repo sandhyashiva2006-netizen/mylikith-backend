@@ -343,6 +343,8 @@ premium.rows.length>0;
                 FROM wallets
 
                 WHERE user_id=$1
+
+                FOR UPDATE
                 `,
 
                 [
@@ -581,7 +583,7 @@ VALUES
 
 if(!isPremium){
 
-        const debitInsert = await client.query(
+        await client.query(
 
             `
             INSERT INTO wallet_transactions
@@ -622,7 +624,6 @@ if(!isPremium){
             FROM wallets
 
             WHERE user_id=$2
-            RETURNING id
             `,
 
             [
@@ -635,9 +636,17 @@ if(!isPremium){
 
         );
 
-        await recordMonetisedUnlock(client, { userId: user_id, authorId: writerId, coins: lock.coins_required, sourceType: 'novel_chapter', sourceReference: `wallet_tx:${debitInsert.rows[0].id}` });
-
 }
+
+        if (!isPremium) {
+            await recordMonetisedUnlock(client, {
+                userId: user_id,
+                authorId: writerId,
+                coins: lock.coins_required,
+                sourceType: "novel_chapter",
+                sourceReference: `novel_chapter:${Number(user_id)}:${Number(chapter_id)}`
+            });
+        }
 
         await client.query("COMMIT");
 

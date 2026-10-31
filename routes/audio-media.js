@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../db");
-const { recordMonetisedUnlock } = require("./magp-commission-engine");
 const auth = require("../middleware/auth");
+const { recordMonetisedUnlock } = require("./magp-commission-engine");
 const {
     getAudioCoverProxyUrl,
     isAudioCoverProxyUrl
@@ -1918,7 +1918,6 @@ router.get(
                         ac.early_access,
 
                         an.title AS audio_novel_title,
-                        an.created_by AS author_id,
                         an.cover_url AS audio_novel_cover_url,
                         an.premium_only AS audio_novel_premium_only,
                         an.publish_status AS audio_novel_publish_status,
@@ -2813,13 +2812,34 @@ router.post(
             ================================================
             */
 
-            const audioDebit = await client.query(`
+            await client.query(`
                 INSERT INTO wallet_transactions
-                (wallet_id,user_id,type,coins,amount,description,reference_id)
-                VALUES ($1,$2,'Debit',$3,0,'Audio Chapter Unlock',$4)
-                RETURNING id
-            `, [wallet.id, userId, coinsRequired, `audio_chapter:${chapterId}`]);
-            await recordMonetisedUnlock(client, { userId, authorId: chapter.author_id, coins: coinsRequired, sourceType: 'audio_chapter', sourceReference: `wallet_tx:${audioDebit.rows[0].id}` });
+                (
+                    wallet_id,
+                    user_id,
+                    type,
+                    coins,
+                    amount,
+                    description,
+                    reference_id
+                )
+
+                VALUES
+                (
+                    $1,
+                    $2,
+                    'Debit',
+                    $3,
+                    0,
+                    'Audio Chapter Unlock',
+                    $4
+                )
+            `, [
+                wallet.id,
+                userId,
+                coinsRequired,
+                `audio_chapter:${chapterId}`
+            ]);
 
             /*
             ================================================
@@ -2846,6 +2866,14 @@ router.post(
                 chapterId,
                 coinsRequired
             ]);
+
+            await recordMonetisedUnlock(client, {
+                userId,
+                authorId: chapter.author_id,
+                coins: coinsRequired,
+                sourceType: "audio_chapter",
+                sourceReference: `audio_chapter:${userId}:${chapterId}`
+            });
 
             await client.query("COMMIT");
 

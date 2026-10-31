@@ -111,7 +111,7 @@ async function recordMonetisedUnlock(client, {
     `, [type, reference]);
 
     if (prior.rows.length) {
-        return { duplicate: true, paidCoins: 0, eligibleAmount: 0, platformShareAmount: 0, commission: 0 };
+        throw new Error('Duplicate MAGP coin consumption detected; unlock transaction must be rolled back.');
     }
 
     const lotsResult = await client.query(`
@@ -119,7 +119,6 @@ async function recordMonetisedUnlock(client, {
         FROM magp_paid_coin_lots
         WHERE user_id = $1
           AND remaining_coins > 0
-          AND (expires_at IS NULL OR expires_at > NOW())
         ORDER BY created_at ASC, id ASC
         FOR UPDATE
     `, [uid]);

@@ -377,6 +377,7 @@ router.get("/admin/list", async (req, res) => {
 router.put("/admin/:id/approve", async (req,res)=>{
 
 const client = await db.connect();
+let transactionStarted = false;
 try{
 
 if(req.user.role!=="admin"){
@@ -391,6 +392,7 @@ success:false
 }
 
 await client.query("BEGIN");
+transactionStarted = true;
 
 const payment=await client.query(
 
@@ -589,7 +591,7 @@ p.user_id
 
 );
 
-const paidCreditTx = await client.query(
+const walletTransaction = await client.query(
 
 `
 INSERT INTO wallet_transactions
@@ -642,20 +644,24 @@ p.transaction_id
 
 );
 
-await recordPaidCoinLot(client, {
-userId: p.user_id,
-walletTransactionId: paidCreditTx.rows[0].id,
-sourceReference: `manual:${p.id}:${p.transaction_id}`,
-paidAmount: packageAmount,
-paidCoins: Number(pkg.rows[0].coins)
-});
+const walletTransactionId = walletTransaction.rows[0]?.id;
+if (!walletTransactionId) throw new Error("Manual coin purchase transaction was not recorded.");
 
-await recordNonPaidCoinLot(client, {
-userId: p.user_id,
-walletTransactionId: paidCreditTx.rows[0].id,
-sourceReference: `manual-bonus:${p.id}:${p.transaction_id}`,
-coins: Number(pkg.rows[0].bonus_coins)
+await recordPaidCoinLot(client, {
+    userId: p.user_id,
+    walletTransactionId,
+    sourceReference: `manual-payment:${p.id}`,
+    paidAmount: packageAmount,
+    paidCoins: Number(pkg.rows[0].coins)
 });
+if (Number(pkg.rows[0].bonus_coins) > 0) {
+    await recordNonPaidCoinLot(client, {
+        userId: p.user_id,
+        walletTransactionId,
+        sourceReference: `manual-payment:${p.id}:bonus`,
+        coins: Number(pkg.rows[0].bonus_coins)
+    });
+}
 
 notificationMessage =
 `Your payment has been verified. ${totalCoins} coins have been added to your wallet.`;
@@ -900,6 +906,7 @@ admin_note||null
 );
 
 await client.query("COMMIT");
+transactionStarted = false;
 
 res.json({
 
@@ -911,7 +918,7 @@ message:"Payment approved."
 
 }catch(err){
 
-await client.query("ROLLBACK");
+if (transactionStarted) { try { await client.query("ROLLBACK"); } catch (_) {} }
 
 console.log(err);
 
@@ -923,8 +930,9 @@ message:err.message
 
 });
 
-} finally {
-client.release();
+}
+finally {
+    client.release();
 }
 
 });
@@ -935,7 +943,6 @@ client.release();
 
 router.put("/admin/:id/reject", async (req,res)=>{
 
-const client = await db.connect();
 try{
 
 if(req.user.role!=="admin"){
@@ -951,7 +958,7 @@ message:"Access denied."
 
 }
 
-await client.query("BEGIN");
+await db.query("BEGIN");
 
 const{
 
@@ -959,7 +966,7 @@ admin_note
 
 }=req.body;
 
-const payment=await client.query(
+const payment=await db.query(
 
 `
 SELECT *
@@ -977,7 +984,7 @@ req.params.id
 
 if(payment.rows.length===0){
 
-await client.query("ROLLBACK");
+await db.query("ROLLBACK");
 
 return res.status(404).json({
 
@@ -989,7 +996,7 @@ message:"Payment not found."
 
 }
 
-await client.query(
+await db.query(
 
 `
 UPDATE manual_payments
@@ -1012,7 +1019,7 @@ admin_note||null
 
 );
 
-await client.query(
+await db.query(
 
 `
 INSERT INTO reader_notifications
@@ -1064,7 +1071,7 @@ admin_note
 
 );
 
-await client.query("COMMIT");
+await db.query("COMMIT");
 
 res.json({
 
@@ -1078,7 +1085,7 @@ message:"Payment rejected."
 
 console.log(err);
 
-await client.query("ROLLBACK");
+await db.query("ROLLBACK");
 
 res.status(500).json({
 
@@ -1088,8 +1095,6 @@ message:"Unable to reject payment."
 
 });
 
-} finally {
-client.release();
 }
 
 });
