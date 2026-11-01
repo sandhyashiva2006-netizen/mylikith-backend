@@ -129,8 +129,8 @@ router.post('/payouts/:id/decision',async(req,res)=>{
    }
   }
   const updated=await client.query(`
-   UPDATE partner_payouts SET status=$1,payment_reference=$2,admin_note=$3,processed_by=$4,
-    processed_at=CASE WHEN $1 IN ('paid','rejected') THEN NOW() ELSE processed_at END
+   UPDATE partner_payouts SET status=$1::varchar,payment_reference=$2,admin_note=$3,processed_by=$4,
+    processed_at=CASE WHEN $1::varchar IN ('paid','rejected') THEN NOW() ELSE processed_at END
    WHERE id=$5 RETURNING *
   `,[status,String(req.body.payment_reference||'').slice(0,120),String(req.body.admin_note||'').slice(0,1000),req.user.id,po.id]);
   await client.query('COMMIT');
