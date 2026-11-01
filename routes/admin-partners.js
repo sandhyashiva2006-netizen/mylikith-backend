@@ -67,11 +67,10 @@ router.post('/commissions/:id/decision',async(req,res)=>{
   res.json({success:true,commission:r.rows[0],message:`Commission ${status}.`});
  }catch(e){console.error('MAGP commission decision:',e);res.status(500).json({success:false,message:'Unable to update commission.'});}
 });
-router.get('/payouts',async(req,res)=>{try{const r=await db.query(`SELECT po.*,u.name,u.email,pp.partner_code FROM partner_payouts po JOIN partner_profiles pp ON pp.id=po.partner_id JOIN users u ON u.id=pp.user_id ORDER BY po.requested_at DESC`);res.json({success:true,payouts:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
+router.get('/payouts',async(req,res)=>{try{const r=await db.query(`SELECT po.*,u.name,u.email,pp.partner_code,pd.payment_method,pd.upi_id,pd.account_name,pd.bank_name,pd.account_number,pd.ifsc_code FROM partner_payouts po JOIN partner_profiles pp ON pp.id=po.partner_id JOIN users u ON u.id=pp.user_id LEFT JOIN partner_payment_details pd ON pd.partner_id=pp.id ORDER BY po.requested_at DESC`);res.json({success:true,payouts:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
 router.post('/payouts/:id/decision',async(req,res)=>{
  const status=req.body.status;
  if(!['approved','paid','rejected'].includes(status))return res.status(400).json({success:false,message:'Invalid payout status.'});
- if((status==='approved'||status==='paid')&&(process.env.MAGP_TAX_REVIEW_COMPLETED!=='true'||process.env.MAGP_REFUND_REVERSALS_READY!=='true'))return res.status(409).json({success:false,message:'Partner payout processing is locked until tax review and refund-reversal handling are confirmed.'});
  const client=await db.connect();
  try{
   await client.query('BEGIN');
@@ -87,6 +86,7 @@ router.post('/payouts/:id/decision',async(req,res)=>{
   }
   const po=found.rows[0];
   if(status==='paid'){
+   if(!String(req.body.payment_reference||'').trim()){await client.query('ROLLBACK');return res.status(400).json({success:false,message:'Payment reference / UTR is required before marking a payout paid.'});}
    // Other pending/approved payouts reserve their amounts. Do not let this payment
    // consume funds already reserved for another payout request.
    const capacity=await client.query(`

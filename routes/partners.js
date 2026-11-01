@@ -27,6 +27,15 @@ router.post('/apply', async (req, res) => {
 
 router.post('/attribute',async(req,res)=>{const partnerCode=clean(req.body.partner_code,24).toUpperCase();if(!partnerCode)return res.status(400).json({success:false,message:'Partner code is required.'});try{const user=await db.query('SELECT id,role FROM users WHERE id=$1',[req.user.id]);if(!user.rows.length||user.rows[0].role!=='writer')return res.status(403).json({success:false,message:'Only registered writer accounts can submit partner attribution.'});const p=await db.query("SELECT id,user_id,partner_code FROM partner_profiles WHERE partner_code=$1 AND status='active'",[partnerCode]);if(!p.rows.length)return res.status(404).json({success:false,message:'Partner code not found.'});if(Number(p.rows[0].user_id)===Number(req.user.id))return res.status(400).json({success:false,message:'Self-referrals are not permitted.'});const r=await db.query(`INSERT INTO partner_referrals(partner_id,author_user_id,referral_code,attribution_end,status) VALUES($1,$2,$3,NOW()+INTERVAL '12 months','pending') RETURNING id,status`,[p.rows[0].id,req.user.id,p.rows[0].partner_code]);res.status(201).json({success:true,referral:r.rows[0],message:'Partner attribution submitted for review.'});}catch(e){if(e.code==='23505')return res.status(409).json({success:false,message:'This writer account already has a partner attribution.'});console.error(e);res.status(500).json({success:false});}});
 
+router.get('/payment-details', async (req,res) => {
+  try {
+    const p = await db.query("SELECT id FROM partner_profiles WHERE user_id=$1 AND status='active'", [req.user.id]);
+    if (!p.rows.length) return res.status(403).json({success:false,message:'Active partner account required.'});
+    const r = await db.query('SELECT payment_method,upi_id,account_name,bank_name,account_number,ifsc_code FROM partner_payment_details WHERE partner_id=$1',[p.rows[0].id]);
+    res.json({success:true,details:r.rows[0]||null});
+  } catch(e) { console.error('Partner payment details:',e); res.status(500).json({success:false,message:'Unable to load payment details.'}); }
+});
+
 router.get('/me', async (req,res) => {
   try {
     const p = await db.query(`SELECT pp.*,u.name,u.email FROM partner_profiles pp JOIN users u ON u.id=pp.user_id WHERE pp.user_id=$1`,[req.user.id]);
@@ -65,9 +74,22 @@ router.get('/me', async (req,res) => {
 });
 
 router.post('/payout-request', async(req,res)=>{
-  if(process.env.MAGP_TAX_REVIEW_COMPLETED!=='true'||process.env.MAGP_REFUND_REVERSALS_READY!=='true')return res.status(409).json({success:false,message:'Commission approval is available, but payout requests remain disabled until tax review and refund-reversal safeguards are confirmed.'});
   const amount=Number(req.body.amount);
   if (!Number.isFinite(amount)||amount<500) return res.status(400).json({success:false,message:'Minimum payout request is ₹500.'});
+  if (!/^\d+(?:\.\d{1,2})?$/.test(String(req.body.amount))) return res.status(400).json({success:false,message:'Enter a valid payout amount.'});
+  const method=clean(req.body.payment_method,20).toLowerCase();
+  const upi=clean(req.body.upi_id,100);
+  const accountName=clean(req.body.account_name,120);
+  const bankName=clean(req.body.bank_name,120);
+  const accountNumber=clean(req.body.account_number,40).replace(/\s/g,'');
+  const ifsc=clean(req.body.ifsc_code,20).toUpperCase();
+  if (!accountName) return res.status(400).json({success:false,message:'Account holder name is required.'});
+  if (method==='upi') {
+    if (!/^[A-Za-z0-9._-]{2,256}@[A-Za-z0-9.-]{2,64}$/.test(upi)) return res.status(400).json({success:false,message:'Enter a valid UPI ID.'});
+  } else if (method==='bank') {
+    if (!bankName || !/^\d{6,24}$/.test(accountNumber) || !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) return res.status(400).json({success:false,message:'Enter valid bank name, account number and IFSC code.'});
+  } else return res.status(400).json({success:false,message:'Choose UPI or bank transfer.'});
+
   const client=await db.connect();
   try {
     await client.query('BEGIN');
@@ -83,9 +105,14 @@ router.post('/payout-request', async(req,res)=>{
     `,[pid]);
     const available=Number(bal.rows[0].available);
     if(amount>available){await client.query('ROLLBACK');return res.status(400).json({success:false,message:`Available approved balance is ₹${Math.max(0,available).toFixed(2)}.`});}
-    await client.query("INSERT INTO partner_payouts(partner_id,amount) VALUES($1,$2)",[pid,amount]);
-    await client.query('COMMIT'); res.status(201).json({success:true,message:'Payout request submitted.'});
-  } catch(e){await client.query('ROLLBACK');console.error(e);res.status(500).json({success:false});} finally{client.release();}
+    await client.query(`INSERT INTO partner_payment_details(partner_id,payment_method,upi_id,account_name,bank_name,account_number,ifsc_code,updated_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,NOW())
+      ON CONFLICT(partner_id) DO UPDATE SET payment_method=EXCLUDED.payment_method,upi_id=EXCLUDED.upi_id,account_name=EXCLUDED.account_name,bank_name=EXCLUDED.bank_name,account_number=EXCLUDED.account_number,ifsc_code=EXCLUDED.ifsc_code,updated_at=NOW()`,
+      [pid,method,method==='upi'?upi:null,accountName,method==='bank'?bankName:null,method==='bank'?accountNumber:null,method==='bank'?ifsc:null]);
+    await client.query('INSERT INTO partner_payouts(partner_id,amount) VALUES($1,$2)',[pid,amount]);
+    await client.query('COMMIT');
+    res.status(201).json({success:true,message:'Withdrawal request submitted. MyLikith will review it and transfer the amount to your saved payment account.'});
+  } catch(e){await client.query('ROLLBACK');console.error('Partner payout request:',e);res.status(500).json({success:false,message:'Unable to submit payout request.'});} finally{client.release();}
 });
 
 module.exports=router;
