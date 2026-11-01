@@ -27,22 +27,13 @@ router.post('/apply', async (req, res) => {
 
 router.post('/attribute',async(req,res)=>{const partnerCode=clean(req.body.partner_code,24).toUpperCase();if(!partnerCode)return res.status(400).json({success:false,message:'Partner code is required.'});try{const user=await db.query('SELECT id,role FROM users WHERE id=$1',[req.user.id]);if(!user.rows.length||user.rows[0].role!=='writer')return res.status(403).json({success:false,message:'Only registered writer accounts can submit partner attribution.'});const p=await db.query("SELECT id,user_id,partner_code FROM partner_profiles WHERE partner_code=$1 AND status='active'",[partnerCode]);if(!p.rows.length)return res.status(404).json({success:false,message:'Partner code not found.'});if(Number(p.rows[0].user_id)===Number(req.user.id))return res.status(400).json({success:false,message:'Self-referrals are not permitted.'});const r=await db.query(`INSERT INTO partner_referrals(partner_id,author_user_id,referral_code,attribution_end,status) VALUES($1,$2,$3,NOW()+INTERVAL '12 months','pending') RETURNING id,status`,[p.rows[0].id,req.user.id,p.rows[0].partner_code]);res.status(201).json({success:true,referral:r.rows[0],message:'Partner attribution submitted for review.'});}catch(e){if(e.code==='23505')return res.status(409).json({success:false,message:'This writer account already has a partner attribution.'});console.error(e);res.status(500).json({success:false});}});
 
-router.get('/payment-details', async (req,res) => {
-  try {
-    const p = await db.query("SELECT id FROM partner_profiles WHERE user_id=$1 AND status='active'", [req.user.id]);
-    if (!p.rows.length) return res.status(403).json({success:false,message:'Active partner account required.'});
-    const r = await db.query('SELECT payment_method,upi_id,account_name,bank_name,account_number,ifsc_code FROM partner_payment_details WHERE partner_id=$1',[p.rows[0].id]);
-    res.json({success:true,details:r.rows[0]||null});
-  } catch(e) { console.error('Partner payment details:',e); res.status(500).json({success:false,message:'Unable to load payment details.'}); }
-});
-
 router.get('/me', async (req,res) => {
   try {
     const p = await db.query(`SELECT pp.*,u.name,u.email FROM partner_profiles pp JOIN users u ON u.id=pp.user_id WHERE pp.user_id=$1`,[req.user.id]);
     const a = await db.query('SELECT status,admin_note,created_at,reviewed_at FROM partner_applications WHERE user_id=$1',[req.user.id]);
     if (!p.rows.length) return res.json({success:true,approved:false,application:a.rows[0]||null});
     const profile=p.rows[0];
-    const [refs, ledger, payouts] = await Promise.all([
+    const [refs, ledger, payouts, paymentDetails] = await Promise.all([
       db.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status='approved')::int AS approved FROM partner_referrals WHERE partner_id=$1`,[profile.id]),
       db.query(`
         WITH commission_totals AS (
@@ -67,35 +58,47 @@ router.get('/me', async (req,res) => {
           GREATEST(ct.approved_commission-pt.paid-pt.reserved,0) AS available
         FROM commission_totals ct CROSS JOIN payout_totals pt
       `,[profile.id]),
-      db.query(`SELECT id,amount,status,requested_at,processed_at,payment_reference FROM partner_payouts WHERE partner_id=$1 ORDER BY id DESC LIMIT 20`,[profile.id])
+      db.query(`SELECT id,amount,status,requested_at,processed_at,payment_reference FROM partner_payouts WHERE partner_id=$1 ORDER BY id DESC LIMIT 20`,[profile.id]),
+      db.query(`SELECT payment_method,upi_id,account_name,bank_name,account_number,ifsc_code FROM writer_payment_details WHERE writer_id=$1`,[req.user.id])
     ]);
-    res.json({success:true,approved:true,profile,referrals:refs.rows[0],commissions:ledger.rows[0],payouts:payouts.rows});
+    res.json({success:true,approved:true,profile,referrals:refs.rows[0],commissions:ledger.rows[0],payouts:payouts.rows,paymentDetails:paymentDetails.rows[0]||null});
   } catch(e) { console.error('Partner dashboard:',e); res.status(500).json({success:false}); }
+});
+
+router.post('/payment-details', async(req,res)=>{
+  const method=clean(req.body.payment_method,10).toUpperCase();
+  const upi=clean(req.body.upi_id,120);
+  const accountName=clean(req.body.account_name,120);
+  const bankName=clean(req.body.bank_name,120);
+  const accountNumber=clean(req.body.account_number,40);
+  const ifsc=clean(req.body.ifsc_code,20).toUpperCase();
+  if(!['UPI','BANK'].includes(method))return res.status(400).json({success:false,message:'Choose UPI or bank transfer.'});
+  if(method==='UPI'&&!/^[A-Za-z0-9._-]{2,100}@[A-Za-z0-9.-]{2,50}$/.test(upi))return res.status(400).json({success:false,message:'Enter a valid UPI ID.'});
+  if(method==='BANK'&&(!accountName||!bankName||!/^\d{6,24}$/.test(accountNumber)||! /^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)))return res.status(400).json({success:false,message:'Enter valid account holder, bank, account number and IFSC details.'});
+  try{
+    const partner=await db.query("SELECT id FROM partner_profiles WHERE user_id=$1 AND status='active'",[req.user.id]);
+    if(!partner.rows.length)return res.status(403).json({success:false,message:'Active partner account required.'});
+    await db.query(`INSERT INTO writer_payment_details(writer_id,payment_method,upi_id,account_name,bank_name,account_number,ifsc_code)
+      VALUES($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT(writer_id) DO UPDATE SET payment_method=EXCLUDED.payment_method,upi_id=EXCLUDED.upi_id,
+      account_name=EXCLUDED.account_name,bank_name=EXCLUDED.bank_name,account_number=EXCLUDED.account_number,ifsc_code=EXCLUDED.ifsc_code`,
+      [req.user.id,method,method==='UPI'?upi:null,method==='BANK'?accountName:null,method==='BANK'?bankName:null,method==='BANK'?accountNumber:null,method==='BANK'?ifsc:null]);
+    res.json({success:true,message:'Withdrawal payment details saved.'});
+  }catch(e){console.error('MAGP payment details:',e);res.status(500).json({success:false,message:'Unable to save payment details.'});}
 });
 
 router.post('/payout-request', async(req,res)=>{
   const amount=Number(req.body.amount);
   if (!Number.isFinite(amount)||amount<500) return res.status(400).json({success:false,message:'Minimum payout request is ₹500.'});
-  if (!/^\d+(?:\.\d{1,2})?$/.test(String(req.body.amount))) return res.status(400).json({success:false,message:'Enter a valid payout amount.'});
-  const method=clean(req.body.payment_method,20).toLowerCase();
-  const upi=clean(req.body.upi_id,100);
-  const accountName=clean(req.body.account_name,120);
-  const bankName=clean(req.body.bank_name,120);
-  const accountNumber=clean(req.body.account_number,40).replace(/\s/g,'');
-  const ifsc=clean(req.body.ifsc_code,20).toUpperCase();
-  if (!accountName) return res.status(400).json({success:false,message:'Account holder name is required.'});
-  if (method==='upi') {
-    if (!/^[A-Za-z0-9._-]{2,256}@[A-Za-z0-9.-]{2,64}$/.test(upi)) return res.status(400).json({success:false,message:'Enter a valid UPI ID.'});
-  } else if (method==='bank') {
-    if (!bankName || !/^\d{6,24}$/.test(accountNumber) || !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) return res.status(400).json({success:false,message:'Enter valid bank name, account number and IFSC code.'});
-  } else return res.status(400).json({success:false,message:'Choose UPI or bank transfer.'});
-
   const client=await db.connect();
   try {
     await client.query('BEGIN');
     const p=await client.query("SELECT id FROM partner_profiles WHERE user_id=$1 AND status='active' FOR UPDATE",[req.user.id]);
     if(!p.rows.length){await client.query('ROLLBACK');return res.status(403).json({success:false,message:'Active partner account required.'});}
     const pid=p.rows[0].id;
+    const details=await client.query('SELECT payment_method,upi_id,account_number,ifsc_code FROM writer_payment_details WHERE writer_id=$1',[req.user.id]);
+    const d=details.rows[0];
+    if(!d || (d.payment_method==='UPI'&&!d.upi_id) || (d.payment_method!=='UPI'&&(!d.account_number||!d.ifsc_code))){await client.query('ROLLBACK');return res.status(400).json({success:false,message:'Please save valid UPI or bank payment details before requesting a payout.'});}
     const bal=await client.query(`
       SELECT
         COALESCE((SELECT SUM(commission_amount) FROM partner_commission_ledger WHERE partner_id=$1 AND status='approved'),0)
@@ -105,14 +108,9 @@ router.post('/payout-request', async(req,res)=>{
     `,[pid]);
     const available=Number(bal.rows[0].available);
     if(amount>available){await client.query('ROLLBACK');return res.status(400).json({success:false,message:`Available approved balance is ₹${Math.max(0,available).toFixed(2)}.`});}
-    await client.query(`INSERT INTO partner_payment_details(partner_id,payment_method,upi_id,account_name,bank_name,account_number,ifsc_code,updated_at)
-      VALUES($1,$2,$3,$4,$5,$6,$7,NOW())
-      ON CONFLICT(partner_id) DO UPDATE SET payment_method=EXCLUDED.payment_method,upi_id=EXCLUDED.upi_id,account_name=EXCLUDED.account_name,bank_name=EXCLUDED.bank_name,account_number=EXCLUDED.account_number,ifsc_code=EXCLUDED.ifsc_code,updated_at=NOW()`,
-      [pid,method,method==='upi'?upi:null,accountName,method==='bank'?bankName:null,method==='bank'?accountNumber:null,method==='bank'?ifsc:null]);
-    await client.query('INSERT INTO partner_payouts(partner_id,amount) VALUES($1,$2)',[pid,amount]);
-    await client.query('COMMIT');
-    res.status(201).json({success:true,message:'Withdrawal request submitted. MyLikith will review it and transfer the amount to your saved payment account.'});
-  } catch(e){await client.query('ROLLBACK');console.error('Partner payout request:',e);res.status(500).json({success:false,message:'Unable to submit payout request.'});} finally{client.release();}
+    await client.query("INSERT INTO partner_payouts(partner_id,amount) VALUES($1,$2)",[pid,amount]);
+    await client.query('COMMIT'); res.status(201).json({success:true,message:'Payout request submitted.'});
+  } catch(e){await client.query('ROLLBACK');console.error(e);res.status(500).json({success:false});} finally{client.release();}
 });
 
 module.exports=router;

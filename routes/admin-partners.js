@@ -5,51 +5,6 @@ const auth=require('../middleware/auth');
 router.use(auth,(req,res,next)=>{if(req.user.role!=='admin')return res.status(403).json({success:false,message:'Admin access required.'});next();});
 const code=()=>`MAGP${Math.random().toString(36).slice(2,8).toUpperCase()}`;
 
-// Temporary read-only MAGP payout schema diagnostic. Remove after schema verification.
-router.get('/diagnostics/payout-schema', async (req, res) => {
-  try {
-    const tables = [
-      'partner_profiles', 'partner_payouts', 'partner_payout_allocations',
-      'partner_commission_ledger', 'writer_payment_details', 'partner_payment_details'
-    ];
-    const columns = await db.query(`
-      SELECT c.table_name, c.column_name, c.data_type, c.udt_name,
-             c.is_nullable, c.column_default
-      FROM information_schema.columns c
-      WHERE c.table_schema = 'public' AND c.table_name = ANY($1::text[])
-      ORDER BY c.table_name, c.ordinal_position
-    `, [tables]);
-    const present = await db.query(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name=ANY($1::text[])
-      ORDER BY table_name
-    `, [tables]);
-    const constraints = await db.query(`
-      SELECT tc.table_name, tc.constraint_name, tc.constraint_type,
-             kcu.column_name, ccu.table_name AS foreign_table_name,
-             ccu.column_name AS foreign_column_name
-      FROM information_schema.table_constraints tc
-      LEFT JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_catalog=kcu.constraint_catalog
-       AND tc.constraint_schema=kcu.constraint_schema
-       AND tc.constraint_name=kcu.constraint_name
-       AND tc.table_name=kcu.table_name
-      LEFT JOIN information_schema.constraint_column_usage ccu
-        ON tc.constraint_catalog=ccu.constraint_catalog
-       AND tc.constraint_schema=ccu.constraint_schema
-       AND tc.constraint_name=ccu.constraint_name
-      WHERE tc.table_schema='public' AND tc.table_name=ANY($1::text[])
-      ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
-    `, [tables]);
-    res.json({ success: true, diagnostic: 'read_only_magp_payout_schema',
-      present_tables: present.rows.map(r => r.table_name),
-      columns: columns.rows, constraints: constraints.rows });
-  } catch (error) {
-    console.error('MAGP payout schema diagnostic failed:', error);
-    res.status(500).json({ success: false, message: 'Payout schema diagnostic failed.' });
-  }
-});
-
 router.get('/applications',async(req,res)=>{try{const r=await db.query(`SELECT a.*,u.name,u.email FROM partner_applications a JOIN users u ON u.id=a.user_id ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END,a.created_at DESC`);res.json({success:true,applications:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
 router.post('/applications/:id/decision',async(req,res)=>{
  const status=req.body.status; if(!['approved','rejected'].includes(status))return res.status(400).json({success:false,message:'Invalid decision.'});
@@ -112,11 +67,11 @@ router.post('/commissions/:id/decision',async(req,res)=>{
   res.json({success:true,commission:r.rows[0],message:`Commission ${status}.`});
  }catch(e){console.error('MAGP commission decision:',e);res.status(500).json({success:false,message:'Unable to update commission.'});}
 });
-router.get('/payouts',async(req,res)=>{try{const r=await db.query(`SELECT po.*,u.name,u.email,pp.partner_code FROM partner_payouts po JOIN partner_profiles pp ON pp.id=po.partner_id JOIN users u ON u.id=pp.user_id ORDER BY po.requested_at DESC`);res.json({success:true,payouts:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
+router.get('/payouts',async(req,res)=>{try{const r=await db.query(`SELECT po.*,u.name,u.email,pp.partner_code,wpd.payment_method,wpd.upi_id,wpd.account_name,wpd.bank_name,wpd.account_number,wpd.ifsc_code FROM partner_payouts po JOIN partner_profiles pp ON pp.id=po.partner_id JOIN users u ON u.id=pp.user_id LEFT JOIN writer_payment_details wpd ON wpd.writer_id=pp.user_id ORDER BY po.requested_at DESC`);res.json({success:true,payouts:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
 router.post('/payouts/:id/decision',async(req,res)=>{
  const status=req.body.status;
  if(!['approved','paid','rejected'].includes(status))return res.status(400).json({success:false,message:'Invalid payout status.'});
- if((status==='approved'||status==='paid')&&(process.env.MAGP_TAX_REVIEW_COMPLETED!=='true'||process.env.MAGP_REFUND_REVERSALS_READY!=='true'))return res.status(409).json({success:false,message:'Partner payout processing is locked until tax review and refund-reversal handling are confirmed.'});
+ if(status==='paid'&&!String(req.body.payment_reference||'').trim())return res.status(400).json({success:false,message:'A verified bank transfer reference / UTR is required before marking a payout paid.'});
  const client=await db.connect();
  try{
   await client.query('BEGIN');
@@ -131,6 +86,9 @@ router.post('/payouts/:id/decision',async(req,res)=>{
    return res.status(404).json({success:false,message:'Payout not found or already processed.'});
   }
   const po=found.rows[0];
+  if(status==='approved'&&po.status!=='pending'){await client.query('ROLLBACK');return res.status(409).json({success:false,message:'Only pending payout requests can be approved.'});}
+  if(status==='paid'&&po.status!=='approved'){await client.query('ROLLBACK');return res.status(409).json({success:false,message:'Approve the payout request before marking it paid.'});}
+  if(status==='rejected'&&!['pending','approved'].includes(po.status)){await client.query('ROLLBACK');return res.status(409).json({success:false,message:'This payout can no longer be rejected.'});}
   if(status==='paid'){
    // Other pending/approved payouts reserve their amounts. Do not let this payment
    // consume funds already reserved for another payout request.
