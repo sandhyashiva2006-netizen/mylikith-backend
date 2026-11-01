@@ -3,49 +3,52 @@ const router=express.Router();
 const db=require('../db');
 const auth=require('../middleware/auth');
 router.use(auth,(req,res,next)=>{if(req.user.role!=='admin')return res.status(403).json({success:false,message:'Admin access required.'});next();});
+const code=()=>`MAGP${Math.random().toString(36).slice(2,8).toUpperCase()}`;
 
-// Temporary read-only diagnostic. Uses the same shared pool as every MAGP route.
-router.get('/diagnostics/database', async (req, res) => {
+// Temporary read-only MAGP payout schema diagnostic. Remove after schema verification.
+router.get('/diagnostics/payout-schema', async (req, res) => {
   try {
-    const identity = await db.query(`
-      SELECT current_database() AS database_name,
-             current_schema() AS current_schema,
-             current_user AS database_user,
-             inet_server_addr()::text AS server_address,
-             current_setting('search_path') AS search_path
-    `);
-    const tables = await db.query(`
-      SELECT table_name
-      FROM information_schema.tables
-      WHERE table_schema = 'public'
-        AND table_type = 'BASE TABLE'
-      ORDER BY table_name
-    `);
-    const expected = [
-      'partner_applications', 'partner_profiles', 'partner_referrals',
-      'partner_commission_ledger', 'partner_payouts',
-      'partner_payout_allocations', 'partner_policy_acceptances',
-      'magp_paid_coin_lots', 'magp_paid_coin_consumptions',
-      'magp_paid_coin_consumption_allocations'
+    const tables = [
+      'partner_profiles', 'partner_payouts', 'partner_payout_allocations',
+      'partner_commission_ledger', 'writer_payment_details', 'partner_payment_details'
     ];
-    const present = new Set(tables.rows.map(row => row.table_name));
-    res.json({
-      success: true,
-      diagnostic: 'read_only_shared_pool',
-      database: identity.rows[0],
-      public_table_count: tables.rows.length,
-      magp_tables: expected.map(table_name => ({
-        table_name,
-        exists: present.has(table_name)
-      })),
-      public_tables: tables.rows.map(row => row.table_name)
-    });
+    const columns = await db.query(`
+      SELECT c.table_name, c.column_name, c.data_type, c.udt_name,
+             c.is_nullable, c.column_default
+      FROM information_schema.columns c
+      WHERE c.table_schema = 'public' AND c.table_name = ANY($1::text[])
+      ORDER BY c.table_name, c.ordinal_position
+    `, [tables]);
+    const present = await db.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name=ANY($1::text[])
+      ORDER BY table_name
+    `, [tables]);
+    const constraints = await db.query(`
+      SELECT tc.table_name, tc.constraint_name, tc.constraint_type,
+             kcu.column_name, ccu.table_name AS foreign_table_name,
+             ccu.column_name AS foreign_column_name
+      FROM information_schema.table_constraints tc
+      LEFT JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_catalog=kcu.constraint_catalog
+       AND tc.constraint_schema=kcu.constraint_schema
+       AND tc.constraint_name=kcu.constraint_name
+       AND tc.table_name=kcu.table_name
+      LEFT JOIN information_schema.constraint_column_usage ccu
+        ON tc.constraint_catalog=ccu.constraint_catalog
+       AND tc.constraint_schema=ccu.constraint_schema
+       AND tc.constraint_name=ccu.constraint_name
+      WHERE tc.table_schema='public' AND tc.table_name=ANY($1::text[])
+      ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+    `, [tables]);
+    res.json({ success: true, diagnostic: 'read_only_magp_payout_schema',
+      present_tables: present.rows.map(r => r.table_name),
+      columns: columns.rows, constraints: constraints.rows });
   } catch (error) {
-    console.error('MAGP database diagnostic failed:', error);
-    res.status(500).json({ success: false, message: 'Database diagnostic failed.' });
+    console.error('MAGP payout schema diagnostic failed:', error);
+    res.status(500).json({ success: false, message: 'Payout schema diagnostic failed.' });
   }
 });
-const code=()=>`MAGP${Math.random().toString(36).slice(2,8).toUpperCase()}`;
 
 router.get('/applications',async(req,res)=>{try{const r=await db.query(`SELECT a.*,u.name,u.email FROM partner_applications a JOIN users u ON u.id=a.user_id ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END,a.created_at DESC`);res.json({success:true,applications:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
 router.post('/applications/:id/decision',async(req,res)=>{
