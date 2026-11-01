@@ -39,7 +39,7 @@ router.get('/me', async (req,res) => {
         WITH commission_totals AS (
           SELECT
             COALESCE(SUM(commission_amount) FILTER (WHERE status IN ('pending_tax_review','pending','approved')),0) AS total,
-            COALESCE(SUM(commission_amount) FILTER (WHERE status='pending_tax_review'),0) AS pending_tax_review,
+            COALESCE(SUM(commission_amount) FILTER (WHERE status IN ('pending_tax_review','pending')),0) AS pending_tax_review,
             COALESCE(SUM(commission_amount) FILTER (WHERE status='pending'),0) AS pending_release,
             COALESCE(SUM(commission_amount) FILTER (WHERE status='approved'),0) AS approved_commission
           FROM partner_commission_ledger WHERE partner_id=$1
@@ -65,6 +65,7 @@ router.get('/me', async (req,res) => {
 });
 
 router.post('/payout-request', async(req,res)=>{
+  if(process.env.MAGP_TAX_REVIEW_COMPLETED!=='true'||process.env.MAGP_REFUND_REVERSALS_READY!=='true')return res.status(409).json({success:false,message:'Commission approval is available, but payout requests remain disabled until tax review and refund-reversal safeguards are confirmed.'});
   const amount=Number(req.body.amount);
   if (!Number.isFinite(amount)||amount<500) return res.status(400).json({success:false,message:'Minimum payout request is ₹500.'});
   const client=await db.connect();

@@ -240,18 +240,10 @@ async function recordMonetisedUnlock(client, {
     const commission = money(platformShareAmount * MAGP_COMMISSION_RATE / 100);
 
     if (commission > 0) {
-        // Tax treatment is deliberately unconfirmed by default. Keep the
-        // calculated amount visible for reconciliation but block admin approval
-        // and payouts until an accountant confirms the tax-exclusive basis.
-        const taxReviewComplete = process.env.MAGP_TAX_REVIEW_COMPLETED === 'true';
-        const refundReversalsReady = process.env.MAGP_REFUND_REVERSALS_READY === 'true';
-        // No per-commission admin approval: auto-credit to payable balance only
-        // after both programme-wide accounting and reversal safeguards are explicitly enabled.
-        const canAutoRelease = taxReviewComplete && refundReversalsReady;
-        const ledgerStatus = canAutoRelease ? 'approved' : 'pending_tax_review';
-        const ledgerNote = canAutoRelease
-            ? 'Automatically calculated and released to partner payable balance from verified paid-coin value consumed on referred-author content.'
-            : `Commission accrued automatically but held from payout. Tax review: ${taxReviewComplete ? 'complete' : 'pending'}; refund/chargeback reversal safeguards: ${refundReversalsReady ? 'ready' : 'not confirmed'}.`;
+        // Every automatically generated commission enters the admin review queue.
+        // It is not payable until an administrator explicitly approves it.
+        const ledgerStatus = 'pending';
+        const ledgerNote = 'Automatically calculated from verified paid-coin value consumed on referred-author content. Awaiting administrator approval.';
 
         await client.query(`
             INSERT INTO partner_commission_ledger

@@ -53,7 +53,7 @@ function makeClient({ duplicate = false, referral = true, lots = [], settings = 
   assert.strictEqual(result.commission, 4);
   const commissionInsert = spendClient.calls.find(c => c.q.includes('INSERT INTO partner_commission_ledger'));
   assert(commissionInsert);
-  assert.strictEqual(commissionInsert.params[8], 'pending_tax_review');
+  assert.strictEqual(commissionInsert.params[8], 'pending');
 
   process.env.MAGP_TAX_REVIEW_COMPLETED = 'true';
   process.env.MAGP_REFUND_REVERSALS_READY = 'true';
@@ -63,7 +63,7 @@ function makeClient({ duplicate = false, referral = true, lots = [], settings = 
     sourceType: 'novel_chapter', sourceReference: 'novel_chapter:15:6'
   });
   const reviewedInsert = reviewedClient.calls.find(c => c.q.includes('INSERT INTO partner_commission_ledger'));
-  assert.strictEqual(reviewedInsert.params[8], 'approved');
+  assert.strictEqual(reviewedInsert.params[8], 'pending');
   delete process.env.MAGP_TAX_REVIEW_COMPLETED;
   delete process.env.MAGP_REFUND_REVERSALS_READY;
 
@@ -76,7 +76,7 @@ function makeClient({ duplicate = false, referral = true, lots = [], settings = 
     sourceType: 'novel_chapter', sourceReference: 'novel_chapter:16:7'
   });
   const holdInsert = holdClient.calls.find(c => c.q.includes('INSERT INTO partner_commission_ledger'));
-  assert.strictEqual(holdInsert.params[8], 'pending_tax_review');
+  assert.strictEqual(holdInsert.params[8], 'pending');
   delete process.env.MAGP_TAX_REVIEW_COMPLETED;
 
   const shortageClient = makeClient({ lots: [{ id: 1, original_amount: '50', remaining_coins: 50, remaining_amount: '50' }] });
