@@ -153,6 +153,7 @@ app.use(
 "/api/writers",
 writerRoutes
 );
+app.use("/api/writer-universe", require("./routes/writer-universe"));
 app.use("/api/publish",publishRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use(
