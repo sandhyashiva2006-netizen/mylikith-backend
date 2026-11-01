@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const auth = require("../middleware/auth");
+const { sendWriterWelcomeEmail } = require("../utils/email");
 
 const router = express.Router();
 
@@ -85,6 +86,18 @@ message: "Already a writer."
             "You are now a writer. Start publishing your stories!",
             "writer"
         );
+
+        try {
+            const userResult = await db.query(
+                `SELECT name, email FROM users WHERE id=$1`,
+                [user_id]
+            );
+            if (userResult.rows[0]) {
+                await sendWriterWelcomeEmail(userResult.rows[0]);
+            }
+        } catch (emailErr) {
+            console.error("Writer welcome email failed:", emailErr.message);
+        }
 
         res.json({
             success: true

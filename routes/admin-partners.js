@@ -2,6 +2,7 @@ const express=require('express');
 const router=express.Router();
 const db=require('../db');
 const auth=require('../middleware/auth');
+const {sendPartnerWelcomeEmail}=require('../utils/email');
 router.use(auth,(req,res,next)=>{if(req.user.role!=='admin')return res.status(403).json({success:false,message:'Admin access required.'});next();});
 const code=()=>`MAGP${Math.random().toString(36).slice(2,8).toUpperCase()}`;
 
@@ -11,7 +12,16 @@ router.post('/applications/:id/decision',async(req,res)=>{
  const client=await db.connect();try{await client.query('BEGIN');const a=await client.query('SELECT * FROM partner_applications WHERE id=$1 FOR UPDATE',[req.params.id]);if(!a.rows.length){await client.query('ROLLBACK');return res.status(404).json({success:false,message:'Application not found.'});}
  const app=a.rows[0];await client.query('UPDATE partner_applications SET status=$1,admin_note=$2,reviewed_by=$3,reviewed_at=NOW(),updated_at=NOW() WHERE id=$4',[status,String(req.body.admin_note||'').slice(0,2000),req.user.id,app.id]);
  if(status==='approved') {let referralCode=code();for(let i=0;i<5;i++){const exists=await client.query('SELECT 1 FROM partner_profiles WHERE partner_code=$1',[referralCode]);if(!exists.rows.length)break;referralCode=code();}await client.query(`INSERT INTO partner_profiles(user_id,partner_code) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET status='active'`,[app.user_id,referralCode]);}
- await client.query('COMMIT');res.json({success:true,message:`Application ${status}.`});
+ await client.query('COMMIT');
+ if(status==='approved' && app.status!=='approved') {
+  try {
+   const user=await db.query('SELECT name,email FROM users WHERE id=$1',[app.user_id]);
+   if(user.rows[0]) await sendPartnerWelcomeEmail(user.rows[0]);
+  } catch(emailErr) {
+   console.error('Partner welcome email failed:',emailErr.message);
+  }
+ }
+ res.json({success:true,message:`Application ${status}.`});
  }catch(e){await client.query('ROLLBACK');console.error(e);res.status(500).json({success:false});}finally{client.release();}});
 router.get('/list',async(req,res)=>{try{const r=await db.query(`SELECT pp.*,u.name,u.email,(SELECT COUNT(*) FROM partner_referrals pr WHERE pr.partner_id=pp.id) AS referrals,(SELECT COALESCE(SUM(commission_amount),0) FROM partner_commission_ledger cl WHERE cl.partner_id=pp.id) AS commissions FROM partner_profiles pp JOIN users u ON u.id=pp.user_id ORDER BY pp.created_at DESC`);res.json({success:true,partners:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
 router.get('/referrals',async(req,res)=>{try{const r=await db.query(`SELECT pr.*,u.name AS author_name,u.email AS author_email,pp.partner_code,pu.name AS partner_name FROM partner_referrals pr JOIN users u ON u.id=pr.author_user_id JOIN partner_profiles pp ON pp.id=pr.partner_id JOIN users pu ON pu.id=pp.user_id ORDER BY CASE pr.status WHEN 'pending' THEN 0 ELSE 1 END,pr.created_at DESC`);res.json({success:true,referrals:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});

@@ -5,7 +5,8 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 
 const {
-    sendPasswordResetEmail
+    sendPasswordResetEmail,
+    sendReaderWelcomeEmail
 } = require("../utils/email");
 
 const db = require("../db");
@@ -274,6 +275,13 @@ referrerId
 
 }
 
+}
+
+// Welcome email is best-effort: mail delivery must never undo registration.
+try {
+    await sendReaderWelcomeEmail(result.rows[0]);
+} catch (emailErr) {
+    console.error("Reader welcome email failed:", emailErr.message);
 }
 
 res.json({
