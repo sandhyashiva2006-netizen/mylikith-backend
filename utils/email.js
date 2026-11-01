@@ -49,42 +49,53 @@ async function sendEmail(to, subject, htmlContent) {
 }
 
 async function sendPasswordResetEmail(email, resetLink) {
-    await sendEmail(email, "Reset your MyLikith password", `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-        <h2 style="color:${BRAND}">MyLikith Password Reset</h2>
-        <p>We received a request to reset your password.</p>
-        <p>Click below to choose a new password.</p>
-        <p style="margin:30px 0"><a href="${resetLink}" style="background:${BRAND};color:#fff;padding:14px 24px;border-radius:8px;text-decoration:none">Reset Password</a></p>
-        <p>This link expires in <strong>15 minutes</strong>.</p>
-        <hr><small>© MyLikith</small>
-      </div>`);
+    await sendEmail(email, "Password Reset Request | MyLikith", shell(`
+      <h2 style="color:${BRAND}">Password Reset Request</h2>
+      <p>Dear MyLikith User,</p>
+      <p>We have received a request to reset the password associated with your MyLikith account.</p>
+      <p>To proceed, please use the secure link below to create a new password.</p>
+      <p style="margin:30px 0"><a href="${resetLink}" style="background:${BRAND};color:#fff;padding:14px 24px;border-radius:8px;text-decoration:none">Reset Password</a></p>
+      <p>This link is valid for <strong>15 minutes</strong> and can be used only once.</p>
+      <p>If you did not request a password reset, you may disregard this email. Your account will remain unchanged.</p>
+      <p>Regards,<br><strong>MyLikith Support Team</strong></p>`));
 }
 
 async function sendReaderWelcomeEmail(user) {
     const name = escapeHtml(user.name || "Reader");
-    await sendEmail(user.email, "Welcome to MyLikith – Your reading journey begins!", shell(`
-      <h2 style="color:${BRAND}">Welcome to MyLikith, ${name}!</h2>
-      <p>We're delighted to have you as part of the MyLikith reading community.</p>
-      <p>Discover engaging novels, explore stories in different languages, follow your favourite authors, and build your personal library.</p>
-      <p>Your next favourite story is waiting for you.</p>`));
+    await sendEmail(user.email, "Welcome to MyLikith | Your Account Is Ready", shell(`
+      <h2 style="color:${BRAND}">Welcome to MyLikith, ${name}</h2>
+      <p>Dear ${name},</p>
+      <p>Thank you for registering with MyLikith. We are pleased to welcome you to our reading community.</p>
+      <p>Through MyLikith, you can discover novels and stories across languages, follow your favourite authors, save titles to your personal library, and continue reading at your convenience.</p>
+      <p>We invite you to explore the platform and discover stories that interest you.</p>
+      <p>Thank you for choosing MyLikith.</p>
+      <p>Regards,<br><strong>MyLikith Team</strong></p>`));
 }
 
 async function sendWriterWelcomeEmail(user) {
     const name = escapeHtml(user.name || "Writer");
-    await sendEmail(user.email, "Welcome to MyLikith Writers!", shell(`
-      <h2 style="color:${BRAND}">Your writing journey starts here, ${name}!</h2>
-      <p>Congratulations on joining the MyLikith writer community.</p>
-      <p>You can create and publish novels, connect with readers, grow your audience, and earn royalties from eligible monetised reading activity.</p>
-      <p>Open your Writer Studio and start bringing your stories to life.</p>`));
+    await sendEmail(user.email, "Welcome to MyLikith | Writer Account Activated", shell(`
+      <h2 style="color:${BRAND}">Welcome to the MyLikith Writer Community</h2>
+      <p>Dear ${name},</p>
+      <p>Thank you for joining MyLikith as a writer. We are pleased to welcome you to our creator community.</p>
+      <p>Through the Writer Studio, you can develop and publish your novels, manage your published work, and reach readers on the platform.</p>
+      <p>Eligible monetised reading activity may generate royalties in accordance with the applicable MyLikith writer terms and platform policies.</p>
+      <p>Please review the relevant publishing guidelines and account information before publishing your work.</p>
+      <p>We look forward to supporting your writing journey.</p>
+      <p>Regards,<br><strong>MyLikith Writer Relations Team</strong></p>`));
 }
 
 async function sendPartnerWelcomeEmail(user) {
     const name = escapeHtml(user.name || "Partner");
-    await sendEmail(user.email, "Welcome to the MyLikith Author Growth Partner Program!", shell(`
-      <h2 style="color:${BRAND}">Welcome aboard, ${name}!</h2>
-      <p>Your application to the MyLikith Author Growth Partner Program has been approved.</p>
-      <p>You can now introduce authors to MyLikith, use your partner referral code, and earn commissions in accordance with the programme terms.</p>
-      <p>Visit your Partner Dashboard to view your partner details and get started.</p>`));
+    await sendEmail(user.email, "MyLikith Author Growth Partner Program | Application Approved", shell(`
+      <h2 style="color:${BRAND}">Your Partner Application Has Been Approved</h2>
+      <p>Dear ${name},</p>
+      <p>We are pleased to inform you that your application to the MyLikith Author Growth Partner Program has been approved.</p>
+      <p>As an approved partner, you may introduce authors to the MyLikith platform and use your assigned referral code to track eligible referrals.</p>
+      <p>Commissions, eligibility, attribution, and settlement are governed by the applicable programme terms and MyLikith policies. Please review those terms in your Partner Dashboard.</p>
+      <p>You may now sign in to your Partner Dashboard to access your referral details and programme information.</p>
+      <p>Thank you for your interest in supporting the MyLikith author community.</p>
+      <p>Regards,<br><strong>MyLikith Partner Relations Team</strong></p>`));
 }
 
 module.exports = {
