@@ -16,7 +16,37 @@ router.post('/applications/:id/decision',async(req,res)=>{
 router.get('/list',async(req,res)=>{try{const r=await db.query(`SELECT pp.*,u.name,u.email,(SELECT COUNT(*) FROM partner_referrals pr WHERE pr.partner_id=pp.id) AS referrals,(SELECT COALESCE(SUM(commission_amount),0) FROM partner_commission_ledger cl WHERE cl.partner_id=pp.id) AS commissions FROM partner_profiles pp JOIN users u ON u.id=pp.user_id ORDER BY pp.created_at DESC`);res.json({success:true,partners:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
 router.get('/referrals',async(req,res)=>{try{const r=await db.query(`SELECT pr.*,u.name AS author_name,u.email AS author_email,pp.partner_code,pu.name AS partner_name FROM partner_referrals pr JOIN users u ON u.id=pr.author_user_id JOIN partner_profiles pp ON pp.id=pr.partner_id JOIN users pu ON pu.id=pp.user_id ORDER BY CASE pr.status WHEN 'pending' THEN 0 ELSE 1 END,pr.created_at DESC`);res.json({success:true,referrals:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
 router.post('/referrals/:id/decision',async(req,res)=>{const status=req.body.status;if(!['approved','rejected'].includes(status))return res.status(400).json({success:false,message:'Invalid referral decision.'});try{const r=await db.query(`UPDATE partner_referrals SET status=$1::varchar,admin_note=$2,attribution_start=CASE WHEN $1::varchar='approved' THEN NOW() ELSE attribution_start END,attribution_end=CASE WHEN $1::varchar='approved' THEN NOW()+INTERVAL '12 months' ELSE attribution_end END WHERE id=$3 AND status='pending' RETURNING *`,[status,String(req.body.admin_note||'').slice(0,1000),req.params.id]);if(!r.rows.length)return res.status(404).json({success:false,message:'Pending referral not found.'});res.json({success:true,referral:r.rows[0]});}catch(e){console.error(e);res.status(500).json({success:false});}});
-router.post('/referrals',async(req,res)=>{const partnerId=Number(req.body.partner_id),authorId=Number(req.body.author_user_id);if(!partnerId||!authorId)return res.status(400).json({success:false,message:'Partner and author are required.'});try{const p=await db.query("SELECT id,partner_code FROM partner_profiles WHERE id=$1 AND status='active'",[partnerId]);if(!p.rows.length)return res.status(404).json({success:false,message:'Active partner not found.'});const r=await db.query(`INSERT INTO partner_referrals(partner_id,author_user_id,referral_code,attribution_end,status) VALUES($1,$2,$3,NOW()+INTERVAL '12 months','approved') RETURNING *`,[partnerId,authorId,p.rows[0].partner_code]);res.status(201).json({success:true,referral:r.rows[0]});}catch(e){if(e.code==='23505')return res.status(409).json({success:false,message:'This author already has a partner attribution.'});console.error(e);res.status(500).json({success:false});}});
+router.post('/referrals',async(req,res)=>{
+ const partnerId=Number(req.body.partner_id);
+ const authorId=Number(req.body.author_user_id);
+ const authorEmail=String(req.body.author_email||'').trim().toLowerCase();
+ if(!partnerId||(!authorId&&!authorEmail))return res.status(400).json({success:false,message:'Partner and author email or user ID are required.'});
+ const client=await db.connect();
+ try{
+  await client.query('BEGIN');
+  const p=await client.query("SELECT id,user_id,partner_code FROM partner_profiles WHERE id=$1 AND status='active' FOR UPDATE",[partnerId]);
+  if(!p.rows.length){await client.query('ROLLBACK');return res.status(404).json({success:false,message:'Active partner not found.'});}
+  const author=authorId
+   ? await client.query("SELECT id,role,email FROM users WHERE id=$1",[authorId])
+   : await client.query("SELECT id,role,email FROM users WHERE LOWER(email)=LOWER($1)",[authorEmail]);
+  if(!author.rows.length){await client.query('ROLLBACK');return res.status(404).json({success:false,message:'Author account not found.'});}
+  if(author.rows[0].role!=='writer'){await client.query('ROLLBACK');return res.status(400).json({success:false,message:'Selected account is not a writer.'});}
+  if(Number(author.rows[0].id)===Number(p.rows[0].user_id)){await client.query('ROLLBACK');return res.status(400).json({success:false,message:'Self-referrals are not permitted.'});}
+  const r=await client.query(`
+   INSERT INTO partner_referrals
+    (partner_id,author_user_id,referral_code,attribution_start,attribution_end,status)
+   VALUES($1,$2,$3,NOW(),NOW()+INTERVAL '12 months','approved')
+   RETURNING *
+  `,[partnerId,author.rows[0].id,p.rows[0].partner_code]);
+  await client.query('COMMIT');
+  res.status(201).json({success:true,referral:r.rows[0],message:'Author referral created and approved.'});
+ }catch(e){
+  await client.query('ROLLBACK');
+  if(e.code==='23505')return res.status(409).json({success:false,message:'This author already has a partner attribution.'});
+  console.error('Manual MAGP referral creation:',e);
+  res.status(500).json({success:false,message:'Unable to create author referral.'});
+ }finally{client.release();}
+});
 // Audited admin posting: platform_share_amount must be the realised, reconciled share, never coin purchase value.
 router.post('/commissions',async(req,res)=>{const ledgerStatus=process.env.MAGP_TAX_REVIEW_COMPLETED==='true'?'pending':'pending_tax_review';const partnerId=Number(req.body.partner_id),referralId=Number(req.body.referral_id),platformShare=Number(req.body.platform_share_amount),gross=Number(req.body.gross_eligible_amount||0);const sourceType=String(req.body.source_type||'').slice(0,40),sourceRef=String(req.body.source_reference||'').slice(0,120);if(!partnerId||!referralId||!sourceType||!sourceRef||!Number.isFinite(platformShare)||platformShare<0||!Number.isFinite(gross)||gross<0)return res.status(400).json({success:false,message:'Valid source and amounts are required.'});try{const p=await db.query("SELECT id,commission_rate FROM partner_profiles WHERE id=$1 AND status='active'",[partnerId]);if(!p.rows.length)return res.status(404).json({success:false,message:'Active partner not found.'});const referral=await db.query(`SELECT id FROM partner_referrals WHERE id=$1 AND partner_id=$2 AND status='approved' AND NOW() BETWEEN attribution_start AND attribution_end`,[referralId,partnerId]);if(!referral.rows.length)return res.status(400).json({success:false,message:'Approved, in-period author attribution is required.'});const rate=Number(p.rows[0].commission_rate),commission=Number((platformShare*rate/100).toFixed(2));const r=await db.query(`INSERT INTO partner_commission_ledger(partner_id,referral_id,source_type,source_reference,gross_eligible_amount,platform_share_amount,commission_rate,commission_amount,status,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,[partnerId,referralId,sourceType,sourceRef,gross,platformShare,rate,commission,ledgerStatus,String(req.body.notes||'').slice(0,1000),req.user.id]);res.status(201).json({success:true,commission:r.rows[0]});}catch(e){if(e.code==='23505')return res.status(409).json({success:false,message:'A commission entry already exists for this source reference.'});console.error(e);res.status(500).json({success:false});}});
 router.get('/commissions',async(req,res)=>{try{const r=await db.query(`SELECT cl.*,pp.partner_code,u.name AS partner_name,pr.author_user_id,au.name AS author_name FROM partner_commission_ledger cl JOIN partner_profiles pp ON pp.id=cl.partner_id JOIN users u ON u.id=pp.user_id LEFT JOIN partner_referrals pr ON pr.id=cl.referral_id LEFT JOIN users au ON au.id=pr.author_user_id ORDER BY cl.created_at DESC LIMIT 500`);res.json({success:true,commissions:r.rows});}catch(e){console.error(e);res.status(500).json({success:false});}});
