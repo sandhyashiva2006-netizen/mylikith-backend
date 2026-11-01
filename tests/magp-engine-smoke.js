@@ -56,13 +56,27 @@ function makeClient({ duplicate = false, referral = true, lots = [], settings = 
   assert.strictEqual(commissionInsert.params[8], 'pending_tax_review');
 
   process.env.MAGP_TAX_REVIEW_COMPLETED = 'true';
+  process.env.MAGP_REFUND_REVERSALS_READY = 'true';
   const reviewedClient = makeClient({ lots: [{ id: 3, original_amount: '20', remaining_coins: 20, remaining_amount: '20' }] });
   await recordMonetisedUnlock(reviewedClient, {
     userId: 15, authorId: 20, coins: 10,
     sourceType: 'novel_chapter', sourceReference: 'novel_chapter:15:6'
   });
   const reviewedInsert = reviewedClient.calls.find(c => c.q.includes('INSERT INTO partner_commission_ledger'));
-  assert.strictEqual(reviewedInsert.params[8], 'pending');
+  assert.strictEqual(reviewedInsert.params[8], 'approved');
+  delete process.env.MAGP_TAX_REVIEW_COMPLETED;
+  delete process.env.MAGP_REFUND_REVERSALS_READY;
+
+
+  process.env.MAGP_TAX_REVIEW_COMPLETED = 'true';
+  delete process.env.MAGP_REFUND_REVERSALS_READY;
+  const holdClient = makeClient({ lots: [{ id: 4, original_amount: '20', remaining_coins: 20, remaining_amount: '20' }] });
+  await recordMonetisedUnlock(holdClient, {
+    userId: 16, authorId: 20, coins: 10,
+    sourceType: 'novel_chapter', sourceReference: 'novel_chapter:16:7'
+  });
+  const holdInsert = holdClient.calls.find(c => c.q.includes('INSERT INTO partner_commission_ledger'));
+  assert.strictEqual(holdInsert.params[8], 'pending_tax_review');
   delete process.env.MAGP_TAX_REVIEW_COMPLETED;
 
   const shortageClient = makeClient({ lots: [{ id: 1, original_amount: '50', remaining_coins: 50, remaining_amount: '50' }] });

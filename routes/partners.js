@@ -38,8 +38,9 @@ router.get('/me', async (req,res) => {
       db.query(`
         WITH commission_totals AS (
           SELECT
-            COALESCE(SUM(commission_amount) FILTER (WHERE status IN ('pending','approved')),0) AS total,
-            COALESCE(SUM(commission_amount) FILTER (WHERE status='pending'),0) AS pending_commission,
+            COALESCE(SUM(commission_amount) FILTER (WHERE status IN ('pending_tax_review','pending','approved')),0) AS total,
+            COALESCE(SUM(commission_amount) FILTER (WHERE status='pending_tax_review'),0) AS pending_tax_review,
+            COALESCE(SUM(commission_amount) FILTER (WHERE status='pending'),0) AS pending_release,
             COALESCE(SUM(commission_amount) FILTER (WHERE status='approved'),0) AS approved_commission
           FROM partner_commission_ledger WHERE partner_id=$1
         ), payout_totals AS (
@@ -50,7 +51,8 @@ router.get('/me', async (req,res) => {
             COALESCE((SELECT SUM(amount) FROM partner_payouts
               WHERE partner_id=$1 AND status IN ('pending','approved')),0) AS reserved
         )
-        SELECT ct.total, ct.pending_commission, ct.approved_commission,
+        SELECT ct.total, ct.pending_tax_review, ct.pending_release,
+          ct.approved_commission,
           GREATEST(ct.approved_commission-pt.paid,0) AS unpaid,
           pt.paid, pt.reserved,
           GREATEST(ct.approved_commission-pt.paid-pt.reserved,0) AS available
