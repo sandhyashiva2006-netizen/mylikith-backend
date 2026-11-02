@@ -1,7 +1,26 @@
 const express = require("express");
 const router = express.Router();
+const coverUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
+            return cb(new Error("Only JPG, PNG and WebP covers are allowed."));
+        }
+        cb(null, true);
+    }
+});
+const b2 = new S3Client({
+    region: process.env.B2_REGION,
+    endpoint: process.env.B2_ENDPOINT,
+    credentials: { accessKeyId: process.env.B2_KEY_ID, secretAccessKey: process.env.B2_APPLICATION_KEY },
+    forcePathStyle: true
+});
 const db = require("../db");
 const auth = require("../middleware/auth");
+const multer = require("multer");
+const crypto = require("crypto");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
 router.use(auth);
 
@@ -109,11 +128,11 @@ router.put("/audio/chapters/:chapterId", async (req, res) => {
     try {
         const owner = await db.query(`SELECT an.id FROM audio_chapters ac JOIN audio_novels an ON an.id=ac.audio_novel_id WHERE ac.id=$1 AND an.created_by=$2`, [req.params.chapterId, req.user.id]);
         if (!owner.rows.length) return res.status(404).json({ success: false, message: "Audio chapter not found." });
-        const { title, is_premium, coins_required, early_access, publish_at } = req.body || {};
+        const { chapter_no, title, is_premium, coins_required, early_access, publish_at } = req.body || {};
         const result = await db.query(
-            `UPDATE audio_chapters SET title=COALESCE($1,title), is_premium=COALESCE($2,is_premium), coins_required=COALESCE($3,coins_required),
-             early_access=COALESCE($4,early_access), publish_at=COALESCE($5,publish_at) WHERE id=$6 RETURNING *`,
-            [title === undefined ? null : clean(title), is_premium === undefined ? null : Boolean(is_premium), coins_required === undefined ? null : Math.max(0, Number(coins_required)||0), early_access === undefined ? null : Boolean(early_access), publish_at === undefined ? null : publish_at, req.params.chapterId]
+            `UPDATE audio_chapters SET chapter_no=COALESCE($1,chapter_no), title=COALESCE($2,title), is_premium=COALESCE($3,is_premium), coins_required=COALESCE($4,coins_required),
+             early_access=COALESCE($5,early_access), publish_at=COALESCE($6,publish_at) WHERE id=$7 RETURNING *`,
+            [chapter_no === undefined ? null : Number(chapter_no), title === undefined ? null : clean(title), is_premium === undefined ? null : Boolean(is_premium), coins_required === undefined ? null : Math.max(0, Number(coins_required)||0), early_access === undefined ? null : Boolean(early_access), publish_at === undefined ? null : publish_at, req.params.chapterId]
         );
         res.json({ success: true, chapter: result.rows[0] });
     } catch (err) { sendError(res, err, "Update audio chapter"); }
@@ -190,16 +209,104 @@ router.put("/originals/episodes/:episodeId", async (req, res) => {
     try {
         const owner = await db.query(`SELECT o.id FROM original_chapters oc JOIN originals o ON o.id=oc.original_id WHERE oc.id=$1 AND o.created_by=$2`, [req.params.episodeId, req.user.id]);
         if (!owner.rows.length) return res.status(404).json({ success: false, message: "Episode not found." });
-        const { title, content, media_type, is_premium, coins_required, early_access, publish_at } = req.body || {};
+        const { chapter_no, title, content, media_type, is_premium, coins_required, early_access, publish_at } = req.body || {};
         if (media_type !== undefined && !["video","audio","text"].includes(media_type)) return res.status(400).json({ success: false, message: "Invalid episode media type." });
         const result = await db.query(
-            `UPDATE original_chapters SET title=COALESCE($1,title),content=COALESCE($2,content),media_type=COALESCE($3,media_type),
-             is_premium=COALESCE($4,is_premium),coins_required=COALESCE($5,coins_required),early_access=COALESCE($6,early_access),
-             publish_at=COALESCE($7,publish_at) WHERE id=$8 RETURNING *`,
-            [title===undefined?null:clean(title),content===undefined?null:clean(content),media_type===undefined?null:media_type,is_premium===undefined?null:Boolean(is_premium),coins_required===undefined?null:Math.max(0,Number(coins_required)||0),early_access===undefined?null:Boolean(early_access),publish_at===undefined?null:publish_at,req.params.episodeId]
+            `UPDATE original_chapters SET chapter_no=COALESCE($1,chapter_no),title=COALESCE($2,title),content=COALESCE($3,content),media_type=COALESCE($4,media_type),
+             is_premium=COALESCE($5,is_premium),coins_required=COALESCE($6,coins_required),early_access=COALESCE($7,early_access),
+             publish_at=COALESCE($8,publish_at) WHERE id=$9 RETURNING *`,
+            [chapter_no===undefined?null:Number(chapter_no),title===undefined?null:clean(title),content===undefined?null:clean(content),media_type===undefined?null:media_type,is_premium===undefined?null:Boolean(is_premium),coins_required===undefined?null:Math.max(0,Number(coins_required)||0),early_access===undefined?null:Boolean(early_access),publish_at===undefined?null:publish_at,req.params.episodeId]
         );
         res.json({ success: true, episode: result.rows[0] });
     } catch (err) { sendError(res, err, "Update Originals episode"); }
+});
+
+
+/* Writer cover image upload. The shared asset worker URL makes the returned URL public. */
+router.post("/cover-upload", coverUpload.single("cover"), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ success:false, message:"Please select a cover image." });
+        const ext = { "image/jpeg":"jpg", "image/png":"png", "image/webp":"webp" }[req.file.mimetype];
+        const key = `covers/${Date.now()}-${crypto.randomUUID()}.${ext}`;
+        await b2.send(new PutObjectCommand({
+            Bucket: process.env.B2_BUCKET_NAME, Key:key, Body:req.file.buffer,
+            ContentType:req.file.mimetype, CacheControl:"public, max-age=31536000, immutable"
+        }));
+        const worker = String(process.env.MYLIKITH_ASSETS_WORKER_URL || "https://mylikith-assets.sandhyashiva2006.workers.dev").replace(/\/+$/,"");
+        res.status(201).json({ success:true, cover_url:`${worker}/${key}`, url:`${worker}/${key}` });
+    } catch (err) { sendError(res, err, "Upload writer cover"); }
+});
+
+/* Publish/unpublish a project. */
+for (const [path, table, childTable, fk] of [
+    ["audio", "audio_novels", "audio_chapters", "audio_novel_id"],
+    ["originals", "originals", "original_chapters", "original_id"]
+]) {
+    router.post(`/${path}/:id/publish`, async (req,res) => {
+        try {
+            if (!await owned(table, req.params.id, req.user.id)) return res.status(404).json({success:false,message:"Project not found."});
+            const published = req.body?.published !== false;
+            if (published) {
+                const ready = path === "audio"
+                    ? await db.query(`SELECT COUNT(*)::int AS total FROM ${childTable} WHERE ${fk}=$1 AND is_published=TRUE AND is_draft=FALSE AND audio_status='ready' AND audio_object_key IS NOT NULL`,[req.params.id])
+                    : await db.query(`SELECT COUNT(*)::int AS total FROM ${childTable} WHERE ${fk}=$1 AND is_published=TRUE AND is_draft=FALSE AND ((media_type='text' AND COALESCE(content,'')<>'') OR (media_type<>'text' AND media_status='ready' AND media_object_key IS NOT NULL))`,[req.params.id]);
+                if (!Number(ready.rows[0].total))
+                    return res.status(400).json({success:false,message:"Publish at least one chapter/episode with its required content or uploaded media before publishing this project."});
+            }
+            const result = await db.query(`UPDATE ${table} SET publish_status=$1, visibility=$2, updated_at=NOW() WHERE id=$3 AND created_by=$4 RETURNING *`,
+                [published?"published":"draft",published?"public":"private",req.params.id,req.user.id]);
+            res.json({success:true, project:result.rows[0]});
+        } catch(err) { sendError(res,err,"Update project publication"); }
+    });
+    router.delete(`/${path}/:id`, async (req,res) => {
+        const client = await db.connect();
+        try {
+            await client.query("BEGIN");
+            const own = await client.query(`SELECT id FROM ${table} WHERE id=$1 AND created_by=$2 FOR UPDATE`,[req.params.id,req.user.id]);
+            if (!own.rows.length) { await client.query("ROLLBACK"); return res.status(404).json({success:false,message:"Project not found."}); }
+            await client.query(`DELETE FROM ${childTable} WHERE ${fk}=$1`,[req.params.id]);
+            await client.query(`DELETE FROM ${table} WHERE id=$1 AND created_by=$2`,[req.params.id,req.user.id]);
+            await client.query("COMMIT");
+            res.json({success:true});
+        } catch(err) { await client.query("ROLLBACK"); sendError(res,err,"Delete project"); }
+        finally { client.release(); }
+    });
+}
+router.post("/audio/chapters/:chapterId/publish", async (req,res) => {
+    try {
+        const q = await db.query(`SELECT ac.id,ac.audio_status,ac.audio_object_key FROM audio_chapters ac JOIN audio_novels an ON an.id=ac.audio_novel_id WHERE ac.id=$1 AND an.created_by=$2`,[req.params.chapterId,req.user.id]);
+        if (!q.rows.length) return res.status(404).json({success:false,message:"Chapter not found."});
+        const published = req.body?.published !== false;
+        if (published && (q.rows[0].audio_status !== "ready" || !q.rows[0].audio_object_key))
+            return res.status(400).json({success:false,message:"Upload the chapter MP3 before publishing it."});
+        const r = await db.query(`UPDATE audio_chapters SET is_published=$1,is_draft=$2,updated_at=NOW() WHERE id=$3 RETURNING *`,[published,!published,req.params.chapterId]);
+        res.json({success:true,chapter:r.rows[0]});
+    } catch(err) { sendError(res,err,"Publish audio chapter"); }
+});
+router.delete("/audio/chapters/:chapterId", async (req,res) => {
+    try {
+        const r=await db.query(`DELETE FROM audio_chapters ac USING audio_novels an WHERE ac.audio_novel_id=an.id AND ac.id=$1 AND an.created_by=$2 RETURNING ac.id`,[req.params.chapterId,req.user.id]);
+        if(!r.rows.length) return res.status(404).json({success:false,message:"Chapter not found."});
+        res.json({success:true});
+    } catch(err) { sendError(res,err,"Delete audio chapter"); }
+});
+router.post("/originals/episodes/:episodeId/publish", async (req,res) => {
+    try {
+        const q=await db.query(`SELECT oc.* FROM original_chapters oc JOIN originals o ON o.id=oc.original_id WHERE oc.id=$1 AND o.created_by=$2`,[req.params.episodeId,req.user.id]);
+        if(!q.rows.length) return res.status(404).json({success:false,message:"Episode not found."});
+        const c=q.rows[0], published=req.body?.published!==false;
+        if(published && (c.media_type==="text" ? !String(c.content||"").trim() : c.media_status!=="ready" || !c.media_object_key))
+            return res.status(400).json({success:false,message:"Add the episode content or finish uploading its media before publishing."});
+        const r=await db.query(`UPDATE original_chapters SET is_published=$1,is_draft=$2,updated_at=NOW() WHERE id=$3 RETURNING *`,[published,!published,req.params.episodeId]);
+        res.json({success:true,episode:r.rows[0]});
+    } catch(err) { sendError(res,err,"Publish Originals episode"); }
+});
+router.delete("/originals/episodes/:episodeId", async (req,res) => {
+    try {
+        const r=await db.query(`DELETE FROM original_chapters oc USING originals o WHERE oc.original_id=o.id AND oc.id=$1 AND o.created_by=$2 RETURNING oc.id`,[req.params.episodeId,req.user.id]);
+        if(!r.rows.length) return res.status(404).json({success:false,message:"Episode not found."});
+        res.json({success:true});
+    } catch(err) { sendError(res,err,"Delete Originals episode"); }
 });
 
 module.exports = router;
