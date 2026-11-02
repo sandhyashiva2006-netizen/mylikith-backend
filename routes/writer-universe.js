@@ -1,4 +1,7 @@
 const express = require("express");
+const multer = require("multer");
+const crypto = require("crypto");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const router = express.Router();
 const coverUpload = multer({
     storage: multer.memoryStorage(),
@@ -18,10 +21,6 @@ const b2 = new S3Client({
 });
 const db = require("../db");
 const auth = require("../middleware/auth");
-const multer = require("multer");
-const crypto = require("crypto");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-
 router.use(auth);
 
 router.use(async (req, res, next) => {
