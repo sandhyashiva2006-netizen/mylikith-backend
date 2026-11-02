@@ -222,6 +222,72 @@ router.put("/originals/episodes/:episodeId", async (req, res) => {
 });
 
 
+
+/* Writer publishing controls for Originals episodes and series. */
+router.post("/originals/episodes/:episodeId/publish", async (req, res) => {
+    try {
+        const episodeId = Number(req.params.episodeId);
+        const published = req.body?.published !== false;
+        const owner = await db.query(
+            `SELECT oc.id, oc.media_type, oc.content, oc.media_status, oc.media_object_key
+             FROM original_chapters oc
+             JOIN originals o ON o.id = oc.original_id
+             WHERE oc.id = $1 AND o.created_by = $2`,
+            [episodeId, req.user.id]
+        );
+        if (!owner.rows.length) return res.status(404).json({success:false,message:"Episode not found."});
+        const ep = owner.rows[0];
+        if (published) {
+            const ready = ep.media_type === "text"
+                ? Boolean(String(ep.content || "").trim())
+                : ep.media_status === "ready" && Boolean(ep.media_object_key);
+            if (!ready) return res.status(400).json({success:false,message: ep.media_type === "text" ? "Add episode text before publishing." : "Upload and verify the episode media before publishing."});
+        }
+        const result = await db.query(
+            `UPDATE original_chapters
+             SET is_published = $1, is_draft = $2, updated_at = NOW()
+             WHERE id = $3 RETURNING *`,
+            [published, !published, episodeId]
+        );
+        return res.json({success:true,episode:result.rows[0]});
+    } catch (err) {
+        console.error("Publish Originals episode:",err);
+        return res.status(500).json({success:false,message:"Unable to update episode publication status."});
+    }
+});
+
+router.post("/originals/:id/publish", async (req, res) => {
+    try {
+        const projectId = Number(req.params.id);
+        const published = req.body?.published !== false;
+        const owner = await db.query(
+            `SELECT id FROM originals WHERE id = $1 AND created_by = $2`,
+            [projectId, req.user.id]
+        );
+        if (!owner.rows.length) return res.status(404).json({success:false,message:"Originals series not found."});
+        if (published) {
+            const ready = await db.query(
+                `SELECT COUNT(*)::int AS total
+                 FROM original_chapters
+                 WHERE original_id = $1 AND is_published = TRUE AND is_draft = FALSE
+                   AND ((media_type = 'text' AND COALESCE(content,'') <> '')
+                     OR (media_type <> 'text' AND media_status = 'ready' AND media_object_key IS NOT NULL))`,
+                [projectId]
+            );
+            if (!Number(ready.rows[0].total)) return res.status(400).json({success:false,message:"Publish at least one episode with its required content or uploaded media before publishing this series."});
+        }
+        const result = await db.query(
+            `UPDATE originals SET publish_status = $1, visibility = $2 WHERE id = $3 RETURNING *`,
+            [published ? "published" : "draft", published ? "public" : "private", projectId]
+        );
+        return res.json({success:true,original:result.rows[0]});
+    } catch (err) {
+        console.error("Publish Originals series:",err);
+        return res.status(500).json({success:false,message:"Unable to update Originals series publication status."});
+    }
+});
+
+
 /* Writer-owned Originals episode video upload to Backblaze B2. */
 async function ownedEpisode(episodeId, userId) {
     const result = await db.query(
