@@ -2890,9 +2890,9 @@ SELECT
 
 u.name,
 
-n.title AS novel,
+COALESCE(n.title, o.title, 'Audio') AS novel,
 
-c.chapter_no,
+COALESCE(c.chapter_no, oc.chapter_no) AS chapter_no,
 
 w.coins,
 
@@ -2905,11 +2905,17 @@ FROM writer_earnings w
 JOIN users u
 ON w.user_id=u.id
 
-JOIN novels n
+LEFT JOIN novels n
 ON w.novel_id=n.id
 
-JOIN chapters c
+LEFT JOIN chapters c
 ON w.chapter_id=c.id
+
+LEFT JOIN originals o
+ON w.original_id=o.id
+
+LEFT JOIN original_chapters oc
+ON w.original_chapter_id=oc.id
 
 WHERE w.writer_id=$1
 
