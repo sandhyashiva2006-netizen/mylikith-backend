@@ -378,4 +378,31 @@ router.post("/originals/episodes/:episodeId/media/complete", async (req, res) =>
 });
 
 
+
+/* Delete a writer-owned Originals episode. */
+router.delete("/originals/episodes/:episodeId", async (req, res) => {
+    try {
+        const episodeId = Number(req.params.episodeId);
+        if (!Number.isInteger(episodeId) || episodeId < 1) {
+            return res.status(400).json({ success: false, message: "Invalid episode ID." });
+        }
+        const owner = await db.query(
+            `SELECT oc.id
+             FROM original_chapters oc
+             JOIN originals o ON o.id = oc.original_id
+             WHERE oc.id = $1 AND o.created_by = $2`,
+            [episodeId, req.user.id]
+        );
+        if (!owner.rows.length) {
+            return res.status(404).json({ success: false, message: "Episode not found or you do not have permission to delete it." });
+        }
+        await db.query(`DELETE FROM original_chapters WHERE id = $1`, [episodeId]);
+        return res.json({ success: true, message: "Originals episode deleted." });
+    } catch (err) {
+        console.error("Delete Originals episode:", err);
+        return res.status(500).json({ success: false, message: "Unable to delete episode. It may still be referenced by another record." });
+    }
+});
+
+
 module.exports = router;
