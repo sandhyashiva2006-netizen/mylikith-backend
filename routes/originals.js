@@ -971,6 +971,54 @@ router.post(
                 ]
             );
 
+            /* -------------------------------------------------
+               RECORD WRITER EARNINGS
+               Same coin-share calculation as novel chapters.
+            ------------------------------------------------- */
+
+            const settingsResult = await client.query(
+                `
+                SELECT writer_share
+                FROM platform_settings
+                LIMIT 1
+                `
+            );
+
+            if (!settingsResult.rows.length) {
+                throw new Error("Platform writer-share settings not found.");
+            }
+
+            const writerShare = Number(settingsResult.rows[0].writer_share);
+            const writerAmount = Number(
+                (coinsRequired * (writerShare / 100)).toFixed(2)
+            );
+
+            await client.query(
+                `
+                INSERT INTO writer_earnings
+                (
+                    writer_id,
+                    user_id,
+                    original_id,
+                    original_chapter_id,
+                    coins,
+                    amount,
+                    payment_reference
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                `,
+                [
+                    chapter.author_id,
+                    userId,
+                    chapter.original_id,
+                    chapterId,
+                    coinsRequired,
+                    writerAmount,
+                    `original_chapter:${userId}:${chapterId}`
+                ]
+            );
+
+            // Keep MAGP referral commission processing unchanged.
             await recordMonetisedUnlock(client, {
                 userId,
                 authorId: chapter.author_id,

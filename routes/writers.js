@@ -2886,15 +2886,17 @@ const history=
 await db.query(
 
 `
+
 SELECT
     u.name,
-    COALESCE(n.title, an.title) AS novel,
-    COALESCE(c.chapter_no, ac.chapter_no) AS chapter_no,
+    COALESCE(n.title, o.title, an.title, 'Audio') AS novel,
+    COALESCE(c.chapter_no, oc.chapter_no, ac.chapter_no) AS chapter_no,
     w.coins,
     w.amount,
     w.created_at,
     CASE
         WHEN w.audio_chapter_id IS NOT NULL THEN 'Audio'
+        WHEN w.original_chapter_id IS NOT NULL THEN 'Originals'
         ELSE 'Novel'
     END AS earning_type
 FROM writer_earnings w
@@ -2904,6 +2906,10 @@ LEFT JOIN novels n
     ON w.novel_id = n.id
 LEFT JOIN chapters c
     ON w.chapter_id = c.id
+LEFT JOIN originals o
+    ON w.original_id = o.id
+LEFT JOIN original_chapters oc
+    ON w.original_chapter_id = oc.id
 LEFT JOIN audio_novels an
     ON w.audio_novel_id = an.id
 LEFT JOIN audio_chapters ac

@@ -138,6 +138,105 @@ router.put("/audio/chapters/:chapterId", async (req, res) => {
     } catch (err) { sendError(res, err, "Update audio chapter"); }
 });
 
+
+/* Writer publishing controls for Audio chapters and novels. */
+router.post("/audio/chapters/:chapterId/publish", async (req, res) => {
+    try {
+        const chapterId = Number(req.params.chapterId);
+        if (!Number.isInteger(chapterId) || chapterId < 1) {
+            return res.status(400).json({ success: false, message: "Invalid audio chapter ID." });
+        }
+
+        const owner = await db.query(
+            `SELECT ac.id, ac.audio_status, ac.audio_object_key
+             FROM audio_chapters ac
+             JOIN audio_novels an ON an.id = ac.audio_novel_id
+             WHERE ac.id = $1 AND an.created_by = $2`,
+            [chapterId, req.user.id]
+        );
+
+        if (!owner.rows.length) {
+            return res.status(404).json({ success: false, message: "Audio chapter not found." });
+        }
+
+        const published = req.body?.published !== false;
+        const chapter = owner.rows[0];
+
+        if (published && !(chapter.audio_status === "ready" && chapter.audio_object_key)) {
+            return res.status(400).json({
+                success: false,
+                message: "Upload and verify the MP3 audio before publishing this chapter."
+            });
+        }
+
+        const result = await db.query(
+            `UPDATE audio_chapters
+             SET is_published = $1, is_draft = $2
+             WHERE id = $3
+             RETURNING *`,
+            [published, !published, chapterId]
+        );
+
+        return res.json({ success: true, chapter: result.rows[0] });
+    } catch (err) {
+        console.error("Publish Audio chapter:", err);
+        return res.status(500).json({ success: false, message: "Unable to update Audio chapter publication status." });
+    }
+});
+
+router.post("/audio/:id/publish", async (req, res) => {
+    try {
+        const audioNovelId = Number(req.params.id);
+        if (!Number.isInteger(audioNovelId) || audioNovelId < 1) {
+            return res.status(400).json({ success: false, message: "Invalid Audio novel ID." });
+        }
+
+        const owner = await db.query(
+            `SELECT id FROM audio_novels WHERE id = $1 AND created_by = $2`,
+            [audioNovelId, req.user.id]
+        );
+
+        if (!owner.rows.length) {
+            return res.status(404).json({ success: false, message: "Audio novel not found." });
+        }
+
+        const published = req.body?.published !== false;
+
+        if (published) {
+            const ready = await db.query(
+                `SELECT COUNT(*)::int AS total
+                 FROM audio_chapters
+                 WHERE audio_novel_id = $1
+                   AND is_published = TRUE
+                   AND is_draft = FALSE
+                   AND audio_status = 'ready'
+                   AND audio_object_key IS NOT NULL`,
+                [audioNovelId]
+            );
+
+            if (!Number(ready.rows[0].total)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Publish at least one chapter with its uploaded and verified MP3 before publishing this Audio novel."
+                });
+            }
+        }
+
+        const result = await db.query(
+            `UPDATE audio_novels
+             SET publish_status = $1, visibility = $2, updated_at = NOW()
+             WHERE id = $3
+             RETURNING *`,
+            [published ? "published" : "draft", published ? "public" : "private", audioNovelId]
+        );
+
+        return res.json({ success: true, audioNovel: result.rows[0] });
+    } catch (err) {
+        console.error("Publish Audio novel:", err);
+        return res.status(500).json({ success: false, message: "Unable to update Audio novel publication status." });
+    }
+});
+
 /* List and create writer-owned Originals series and episodes. */
 router.get("/originals", async (req, res) => {
     try {
@@ -375,6 +474,33 @@ router.post("/originals/episodes/:episodeId/media/complete", async (req, res) =>
         );
         res.json({success:true,message:"Video uploaded successfully.",episode_id:episodeId,object_key,size_bytes:head.ContentLength||null,content_type:head.ContentType||null});
     } catch(err) { console.error("Writer Originals video upload complete:",err); res.status(500).json({success:false,message:"Unable to complete video upload."}); }
+});
+
+
+
+/* Delete a writer-owned Originals episode. */
+router.delete("/originals/episodes/:episodeId", async (req, res) => {
+    try {
+        const episodeId = Number(req.params.episodeId);
+        if (!Number.isInteger(episodeId) || episodeId < 1) {
+            return res.status(400).json({ success: false, message: "Invalid episode ID." });
+        }
+        const owner = await db.query(
+            `SELECT oc.id
+             FROM original_chapters oc
+             JOIN originals o ON o.id = oc.original_id
+             WHERE oc.id = $1 AND o.created_by = $2`,
+            [episodeId, req.user.id]
+        );
+        if (!owner.rows.length) {
+            return res.status(404).json({ success: false, message: "Episode not found or you do not have permission to delete it." });
+        }
+        await db.query(`DELETE FROM original_chapters WHERE id = $1`, [episodeId]);
+        return res.json({ success: true, message: "Originals episode deleted." });
+    } catch (err) {
+        console.error("Delete Originals episode:", err);
+        return res.status(500).json({ success: false, message: "Unable to delete episode. It may still be referenced by another record." });
+    }
 });
 
 
