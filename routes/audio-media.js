@@ -2867,6 +2867,59 @@ router.post(
                 coinsRequired
             ]);
 
+            /*
+            =================================================
+            RECORD AUDIO WRITER EARNINGS
+            Use the same coin-based writer share calculation
+            as novel chapter unlocks (e.g. 60% of coins).
+            =================================================
+            */
+            const writerSettingsResult = await client.query(`
+                SELECT writer_share
+                FROM platform_settings
+                ORDER BY id ASC
+                LIMIT 1
+            `);
+
+            const writerShare = Number(
+                writerSettingsResult.rows[0]?.writer_share
+            );
+
+            if (!Number.isFinite(writerShare) || writerShare < 0 || writerShare > 100) {
+                throw new Error("A valid writer_share setting is required for Audio earnings.");
+            }
+
+            const writerAmount = Number(
+                (coinsRequired * writerShare / 100).toFixed(2)
+            );
+
+            await client.query(`
+                INSERT INTO writer_earnings
+                (
+                    writer_id,
+                    user_id,
+                    audio_novel_id,
+                    audio_chapter_id,
+                    coins,
+                    amount,
+                    payment_reference
+                )
+                SELECT $1, $2, $3, $4, $5, $6, $7
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM writer_earnings
+                    WHERE payment_reference = $7
+                )
+            `, [
+                chapter.author_id,
+                userId,
+                chapter.audio_novel_id,
+                chapterId,
+                coinsRequired,
+                writerAmount,
+                `audio_chapter:${userId}:${chapterId}`
+            ]);
+
             await recordMonetisedUnlock(client, {
                 userId,
                 authorId: chapter.author_id,

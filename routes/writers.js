@@ -2887,34 +2887,29 @@ await db.query(
 
 `
 SELECT
-
-u.name,
-
-n.title AS novel,
-
-c.chapter_no,
-
-w.coins,
-
-w.amount,
-
-w.created_at
-
+    u.name,
+    COALESCE(n.title, an.title) AS novel,
+    COALESCE(c.chapter_no, ac.chapter_no) AS chapter_no,
+    w.coins,
+    w.amount,
+    w.created_at,
+    CASE
+        WHEN w.audio_chapter_id IS NOT NULL THEN 'Audio'
+        ELSE 'Novel'
+    END AS earning_type
 FROM writer_earnings w
-
 JOIN users u
-ON w.user_id=u.id
-
-JOIN novels n
-ON w.novel_id=n.id
-
-JOIN chapters c
-ON w.chapter_id=c.id
-
-WHERE w.writer_id=$1
-
+    ON w.user_id = u.id
+LEFT JOIN novels n
+    ON w.novel_id = n.id
+LEFT JOIN chapters c
+    ON w.chapter_id = c.id
+LEFT JOIN audio_novels an
+    ON w.audio_novel_id = an.id
+LEFT JOIN audio_chapters ac
+    ON w.audio_chapter_id = ac.id
+WHERE w.writer_id = $1
 ORDER BY w.id DESC
-
 LIMIT 50
 `,
 
